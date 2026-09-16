@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseListing, decodeEntities } from "../src/parsers.js";
+import { parseListing, decodeEntities, parseDetail } from "../src/parsers.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 
@@ -56,5 +56,33 @@ describe("parseListing", () => {
     expect(sites.length).toBe(baseline.length);
     expect(sites.map((s) => s.slug)).toEqual(baseline.map((s) => s.slug));
     for (const s of sites) expect(s.detailPath).toMatch(/^\/sites\//);
+  });
+});
+
+const detail = () => readFixture("detail.html");
+
+describe("parseDetail", () => {
+  const d = () => parseDetail(detail(), "l-i-s-a");
+
+  it("extracts the color palette", () => {
+    expect(d().palette.length).toBeGreaterThanOrEqual(1);
+    expect(d().palette[0]).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it("extracts technologies, elements and description", () => {
+    expect(d().technologies.length).toBeGreaterThanOrEqual(3);
+    expect(d().technologies).toContain("WebGL");
+    expect(d().elements).toContain("3D model");
+    expect(d().description).toContain("Locomotive Interactive Super Assistant");
+  });
+
+  it("extracts the award with date", () => {
+    expect(d().awards.some((a) => a.title === "Site of the Day")).toBe(true);
+    expect(d().awards[0].date).toMatch(/^[A-Z][a-z]+ \d{1,2}, \d{4}$/);
+  });
+
+  it("extracts og image and live url", () => {
+    expect(d().ogImage).toContain("assets.awwwards.com");
+    expect(d().liveUrl).toBe("https://lisa.locomotive.ca/en");
   });
 });
