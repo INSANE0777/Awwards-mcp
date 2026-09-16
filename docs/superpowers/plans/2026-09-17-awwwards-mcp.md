@@ -488,7 +488,7 @@ describe("parseCategories", () => {
   it("extracts color hex codes and tag slugs from the listing fixture", () => {
     const cats = parseCategories(listing());
     expect(cats.colors.length).toBeGreaterThanOrEqual(20);
-    expect(cats.colors).toContain("#000000");
+    expect(cats.colors).toContain("#404040");
     expect(cats.filters).toContain("3d");
     expect(cats.filters).toContain("webgl");
     expect(cats.filters.length).toBeGreaterThanOrEqual(100);
