@@ -1414,7 +1414,7 @@ export function createHandlers(deps: {
         d = parseDetail(await client.getHtml(`/sites/${args.slug}`), args.slug);
         cache.setMeta(metaKey, d);
       }
-      const cachedSite = cache.getSite(args.slug);
+      const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
       const liveUrl = d.liveUrl ?? cachedSite?.liveUrl ?? null;
 
       const content: Block[] = [
