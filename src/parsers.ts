@@ -1,4 +1,4 @@
-import type { SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, SiteDetails, SiteSummary } from "./types.js";
 
 const ENTITIES: Record<string, string> = {
   "&quot;": '"',
@@ -129,4 +129,28 @@ export function parseDetail(html: string, slug: string): SiteDetails {
     ogImage: ogMatch ? decodeEntities(ogMatch[1]) : null,
     liveUrl: liveUrl ? decodeEntities(liveUrl) : null,
   };
+}
+
+const NON_FILTERS = new Set(["sites_of_the_day"]);
+
+// Filter taxonomy from listing-page sidebars: color filters link to
+// /websites/%23<HEX>/ and tag/technology filters to /websites/<slug>/. Award
+// collections (sites_of_the_day) are not tags — they are exposed via the
+// `award` argument on the search tool instead.
+export function parseCategories(html: string): Categories {
+  const colors = [
+    ...new Set(
+      [...html.matchAll(/href="\/websites\/%23([0-9A-Fa-f]{6})\/"/g)].map((m) =>
+        `#${m[1].toUpperCase()}`,
+      ),
+    ),
+  ].sort();
+  const filters = [
+    ...new Set(
+      [...html.matchAll(/href="\/websites\/([a-z0-9-]{2,60})\/"/g)].map((m) => m[1]),
+    ),
+  ]
+    .filter((s) => !NON_FILTERS.has(s))
+    .sort();
+  return { colors, filters };
 }

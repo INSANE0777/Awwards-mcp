@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseListing, decodeEntities, parseDetail } from "../src/parsers.js";
+import { parseListing, decodeEntities, parseDetail, parseCategories } from "../src/parsers.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 
@@ -92,5 +92,21 @@ describe("parseDetail", () => {
       '<div data-collectable-model-value="{&quot;collectableTitle&quot;:&quot;UI &amp; UX&quot;,&quot;id&quot;:1}"></div>' +
       '<h2 class="text-default">Color Palette</h2>';
     expect(parseDetail(html, "x").elements).toContain("UI & UX");
+  });
+});
+
+describe("parseCategories", () => {
+  it("extracts color hex codes and tag slugs from the listing fixture", () => {
+    const cats = parseCategories(listing());
+    expect(cats.colors.length).toBeGreaterThanOrEqual(20);
+    expect(cats.colors).toContain("#404040");
+    expect(cats.filters).toContain("3d");
+    expect(cats.filters).toContain("webgl");
+    expect(cats.filters.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it("excludes award collections from the filter list", () => {
+    const cats = parseCategories(listing());
+    expect(cats.filters).not.toContain("sites_of_the_day");
   });
 });
