@@ -85,4 +85,12 @@ describe("parseDetail", () => {
     expect(d().ogImage).toContain("assets.awwwards.com");
     expect(d().liveUrl).toBe("https://lisa.locomotive.ca/en");
   });
+
+  it("captures element names containing entities", () => {
+    const html =
+      '<h2 class="text-default">Elements</h2>' +
+      '<div data-collectable-model-value="{&quot;collectableTitle&quot;:&quot;UI &amp; UX&quot;,&quot;id&quot;:1}"></div>' +
+      '<h2 class="text-default">Color Palette</h2>';
+    expect(parseDetail(html, "x").elements).toContain("UI & UX");
+  });
 });

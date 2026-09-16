@@ -88,7 +88,7 @@ export function parseDetail(html: string, slug: string): SiteDetails {
   const elStart = html.indexOf(">Elements</h2>");
   const elEnd = elStart >= 0 ? html.indexOf(">Color Palette</h2>", elStart) : -1;
   const elSection = elStart >= 0 && elEnd > elStart ? html.slice(elStart, elEnd) : "";
-  const elements = [...elSection.matchAll(/collectableTitle&quot;:&quot;([^&]+)&quot;/g)].map(
+  const elements = [...elSection.matchAll(/collectableTitle&quot;:&quot;(.+?)&quot;/g)].map(
     (m) => decodeEntities(m[1]),
   );
 
