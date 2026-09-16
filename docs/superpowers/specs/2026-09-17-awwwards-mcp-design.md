@@ -55,7 +55,7 @@ Four modules, single-purpose, independently testable:
 | Tool | Input | Output |
 |------|-------|--------|
 | `search_sites` | `query?` (string, matched against title/tags), `color?` (hex), `tags?` (string[]), `technology?`, `award?` (`sotd`\|`developer`\|`honorable`), `count?` (default 6, max 12), `page?` (default 1) | Per site: title, slug, live URL, awwwards URL, award + date, tags, thumbnail inline as base64 image content |
-| `get_site_details` | `slug` | Color palette (hex list), technologies & tools, design elements, description, author, award history, full-size screenshot URL, thumbnail inline |
+| `get_site_details` | `slug` | Color palette (hex list), technologies & tools, design elements, description, award history, full-size screenshot URL, thumbnail inline |
 | `list_categories` | — | Tag taxonomy, color list, technology list (cached 30 days) — lets the agent discover valid search keys |
 | `capture_live_site` | `url` | Fresh full-page screenshot via Playwright headless Chromium. **Optional dependency**: if Playwright is not installed, the tool returns clear install instructions instead of erroring |
 
