@@ -10,7 +10,7 @@ import {
   runIndexer,
   shouldAutoIndex,
 } from "../src/indexer.js";
-import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
+import { AwwwardsClient, BlockedError, RateLimiter } from "../src/awwwards.js";
 import { parseCategories } from "../src/parsers.js";
 import { Cache } from "../src/cache.js";
 
@@ -128,5 +128,38 @@ describe("runIndexer", () => {
     const { client } = fakeClient();
     const result = await runIndexer({ client, cache, now: () => t + INDEX_LOCK_STALE_MS });
     expect(result.pagesDone).toBe(tags.length);
+  });
+
+  it("aborts on block, preserves progress, records lastError, releases lock", async () => {
+    const cache = new Cache(tmpDir());
+    const secondTag = tags[1];
+    const { client } = fakeClient(
+      new Map([[`/websites/${secondTag}/`, () => new Response("blocked", { status: 403 })]]),
+    );
+    await expect(runIndexer({ client, cache })).rejects.toBeInstanceOf(BlockedError);
+    const progress = cache.getMeta<string[]>("index:progress", 10_000)!;
+    expect(progress).toContain(firstTag); // first page completed before the block
+    expect(progress).not.toContain(secondTag);
+    const status = cache.getMeta<any>("index:status", 10_000);
+    expect(status.lastError).toMatch(/block|403/i);
+    expect(cache.getMeta("index:lock", 10_000)).toBeNull();
+    // resume after the block completes the rest
+    const { client: client2 } = fakeClient();
+    const result = await runIndexer({ client: client2, cache });
+    expect(result.skipped).toBe(progress.length);
+  });
+
+  it("aborts on parser mismatch and does not mark the page done", async () => {
+    const cache = new Cache(tmpDir());
+    const secondTag = tags[1];
+    const { client } = fakeClient(
+      new Map([[`/websites/${secondTag}/`, () => new Response("<html><body>nothing</body></html>", { status: 200 })]]),
+    );
+    await expect(runIndexer({ client, cache })).rejects.toThrow(/parsed 0 site cards/);
+    const progress = cache.getMeta<string[]>("index:progress", 10_000)!;
+    expect(progress).toContain(firstTag);
+    expect(progress).not.toContain(secondTag);
+    const status = cache.getMeta<any>("index:status", 10_000);
+    expect(status.lastError).toContain(secondTag);
   });
 });

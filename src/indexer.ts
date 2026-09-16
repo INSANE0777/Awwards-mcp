@@ -86,9 +86,30 @@ export async function runIndexer(deps: {
       sitesIndexed: result.sitesIndexed,
       skipped: result.skipped,
     };
+  } catch (err) {
+    const previous = cache.getMeta<IndexStatus>("index:status", Number.POSITIVE_INFINITY);
+    const progress = (cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY) ?? []).length;
+    cache.setMeta("index:status", {
+      startedAt: previous?.startedAt,
+      pagesDone: progress,
+      pagesTotal: tagsCount(cache),
+      sitesIndexed: previous?.sitesIndexed ?? 0,
+      lastError: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   } finally {
     cache.deleteMeta("index:lock");
   }
+}
+
+// Total page count for abort-path status writes: prefer the last status object,
+// fall back to the cached taxonomy size. 0 is accurate when the abort happened
+// before any taxonomy was ever fetched.
+function tagsCount(cache: Cache): number {
+  return (
+    cache.getMeta<IndexStatus>("index:status", Number.POSITIVE_INFINITY)?.pagesTotal ??
+    (cache.getMeta<Categories>("categories", CATEGORY_TTL_MS)?.filters.length ?? 0)
+  );
 }
 
 async function crawl(
@@ -105,6 +126,12 @@ async function crawl(
     if (done.has(tag)) continue;
     const html = await client.getHtml(`/websites/${encodeURIComponent(tag)}/`);
     const sites = parseListing(html);
+    if (sites.length === 0) {
+      throw new Error(
+        `Awwwards layout may have changed: parsed 0 site cards on /websites/${tag}/. ` +
+          "The awwwards-mcp parser likely needs an update.",
+      );
+    }
     cache.upsertSites(sites);
     sitesIndexed += sites.length;
     pagesDone += 1;
