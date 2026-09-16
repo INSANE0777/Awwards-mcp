@@ -118,6 +118,38 @@ describe("search_sites", () => {
     expect(text).toContain("s1");
     expect(res.isError).toBeUndefined();
   });
+
+  it("client-side applies the award filter when color wins the URL", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      ...Array.from({ length: 8 }, (_, i) =>
+        site({ slug: `a${i + 1}`, awards: ["Site of the Day"] })),
+      site({ slug: "plain", awards: [] }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ color: "#404040", award: "sotd", count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("a1");
+    expect(text).not.toContain("plain");
+    const pageCalls = fetchFn.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes("/websites/") || String(c[0]).includes("/sites/"));
+    expect(pageCalls.length).toBe(0);
+  });
+});
+
+describe("search_sites error hardening", () => {
+  it("returns isError instead of throwing when the cache store is broken", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    (cache as any).getSites = () => {
+      throw new Error("corrupt db");
+    };
+    (cache as any).upsertSites = () => {};
+    const res = await h.search_sites({ tags: ["3d"], count: 6 });
+    expect(res.isError).toBe(true);
+  });
 });
 
 describe("get_site_details", () => {

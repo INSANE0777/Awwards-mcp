@@ -1,8 +1,14 @@
 import { parseCategories, parseDetail, parseListing } from "./parsers.js";
 import { AwwwardsClient, BlockedError, buildFilterUrl } from "./awwwards.js";
 import type { Cache } from "./cache.js";
-import type { SearchFilters } from "./awwwards.js";
+import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { Categories, SiteDetails, SiteSummary } from "./types.js";
+
+const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
+  sotd: "Site of the Day",
+  developer: "Developer Award",
+  honorable: "Honorable Mention",
+};
 
 export const SITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const CATEGORY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -83,6 +89,9 @@ export function createHandlers(deps: {
       const slug = f.technology.toLowerCase();
       if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
     }
+    if (f.award && source !== "award") {
+      if (!s.awards.includes(AWARD_FILTER_LABELS[f.award])) return false;
+    }
     if (f.query) {
       const q = f.query.toLowerCase();
       if (
@@ -151,8 +160,14 @@ export function createHandlers(deps: {
       ];
       return { content };
     } catch (err) {
-      // Spec: on live-request failure, serve stale cache if present.
-      const stale = cache.getSites(Infinity).filter((s) => matchesFilters(s, args));
+      // Spec: on live-request failure, serve stale cache if present. The store
+      // itself may be the failure source, so this lookup is guarded too.
+      let stale: SiteSummary[] = [];
+      try {
+        stale = cache.getSites(Infinity).filter((s) => matchesFilters(s, args));
+      } catch {
+        stale = [];
+      }
       if (stale.length > 0) {
         const slice = stale.slice(0, count);
         const images = await Promise.all(slice.map(siteImage));
