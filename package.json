@@ -6,7 +6,7 @@
   "license": "MIT",
   "bin": { "awwwards-mcp": "dist/cli.js" },
   "files": ["dist", "README.md"],
-  "engines": { "node": ">=22.5.0" },
+  "engines": { "node": ">=22.13.0" },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

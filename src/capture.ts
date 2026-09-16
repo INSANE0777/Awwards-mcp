@@ -38,6 +38,10 @@ export async function captureLiveSite(
     await page.screenshot({ path: file, fullPage: true });
     return { file, base64: (await readFile(file)).toString("base64") };
   } finally {
-    await browser.close();
+    try {
+      await browser.close();
+    } catch {
+      /* keep the primary error */
+    }
   }
 }

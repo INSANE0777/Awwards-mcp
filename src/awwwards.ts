@@ -1,6 +1,3 @@
-import { parseListing } from "./parsers.js";
-import type { SiteSummary } from "./types.js";
-
 export const BASE_URL = "https://www.awwwards.com";
 export const ASSETS_URL = "https://assets.awwwards.com";
 
@@ -110,9 +107,4 @@ export class AwwwardsClient {
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching thumbnail ${thumbPath}`);
     return Buffer.from(await res.arrayBuffer());
   }
-}
-
-// Convenience for callers that want parsed results straight off the wire.
-export async function fetchSites(client: AwwwardsClient, path: string): Promise<SiteSummary[]> {
-  return parseListing(await client.getHtml(path));
 }

@@ -192,3 +192,28 @@ describe("capture_live_site", () => {
     expect((res.content[0] as any).text).toContain("Playwright is not installed");
   });
 });
+
+describe("empty-parse guards", () => {
+  it("list_categories errors instead of caching an empty taxonomy", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: (async () => new Response("<html><body>nothing</body></html>", { status: 200 })) as unknown as typeof fetch,
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("parsed 0 categories");
+    expect(cache.getMeta<any>("categories", 30 * 24 * 60 * 60 * 1000)).toBeNull();
+  });
+
+  it("get_site_details errors instead of caching an empty parse", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: (async () => new Response("<html><body>nothing</body></html>", { status: 200 })) as unknown as typeof fetch,
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_details({ slug: "l-i-s-a" });
+    expect(res.isError).toBe(true);
+    expect(cache.getMeta<any>("detail:l-i-s-a", 7 * 24 * 60 * 60 * 1000)).toBeNull();
+  });
+});

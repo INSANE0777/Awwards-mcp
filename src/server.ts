@@ -60,11 +60,6 @@ export interface Handlers {
   capture_live_site(args: { url: string }): Promise<ToolResponse>;
 }
 
-// Placeholder until src/capture.ts lands in Task 9; Task 10 wires the real
-// dynamic import here. Keeping it static avoids a dangling module specifier.
-const defaultCapture: CaptureFn = async () =>
-  ({ error: "capture module not wired until Task 9" });
-
 export function createHandlers(deps: {
   client: AwwwardsClient;
   cache: Cache;
@@ -192,6 +187,24 @@ export function createHandlers(deps: {
       let d = cache.getMeta<SiteDetails>(metaKey, SITE_TTL_MS);
       if (!d) {
         d = parseDetail(await client.getHtml(`/sites/${args.slug}`), args.slug);
+        if (
+          d.palette.length === 0 &&
+          d.technologies.length === 0 &&
+          d.elements.length === 0 &&
+          d.awards.length === 0 &&
+          !d.description
+        ) {
+          return {
+            content: [
+              text(
+                "Awwwards layout may have changed: parsed no design data for " +
+                  args.slug +
+                  ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
+              ),
+            ],
+            isError: true,
+          };
+        }
         cache.setMeta(metaKey, d);
       }
       const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
@@ -230,6 +243,17 @@ export function createHandlers(deps: {
       let cats = cache.getMeta<Categories>("categories", CATEGORY_TTL_MS);
       if (!cats) {
         cats = parseCategories(await client.getHtml("/websites/"));
+        if (cats.colors.length === 0 && cats.filters.length === 0) {
+          return {
+            content: [
+              text(
+                "Awwwards layout may have changed: parsed 0 categories. " +
+                  "The awwwards-mcp parser likely needs an update.",
+              ),
+            ],
+            isError: true,
+          };
+        }
         cache.setMeta("categories", cats);
       }
       return {
@@ -257,7 +281,7 @@ export function createHandlers(deps: {
 
   async function capture_live_site(args: { url: string }): Promise<ToolResponse> {
     try {
-      const capture = deps.captureFn ?? defaultCapture;
+      const capture = deps.captureFn ?? (await import("./capture.js")).captureLiveSite;
       const result = await capture(args.url, cache.imagesDir);
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return {

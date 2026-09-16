@@ -18,9 +18,20 @@ const asMcpResult = (p: Promise<ToolResponse>): Promise<CallToolResult> =>
   p as unknown as Promise<CallToolResult>;
 
 const cacheRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
+let cache: Cache;
+try {
+  cache = new Cache(cacheRoot);
+} catch (err) {
+  console.error(
+    `awwwards-mcp: cannot initialize cache at ${cacheRoot}: ${
+      err instanceof Error ? err.message : String(err)
+    }`,
+  );
+  process.exit(1);
+}
 const handlers = createHandlers({
   client: new AwwwardsClient(),
-  cache: new Cache(cacheRoot),
+  cache,
   captureFn: captureLiveSite,
 });
 
@@ -48,7 +59,12 @@ server.tool(
 server.tool(
   "get_site_details",
   "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot.",
-  { slug: z.string().describe("Site slug from search_sites, e.g. 'l-i-s-a'") },
+  {
+    slug: z
+      .string()
+      .regex(/^[\w-]+$/)
+      .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
+  },
   (args) => asMcpResult(handlers.get_site_details(args)),
 );
 
