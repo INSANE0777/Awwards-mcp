@@ -90,11 +90,21 @@ export class Cache {
            awards=excluded.awards, fetchedAt=excluded.fetchedAt`,
       );
       const t = this.now();
-      for (const s of sites) {
-        stmt.run(
-          s.slug, s.id, s.title, s.createdAt, JSON.stringify(s.tags),
-          s.thumbnailPath, s.liveUrl, s.detailPath, JSON.stringify(s.awards), t,
-        );
+      // One transaction for the whole batch: each autocommitted INSERT pays a
+      // disk sync (~4ms on Windows), which made a 31-card upsert ~150ms and a
+      // full index crawl take minutes. A single commit syncs once.
+      db.exec("BEGIN");
+      try {
+        for (const s of sites) {
+          stmt.run(
+            s.slug, s.id, s.title, s.createdAt, JSON.stringify(s.tags),
+            s.thumbnailPath, s.liveUrl, s.detailPath, JSON.stringify(s.awards), t,
+          );
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
       }
     });
   }
@@ -135,6 +145,12 @@ export class Cache {
         | undefined;
       if (!row || row.fetchedAt <= this.now() - maxAgeMs) return null;
       return JSON.parse(row.value) as T;
+    });
+  }
+
+  deleteMeta(key: string): void {
+    this.withDb((db) => {
+      db.prepare("DELETE FROM meta WHERE key = ?").run(key);
     });
   }
 

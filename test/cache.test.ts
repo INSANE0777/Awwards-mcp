@@ -71,4 +71,14 @@ describe("Cache", () => {
     expect(second.equals(first)).toBe(true);
     expect(first.toString()).toContain("jpeg-bytes-1");
   });
+
+  it("deletes meta keys", () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("index:lock", { startedAt: 1 });
+    expect(cache.getMeta<any>("index:lock", 10_000)).toEqual({ startedAt: 1 });
+    cache.deleteMeta("index:lock");
+    expect(cache.getMeta("index:lock", 10_000)).toBeNull();
+    cache.deleteMeta("index:lock"); // idempotent
+    expect(cache.getMeta("index:lock", 10_000)).toBeNull();
+  });
 });
