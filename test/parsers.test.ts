@@ -46,10 +46,10 @@ describe("parseListing", () => {
   it("skips collection blobs, malformed JSON, and cards without a /sites/ href", () => {
     const synthetic = [
       '<div data-collectable-model-value="{&quot;slug&quot;:&quot;coll-1&quot;,&quot;title&quot;:&quot;Some Collection&quot;,&quot;type&quot;:&quot;collection&quot;}">',
-      '<a href="/collections/coll-1">c</a></div>',
-      '<div data-collectable-model-value="{broken json"><span>garbage</span></div>',
+      '<a href="/sites/decoy">d</a>',
       '<div data-collectable-model-value="{&quot;slug&quot;:&quot;no-href&quot;,&quot;title&quot;:&quot;No Href&quot;,&quot;type&quot;:&quot;submission&quot;}">',
       '<span>no sites link here</span></div>',
+      '<div data-collectable-model-value="{broken json"><span>garbage</span></div>',
     ].join("");
     const baseline = parseListing(readFixture("listing.html"));
     const sites = parseListing(synthetic + readFixture("listing.html"));
