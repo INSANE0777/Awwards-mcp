@@ -31,6 +31,23 @@ describe("captureLiveSite", () => {
     if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
   });
 
+  it("propagates page-level runtime errors instead of the install hint", async () => {
+    const res = captureLiveSite("https://example.com", tmpDir(), async () => ({
+      chromium: {
+        launch: async () => ({
+          newPage: async () => ({
+            goto: async () => {
+              throw new Error("Timeout 45000ms exceeded");
+            },
+            screenshot: async () => {},
+          }),
+          close: async () => {},
+        }),
+      },
+    }));
+    await expect(res).rejects.toThrow("Timeout 45000ms exceeded");
+  });
+
   it("screenshots the page with a fake chromium", async () => {
     const dir = tmpDir();
     const fake = {

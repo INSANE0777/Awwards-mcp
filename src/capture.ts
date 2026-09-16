@@ -19,20 +19,25 @@ export async function captureLiveSite(
   let chromium: any;
   try {
     ({ chromium } = await loader());
-    const browser = await chromium.launch();
-    try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-      await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
-      const file = join(
-        imagesDir,
-        "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + ".png",
-      );
-      await page.screenshot({ path: file, fullPage: true });
-      return { file, base64: (await readFile(file)).toString("base64") };
-    } finally {
-      await browser.close();
-    }
   } catch {
     return { error: CAPTURE_INSTALL_HINT };
+  }
+  let browser: any;
+  try {
+    browser = await chromium.launch();
+  } catch {
+    return { error: CAPTURE_INSTALL_HINT };
+  }
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
+    const file = join(
+      imagesDir,
+      "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + ".png",
+    );
+    await page.screenshot({ path: file, fullPage: true });
+    return { file, base64: (await readFile(file)).toString("base64") };
+  } finally {
+    await browser.close();
   }
 }
