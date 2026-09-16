@@ -1,0 +1,2 @@
+* text=auto eol=lf
+test/fixtures/*.html -text
