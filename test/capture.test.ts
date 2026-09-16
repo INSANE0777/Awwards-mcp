@@ -23,6 +23,14 @@ describe("captureLiveSite", () => {
     if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
   });
 
+  it("returns install instructions when chromium launch fails", async () => {
+    const res = await captureLiveSite("https://example.com", tmpDir(), async () => ({
+      chromium: { launch: async () => { throw new Error("Executable doesn't exist"); } },
+    }));
+    expect("error" in res).toBe(true);
+    if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
+  });
+
   it("screenshots the page with a fake chromium", async () => {
     const dir = tmpDir();
     const fake = {
