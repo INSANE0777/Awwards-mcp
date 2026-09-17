@@ -111,18 +111,28 @@ describe("analyzePageStructure", () => {
 // Mirror of the SCAN_SNIPPET in-page alpha parse (src/structure.ts). The
 // snippet runs in a browser DOM we cannot spin up in offline tests, so the
 // parse logic is mirrored here to pin the exact contract: space syntax,
-// slash notation, and percentage alphas. Keep in sync with src/structure.ts.
+// slash notation, percentage alphas, and the rgba?()-miss fallback (modern
+// color functions are opaque; anything else stays conservative at 0).
+// Keep in sync with src/structure.ts.
 it("SCAN_SNIPPET alpha parsing handles space syntax and percentage alphas", () => {
   const parseAlpha = (color: string): number => {
     const m = /rgba?\(([^)]+)\)/.exec(color);
-    if (!m) return 0;
-    const parts = m[1].replace(/\//g, " ").trim().split(/[\s,]+/).filter(Boolean);
-    const aRaw = parts.length >= 4 ? parts[3] : "1";
-    const alpha = aRaw.endsWith("%") ? parseFloat(aRaw) / 100 : parseFloat(aRaw);
-    return Number.isNaN(alpha) ? 0 : alpha;
+    let alpha = 0;
+    if (m) {
+      const parts = m[1].replace(/\//g, " ").trim().split(/[\s,]+/).filter(Boolean);
+      const aRaw = parts.length >= 4 ? parts[3] : "1";
+      alpha = aRaw.endsWith("%") ? parseFloat(aRaw) / 100 : parseFloat(aRaw);
+      if (Number.isNaN(alpha)) alpha = 0;
+    } else if (/^(oklch|oklab|lab|lch|hwb|color)\(/.test(color.trim())) {
+      alpha = 1;
+    }
+    return alpha;
   };
   expect(parseAlpha("rgb(16 21 42 / 0)")).toBe(0); // space syntax, transparent
   expect(parseAlpha("rgb(16, 21, 42, 0)")).toBe(0); // legacy comma, transparent
   expect(parseAlpha("rgb(16 21 42 / 50%)")).toBeCloseTo(0.5); // percentage alpha
   expect(parseAlpha("rgb(240, 242, 247)")).toBe(1); // opaque, no alpha part
+  expect(parseAlpha("oklch(0.7 0.1 200)")).toBe(1); // modern opaque function
+  expect(parseAlpha("color(srgb 0.2 0.4 0.6)")).toBe(1); // modern opaque function
+  expect(parseAlpha("linear-gradient(...)")).toBe(0); // non-function → conservative
 });

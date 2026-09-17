@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.log
+capture-build.mjs
 
 # controller scratch (execution ledger, briefs, review packages)
 .superpowers/

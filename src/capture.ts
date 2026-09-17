@@ -5,7 +5,7 @@ import { join } from "node:path";
 export const CAPTURE_INSTALL_HINT =
   "Full-page capture needs Playwright, which is an optional dependency.\n" +
   "Install it with:  npm install -D playwright && npx playwright install chromium\n" +
-  "Then retry capture_live_site.";
+  "Then retry the capture or structure tool.";
 
 type CaptureResult = { file: string; base64: string } | { error: string };
 

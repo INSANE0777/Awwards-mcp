@@ -43,9 +43,10 @@ export interface ScanResult {
 // (no closures over module scope). The Node tsconfig has no DOM lib, so
 // browser globals are reached through globalThis.
 //
-// The backgroundColor alpha parsing in the visit loop is mirrored in
-// test/structure.test.ts ("SCAN_SNIPPET alpha parsing handles space syntax
-// and percentage alphas") and must stay in sync.
+// The backgroundColor alpha parsing in the visit loop (including the
+// modern-color-function fallback) is mirrored in test/structure.test.ts
+// ("SCAN_SNIPPET alpha parsing handles space syntax and percentage alphas")
+// and must stay in sync.
 export const SCAN_SNIPPET = (): ScanResult => {
   const g = globalThis as any;
   const doc = g.document;
@@ -72,6 +73,9 @@ export const SCAN_SNIPPET = (): ScanResult => {
       const color = s.backgroundColor;
       // Alpha parse tolerant of legacy comma syntax and CSS Color 4
       // space syntax: rgb(r g b / a), rgb(r, g, b, a), and percentage alphas.
+      // A rgba?() miss falls back by color function: modern opaque functions
+      // (oklch/oklab/lab/lch/hwb/color) count as opaque (alpha 1); anything
+      // else (gradients, keywords) stays conservative at alpha 0.
       const m = /rgba?\(([^)]+)\)/.exec(color);
       let alpha = 0;
       if (m) {
@@ -79,6 +83,8 @@ export const SCAN_SNIPPET = (): ScanResult => {
         const aRaw = parts.length >= 4 ? parts[3] : "1";
         alpha = aRaw.endsWith("%") ? parseFloat(aRaw) / 100 : parseFloat(aRaw);
         if (Number.isNaN(alpha)) alpha = 0;
+      } else if (/^(oklch|oklab|lab|lch|hwb|color)\(/.test(color.trim())) {
+        alpha = 1;
       }
       if (alpha > 0) {
         candidates.push({
@@ -187,6 +193,17 @@ export async function analyzePageStructure(
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
+    // Scroll through the page so lazy-rendered sections have layout before
+    // the band scan (spec requirement; 450px steps, brief settle, back to top).
+    await page.evaluate(async () => {
+      const step = 450;
+      for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      window.scrollTo(0, 0);
+      await new Promise((r) => setTimeout(r, 150));
+    });
     const raw = (await page.evaluate(SCAN_SNIPPET)) as ScanResult;
     return {
       url,
