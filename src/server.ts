@@ -1,8 +1,14 @@
-import { parseCategories, parseDetail, parseListing } from "./parsers.js";
-import { AwwwardsClient, BlockedError, buildFilterUrl } from "./awwwards.js";
+import { parseCategories, parseDetail, parseElements, parseListing } from "./parsers.js";
+import {
+  AwwwardsClient,
+  BlockedError,
+  buildFilterUrl,
+  elementPosterPath,
+  elementUrl,
+} from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
-import type { Categories, SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -56,6 +62,7 @@ function errorResponse(err: unknown): ToolResponse {
 export interface Handlers {
   search_sites(args: SearchArgs): Promise<ToolResponse>;
   get_site_details(args: { slug: string }): Promise<ToolResponse>;
+  get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
   capture_live_site(args: { url: string }): Promise<ToolResponse>;
 }
@@ -204,7 +211,8 @@ export function createHandlers(deps: {
       const metaKey = `detail:${args.slug}`;
       let d = cache.getMeta<SiteDetails>(metaKey, SITE_TTL_MS);
       if (!d) {
-        d = parseDetail(await client.getHtml(`/sites/${args.slug}`), args.slug);
+        const html = await client.getHtml(`/sites/${args.slug}`);
+        d = parseDetail(html, args.slug);
         if (
           d.palette.length === 0 &&
           d.technologies.length === 0 &&
@@ -224,6 +232,14 @@ export function createHandlers(deps: {
           };
         }
         cache.setMeta(metaKey, d);
+        // One fetch feeds both caches: seed the elements cache from the same
+        // HTML. Null (no section) caches as a legitimate empty; a zero-blob
+        // parse is left uncached for get_site_elements to surface as a mismatch.
+        if (cache.getMeta<ElementMedia[]>(`elements:${args.slug}`, SITE_TTL_MS) === null) {
+          const els = parseElements(html);
+          if (els === null) cache.setMeta(`elements:${args.slug}`, []);
+          else if (els.length > 0) cache.setMeta(`elements:${args.slug}`, els);
+        }
       }
       const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
       const liveUrl = d.liveUrl ?? cachedSite?.liveUrl ?? null;
@@ -251,6 +267,76 @@ export function createHandlers(deps: {
         if (img) content.push(img);
       }
       return { content };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function get_site_elements(args: { slug: string }): Promise<ToolResponse> {
+    try {
+      const elementsKey = `elements:${args.slug}`;
+      let elements = cache.getMeta<ElementMedia[]>(elementsKey, SITE_TTL_MS);
+      if (!elements) {
+        const html = await client.getHtml(`/sites/${args.slug}`);
+        const parsed = parseElements(html);
+        if (parsed === null) {
+          elements = [];
+          cache.setMeta(elementsKey, elements);
+        } else if (parsed.length === 0) {
+          return {
+            content: [
+              text(
+                "Awwwards layout may have changed: found an Elements section but parsed 0 elements. " +
+                  "The awwwards-mcp parser likely needs an update.",
+              ),
+            ],
+            isError: true,
+          };
+        } else {
+          elements = parsed;
+          cache.setMeta(elementsKey, elements);
+        }
+        // One fetch feeds both caches: seed the detail cache from the same
+        // HTML unless it is an all-empty parse (never cached, per contract).
+        if (cache.getMeta<SiteDetails>(`detail:${args.slug}`, SITE_TTL_MS) === null) {
+          const d = parseDetail(html, args.slug);
+          const empty =
+            d.palette.length === 0 && d.technologies.length === 0 &&
+            d.elements.length === 0 && d.awards.length === 0 && !d.description;
+          if (!empty) cache.setMeta(`detail:${args.slug}`, d);
+        }
+      }
+      const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
+      const title =
+        cache.getMeta<SiteDetails>(`detail:${args.slug}`, SITE_TTL_MS)?.title ??
+        cachedSite?.title ??
+        args.slug;
+      if (elements.length === 0) {
+        return { content: [text(`No design elements listed for ${title} (${args.slug}).`)] };
+      }
+      const shown = elements.slice(0, 8);
+      const lines = elements.map((el, i) => {
+        const isVideo = el.mediaPath.endsWith(".mp4");
+        return `${i + 1}. ${el.title} (${isVideo ? "video" : "image"})` +
+          (isVideo ? ` — ${elementUrl(el.mediaPath)}` : "");
+      });
+      const posters = await Promise.all(
+        shown.map(async (el): Promise<Block | null> => {
+          try {
+            const poster = elementPosterPath(el.mediaPath);
+            const buf = await cache.getImage(poster, () => client.getAsset(poster));
+            return { type: "image", data: buf.toString("base64"), mimeType: "image/jpeg" };
+          } catch {
+            return null; // poster failures degrade to text-only listings
+          }
+        }),
+      );
+      return {
+        content: [
+          text(`${title}: ${elements.length} design element(s):\n\n${lines.join("\n")}`),
+          ...posters.filter((b): b is Block => b !== null),
+        ],
+      };
     } catch (err) {
       return errorResponse(err);
     }
@@ -313,5 +399,5 @@ export function createHandlers(deps: {
     }
   }
 
-  return { search_sites, get_site_details, list_categories, capture_live_site };
+  return { search_sites, get_site_details, get_site_elements, list_categories, capture_live_site };
 }

@@ -264,3 +264,65 @@ describe("empty-parse guards", () => {
     expect(cache.getMeta<any>("detail:l-i-s-a", 7 * 24 * 60 * 60 * 1000)).toBeNull();
   });
 });
+
+describe("get_site_elements", () => {
+  it("returns posters inline with video urls; caches after one page fetch", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_elements({ slug: "l-i-s-a" });
+    const body = (res.content[0] as any).text;
+    expect(body).toContain("3D model");
+    expect(body).toContain("(video)");
+    expect(body).toContain("https://assets.awwwards.com/awards/element/");
+    expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
+    const res2 = await h.get_site_elements({ slug: "l-i-s-a" });
+    expect(res2.content.filter((b: any) => b.type === "image").length).toBe(6);
+    const pageCalls = fetchFn.mock.calls.filter(
+      (c: any[]) => String(c[0]).includes("/sites/l-i-s-a"),
+    );
+    expect(pageCalls.length).toBe(1); // second call served from meta cache
+  });
+
+  it("shares one page fetch with get_site_details", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    await h.get_site_details({ slug: "l-i-s-a" });
+    await h.get_site_elements({ slug: "l-i-s-a" });
+    const pageCalls = fetchFn.mock.calls.filter(
+      (c: any[]) => String(c[0]).includes("/sites/l-i-s-a"),
+    );
+    expect(pageCalls.length).toBe(1);
+  });
+
+  it("reports a legitimate empty (and caches it) when there is no Elements section", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: (async () =>
+        new Response("<html><body>no sections</body></html>", { status: 200 })) as unknown as typeof fetch,
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_elements({ slug: "plain-site" });
+    expect((res.content[0] as any).text).toContain("No design elements listed");
+    expect(res.isError).toBeUndefined();
+    expect(
+      cache.getMeta<any[]>("elements:plain-site", 7 * 24 * 60 * 60 * 1000),
+    ).toEqual([]);
+  });
+
+  it("errors without caching on a section-with-zero-blobs mismatch", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: (async () =>
+        new Response(
+          "<h2>Elements</h2><p>broken</p><h2>Color Palette</h2>",
+          { status: 200 },
+        )) as unknown as typeof fetch,
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_elements({ slug: "weird" });
+    expect(res.isError).toBe(true);
+    expect(cache.getMeta("elements:weird", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
