@@ -113,19 +113,20 @@ export class AwwwardsClient {
 
   // Thumbnail fetch from the CDN — not rate-limited.
   async getThumbnail(thumbPath: string, size: 440 | 880 = 880): Promise<Buffer> {
-    const res = await this.fetchFn(thumbnailUrl(thumbPath, size), {
-      headers: { "User-Agent": USER_AGENT },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching thumbnail ${thumbPath}`);
-    return Buffer.from(await res.arrayBuffer());
+    return this.fetchCdnBinary(thumbnailUrl(thumbPath, size), `thumbnail ${thumbPath}`);
   }
 
   // Asset fetch from the CDN (element posters etc.) — not rate-limited.
   async getAsset(assetPath: string): Promise<Buffer> {
-    const res = await this.fetchFn(elementUrl(assetPath), {
+    return this.fetchCdnBinary(elementUrl(assetPath), `asset ${assetPath}`);
+  }
+
+  // Binary CDN assets (thumbnails, element media) all fetch through this single path.
+  private async fetchCdnBinary(url: string, label: string): Promise<Buffer> {
+    const res = await this.fetchFn(url, {
       headers: { "User-Agent": USER_AGENT },
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching asset ${assetPath}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${label}`);
     return Buffer.from(await res.arrayBuffer());
   }
 }
