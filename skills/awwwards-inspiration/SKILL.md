@@ -31,7 +31,8 @@ Run this loop before building anything visual:
 3. **Search.** Call `search_sites` with 1–3 filters (e.g.
    `{ color: "#404040", tags: ["3d", "portfolio"] }`). Judge the results from
    the inline screenshots, not just titles. Shortlist 2–3 candidates.
-4. **Live reference URL named? Capture it full-page first.** If the user
+4. **Live reference URL named? Capture it full-page first.** (and later capture
+   your own build the same way — compare both against each other) If the user
    points at a specific live site (e.g. "recreate cerebrium.ai"), call
    `capture_live_site` on that URL before anything else and design from the
    full-page PNG — every section, top to bottom. Cached Awwwards screenshots
@@ -51,6 +52,13 @@ Run this loop before building anything visual:
 7. **State the design direction before writing code.** In prose: palette
    (hexes from the references), type mood, layout patterns, and tech choices,
    each traceable to a reference. Then build.
+8. **Verify structure, then polish.** After building, capture your own build
+   full-page (`capture_live_site` on its `file://` or served URL) and run
+   `analyze_page_structure` on BOTH the reference and the build. Compare band
+   maps section by section (count, order, backgrounds, heights). Fix
+   distribution mismatches first — a section that is 3× the reference's height
+   is a structural bug no amount of pixel polish fixes. Match the reference's
+   band structure, never just its total height.
 
 ### Anti-patterns
 
@@ -63,6 +71,10 @@ Run this loop before building anything visual:
 - **Designing from a thumbnail or element poster** — thumbnails are hero-only
   crops and posters are video frames; neither shows the page's real
   structure. When the reference URL is known, capture it full-page (step 4).
+- **Padding empty bands to match total height** — if your build's total height
+  matches the reference but a spacer/background band is far taller than the
+  reference's equivalent, the height was stolen from real content sections.
+  Compare band maps, not totals.
 
 ## Tool reference
 
@@ -73,6 +85,7 @@ Run this loop before building anything visual:
 | `get_site_elements` | `slug` | Numbered element list (image or video, with video URLs) + up to 8 inline poster JPEGs | Videos are mp4 URLs (posters only are shown inline). Elements feed from the same fetch as `get_site_details`. |
 | `list_categories` | none | JSON: every color hex and filter/tag slug, plus usage guidance | Cached 30 days. Call this whenever filter vocabulary is uncertain. |
 | `capture_live_site` | `url` (absolute URL) | Full-page PNG saved to disk + inline image | Requires the optional playwright dependency (`npm install -g playwright && npx playwright install chromium`). |
+| `analyze_page_structure` | `url` (absolute URL or `file://` path), `maxBands` (cap on returned bands, default 40) | JSON: `title`, `totalHeight`, and an ordered band map (`index`, `tag`, `label`, `background`, `offsetTop`, `height` per band) | Requires playwright. Run it on BOTH the reference and your build (step 8) and compare band maps — count, order, backgrounds, heights — never just total height. |
 
 All image results arrive as MCP image content blocks — look at them, don't
 just read the text blocks.
