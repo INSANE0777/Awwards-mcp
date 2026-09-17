@@ -54,6 +54,7 @@ mkdir -p ~/.claude/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-ins
 ```
 
 For ZCode, copy to `~/.zcode/skills/` instead of `~/.claude/skills/`.
+Windows: run this from Git Bash, or copy `node_modules\awwwards-mcp\skills\awwwards-inspiration` manually.
 
 ## Indexing (recommended)
 

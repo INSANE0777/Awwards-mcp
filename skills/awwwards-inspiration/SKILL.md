@@ -32,7 +32,9 @@ Run this loop before building anything visual:
    `{ color: "#404040", tags: ["3d", "portfolio"] }`). Judge the results from
    the inline screenshots, not just titles. Shortlist 2–3 candidates.
 4. **Get the design DNA.** Call `get_site_details` on the top pick for its
-   palette, technologies, design elements, awards, and description.
+   palette, technologies, design elements, awards, and description. If it
+   reports a layout-drift error, fall back to judging the shortlisted
+   screenshots and `get_site_elements` (which uses a different parser) instead.
 5. **Get component-level visuals (when building).** Call `get_site_elements`
    on shortlisted sites to see individual design elements — 3D models, video
    content, mobile layouts, microcopy — with poster images inline and video
