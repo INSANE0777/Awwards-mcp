@@ -24,8 +24,9 @@ New tool; existing tools unchanged.
 
 | File | Change |
 |------|--------|
-| `src/parsers.ts` | Add `parseElements(html): { title: string; mediaPath: string }[]` — section-bounded extraction of the element blobs. Existing `parseDetail` elements list stays as-is (it feeds text summaries). |
-| `src/awwwards.ts` | Add `elementUrl(mediaPath: string): string` (CDN URL) and `elementPosterPath(mediaPath: string): string` (`.mp4` → `_static.jpeg`; jpg unchanged). |
+| `src/types.ts` | Add `ElementMedia { title: string; mediaPath: string }` (same home as the other shared types). |
+| `src/parsers.ts` | Add `parseElements(html): ElementMedia[] \| null` — section-bounded extraction of the element blobs; **null = no Elements section** (legitimate empty), `[]` = section present but zero blobs parsed (mismatch signal). Existing `parseDetail` elements list stays as-is (it feeds text summaries). |
+| `src/awwwards.ts` | Add `elementUrl(mediaPath: string): string` (CDN URL) and `elementPosterPath(mediaPath: string): string` (`.mp4` → `_static.jpeg`; jpg unchanged); add `AwwwardsClient.getAsset(assetPath: string): Promise<Buffer>` (CDN fetch, not rate-limited — same as thumbnails). |
 | `src/server.ts` | Add `get_site_elements` to `Handlers` + `createHandlers`. |
 | `src/cli.ts` | Register `get_site_elements` (slug schema identical to `get_site_details`: `/^[\w-]+$/`). |
 | `README.md` | Tools table row. |
