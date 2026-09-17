@@ -71,6 +71,18 @@ server.tool(
 );
 
 server.tool(
+  "get_site_elements",
+  "Get the design-element highlights of one Awwwards site: component-level visuals (3D models, video content, mobile layouts, microcopy) with poster images inline and video URLs.",
+  {
+    slug: z
+      .string()
+      .regex(/^[\w-]+$/)
+      .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
+  },
+  (args) => asMcpResult(handlers.get_site_elements(args)),
+);
+
+server.tool(
   "list_categories",
   "List the filter taxonomy available on Awwwards: color hexes and tag/technology slugs usable with search_sites.",
   {},
