@@ -42,6 +42,18 @@ Optional full-page captures:
 npm install -g playwright && npx playwright install chromium
 ```
 
+## Skills
+
+This package ships an agent skill that teaches the inspiration workflow —
+search, judge from screenshots, pull design DNA, state a design direction —
+using the awwwards MCP tools. Copy it into your agent's skills directory:
+
+```bash
+npx -y -p awwwards-mcp sh -c 'mkdir -p ~/.claude/skills && cp -r $(npm root -p)/awwwards-mcp/skills/awwwards-inspiration ~/.claude/skills/'
+```
+
+For ZCode, copy to `~/.zcode/skills/` instead of `~/.claude/skills/`.
+
 ## Indexing (recommended)
 
 `search_sites` works out of the box, but its depth is limited by polite live
