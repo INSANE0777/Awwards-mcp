@@ -1,13 +1,21 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
-// preScroll lives in structure.ts (shared with capture); importing it here is a
-// leaf-direction import — motion → {capture, structure}, and the existing
-// capture⇄structure cycle is verified safe.
-import { preScroll, type WaitStrategy } from "./structure.js";
+// WaitStrategy is shared with capture/structure (leaf-direction import —
+// motion → {capture, structure}; the existing capture⇄structure cycle is
+// verified safe). The pre-scroll itself is motion-local: boundedPreScroll
+// below caps the walk so a huge page cannot blow the recording budget.
+import { type WaitStrategy } from "./structure.js";
 
 export const MOTION_FFMPEG_HINT =
   "Motion recording needs ffmpeg-static, which is an optional dependency.\n" +
@@ -43,7 +51,12 @@ export interface MotionOpts {
 //   preloader dwell ............ 5.0s   (script: 7s; also covers the fixed
 //                                       "load" settle capture.ts applies —
 //                                       one top-of-page wait serves both)
-//   lazy-render preScroll ...... ~1s    (shared 40ms-step pass, back to top)
+//   lazy-render pre-scroll ...... ≤ ~1s  (bounded 40ms-step pass, back to top:
+//                                       the ceiling is min(page height, 450 ×
+//                                       24 = 10.8k px, matching the tour cap,
+//                                       so the walk can never exceed ~1s — the
+//                                       capped tour below still renders lazy
+//                                       content on taller pages)
 //   stepped scroll tour ........ ~8.4s  (450px steps / 350ms settle, capped at
 //                                       MAX_SCROLL_STEPS=24 ≈ 10.8k px of page
 //                                       height so tall pages cannot blow the
@@ -68,6 +81,8 @@ const TOP_RETURN_MS = 1500;
 // Default ffmpeg invocation: tile the recorded video into one filmstrip JPEG
 // (a frame every 4s, 720px wide, cols x rows grid, single output frame).
 // Exported for direct testing; callers inject ffmpegFn to replace it.
+const FFMPEG_TIMEOUT_MS = 60_000;
+
 export async function runFfmpeg(
   bin: string,
   video: string,
@@ -82,10 +97,39 @@ export async function runFfmpeg(
       ["-y", "-i", video, "-vf", `fps=1/4,scale=720:-1,tile=${cols}x${rows}`, "-frames:v", "1", strip],
       { stdio: "ignore", windowsHide: true },
     );
-    child.on("error", reject); // spawn failure (missing binary, ...)
-    child.on("close", (code) =>
-      code === 0 ? resolve() : reject(new Error(`ffmpeg exited with code ${code}`)),
-    );
+    // Deadline: a hung ffmpeg (wedged pipe, dead filesystem) must not hang the
+    // tool call forever — kill the child and reject so the caller gets the
+    // install-hint error path.
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`ffmpeg timed out after ${FFMPEG_TIMEOUT_MS / 1000}s`));
+    }, FFMPEG_TIMEOUT_MS);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err); // spawn failure (missing binary, ...)
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolve() : reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
+// Lazy-render pre-scroll for the motion pass. Same loop shape as structure.ts's
+// preScroll, but bounded: the walk ceiling is min(page height, 450 × 24 = 10.8k
+// px, matching MAX_SCROLL_STEPS) so a 50k-px page costs ≤ ~1s instead of ~4.5s
+// — the capped scroll tour below still renders lazy content on taller pages.
+async function boundedPreScroll(page: any): Promise<void> {
+  await page.evaluate(async () => {
+    const g = globalThis as any;
+    const ceiling = Math.min(g.document.documentElement.scrollHeight, 450 * 24);
+    const step = 450;
+    for (let y = 0; y < ceiling; y += step) {
+      g.window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    g.window.scrollTo(0, 0);
+    await new Promise((r) => setTimeout(r, 150));
   });
 }
 
@@ -134,8 +178,12 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   const hash = createHash("sha1").update(url).digest("hex").slice(0, 10);
   const videoPath = join(opts.cacheImagesDir, `motion-${hash}.webm`);
   const stripPath = join(opts.cacheImagesDir, `motion-${hash}-strip.jpg`);
-  const videoTmp = join(opts.cacheImagesDir, ".video-tmp");
-  mkdirSync(videoTmp, { recursive: true });
+  // Per-call tmp isolation: each run records into its own mkdtemp dir, so a
+  // stale partial video from a crashed run (e.g. goto timeout → context.close()
+  // still flushes a partial .webm) or a concurrent run's video can never be
+  // globbed and filmed under this URL's hash.
+  mkdirSync(opts.cacheImagesDir, { recursive: true });
+  const videoTmp = mkdtempSync(join(opts.cacheImagesDir, ".video-tmp-"));
 
   const waitStrategy: WaitStrategy = opts.waitStrategy ?? "load";
   try {
@@ -149,8 +197,9 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
       // Preloader + entrance animations on camera. This top-of-page wait also
       // stands in for capture.ts's fixed 3s "load" settle (see budget above).
       await page.waitForTimeout(DWELL_MS);
-      // Pre-render lazy sections so the tour films settled layout.
-      await preScroll(page);
+      // Pre-render lazy sections so the tour films settled layout (bounded —
+      // see boundedPreScroll; a huge page must not burn the budget here).
+      await boundedPreScroll(page);
 
       // Virtual cursor: an SVG arrow injected into the page, moved alongside
       // page.mouse (page.evaluate serializes plain data only, so snippets are
@@ -233,10 +282,13 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
           }
           // Pass 2: cursor:pointer discovery — custom interactive surfaces
           // with unknown markup. Skip the pointer region's top (compare
-          // against the parent).
+          // against the parent). Bounded by ITERATIONS only (the 3k-element
+          // walk below); no pool cap — dedupe plus the 16-target spread at
+          // the end bound the output anyway, and an out.length cap here would
+          // silently disable pointer discovery on link-dense pages.
           let visited = 0;
           for (const el of doc.querySelectorAll("body *")) {
-            if (++visited > 3000 || out.length > 200) break;
+            if (++visited > 3000) break;
             if (g.getComputedStyle(el).cursor !== "pointer") continue;
             const parent = el.parentElement;
             if (parent && g.getComputedStyle(parent).cursor === "pointer") continue; // inherited
@@ -301,21 +353,26 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
         /* flush is best-effort */
       }
     }
+
+    // Video handoff: the glob only sees THIS call's flushed .webm (fresh
+    // per-call tmp dir). Rename it to its stable, URL-keyed name in
+    // cacheImagesDir while the tmp dir still exists.
+    const webms = readdirSync(videoTmp).filter((f) => f.endsWith(".webm"));
+    if (webms.length === 0) {
+      // Not an install problem — plain failure, no install advice attached.
+      return { error: "recording failed: no video file was produced" };
+    }
+    renameSync(join(videoTmp, webms[0]), videoPath);
   } finally {
     try {
       await browser.close();
     } catch {
       /* keep the primary error */
     }
+    // Drop this run's tmp dir last: any partial video flushed by a mid-run
+    // failure dies here instead of leaking into a later run's glob.
+    rmSync(videoTmp, { recursive: true, force: true });
   }
-
-  // Video handoff: glob the flushed .webm out of the recordVideo tmp dir and
-  // rename it to its stable, URL-keyed name in cacheImagesDir.
-  const recorded = readdirSync(videoTmp).find((f) => f.endsWith(".webm"));
-  if (!recorded) {
-    return { error: "Motion recording failed: Playwright produced no video file." };
-  }
-  renameSync(join(videoTmp, recorded), videoPath);
 
   const ffmpegFn = opts.ffmpegFn ?? runFfmpeg;
   try {
