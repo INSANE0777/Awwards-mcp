@@ -427,7 +427,7 @@ console.log('image blocks:', blocks.filter(b => b.type === 'image').length);
 "
 ```
 
-Expected: `isError: false`; text starts `L.I.S.A.: 6 design element(s):`; **6 image blocks** (real posters fetched from the CDN). If awwwards blocks the detail fetch, wait 60s and retry once; blocked twice → report BLOCKED.
+Expected: `isError: false`; text starts `L.I.S.A. - Awwwards SOTD: 6 design element(s):`; **6 image blocks** (real posters fetched from the CDN). If awwwards blocks the detail fetch, wait 60s and retry once; blocked twice → report BLOCKED.
 
 - [ ] **Step 4: Commit**
 
