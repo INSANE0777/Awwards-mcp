@@ -34,7 +34,10 @@ const client = new AwwwardsClient();
 const handlers = createHandlers({
   client,
   cache,
-  captureFn: captureLiveSite,
+  // captureLiveSite's third positional is the injectable playwright loader,
+  // so the CaptureFn-shaped (url, dir, opts) call is adapted to land opts
+  // in the function's fourth (opts) position.
+  captureFn: (url, imagesDir, opts) => captureLiveSite(url, imagesDir, undefined, opts),
 });
 
 const server = new McpServer({ name: "awwwards-mcp", version: "1.0.0" });
@@ -52,6 +55,12 @@ server.tool(
     tags: z.array(z.string()).describe("Tag slugs, e.g. ['3d', 'portfolio']").optional(),
     technology: z.string().describe("Technology slug, e.g. 'webgl', 'gsap', 'astro'").optional(),
     award: z.enum(["sotd", "developer", "honorable"]).optional(),
+    sortBy: z
+      .enum(["score", "newest"])
+      .default("newest")
+      .describe(
+        "Sort results: by Awwwards jury score (details previously fetched) or newest first",
+      ),
     count: z.number().int().min(1).max(12).default(6),
     page: z.number().int().min(1).default(1),
   },
@@ -92,7 +101,13 @@ server.tool(
 server.tool(
   "capture_live_site",
   "Take a fresh full-page screenshot of a live website URL using a headless browser. Requires the optional playwright dependency.",
-  { url: z.string().url().describe("Absolute URL of the site to capture") },
+  {
+    url: z.string().url().describe("Absolute URL of the site to capture"),
+    waitStrategy: z
+      .enum(["load", "networkidle"])
+      .default("load")
+      .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet"),
+  },
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
 
@@ -102,6 +117,10 @@ server.tool(
   {
     url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
     maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
+    waitStrategy: z
+      .enum(["load", "networkidle"])
+      .default("load")
+      .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet"),
   },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
 );

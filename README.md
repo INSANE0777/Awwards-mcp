@@ -16,8 +16,9 @@ of any site: color palette, tech stack, design elements, award history.
 | `get_site_details` | Full design DNA for one site: palette, technologies, elements, awards, description. |
 | `get_site_elements` | Component-level visuals for one site: each element's poster image inline (3D models, video content, mobile layouts, microcopy…) + video URLs. |
 | `list_categories` | Every filter the agent can search by (200+ tags, 27 colors). |
-| `capture_live_site` | Optional: fresh full-page screenshot of any live URL (needs [playwright](https://playwright.dev)). |
-| `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Compare a reference site's structure against your build. (needs [playwright](https://playwright.dev)). |
+| `capture_live_site` | Optional: fresh full-page screenshot of any live URL. Waits for `load` + a settle window with a bounded pre-scroll, so heavy sites work (`waitStrategy: "networkidle"` available). (needs [playwright](https://playwright.dev)). |
+| `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Compare a reference site's structure against your build. Same heavy-site-friendly wait (`waitStrategy: "networkidle"` available). (needs [playwright](https://playwright.dev)). |
+| `record_site_motion` | Optional: short motion-through video of a live URL — preloader, scroll-triggered and hover/cursor animations. Returns an inline filmstrip JPEG plus the saved .webm path. (needs [playwright](https://playwright.dev) + ffmpeg-static). |
 
 ## Setup
 

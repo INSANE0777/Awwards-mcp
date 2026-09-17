@@ -87,6 +87,7 @@ Run this loop before building anything visual:
 | `list_categories` | none | JSON: every color hex and filter/tag slug, plus usage guidance | Cached 30 days. Call this whenever filter vocabulary is uncertain. |
 | `capture_live_site` | `url` (absolute URL) | Full-page PNG saved to disk + inline image | Requires the optional playwright dependency (`npm install -g playwright && npx playwright install chromium`). |
 | `analyze_page_structure` | `url` (absolute URL or `file://` path), `maxBands` (cap on returned bands, default 40) | JSON: `title`, `totalHeight`, and an ordered band map (`index`, `tag`, `label`, `background`, `offsetTop`, `height`, `textStart` (first ~60 chars of the band's text) per band) | Requires playwright. Run it on BOTH the reference and your build (step 8) and compare band maps — count, order, backgrounds, heights — never just total height. |
+| `record_site_motion` | `url` (absolute URL), `frames` (filmstrip tile count, 4–36, default 16 → a 4x4 grid) | Inline filmstrip JPEG of a motion-through pass (preloader dwell, slow scroll, hover/cursor interactions) + the saved .webm path as text | Requires playwright + ffmpeg-static. Runs a ~30 s scripted pass — heavier than a capture, use when motion matters (step on from static captures). |
 
 All image results arrive as MCP image content blocks — look at them, don't
 just read the text blocks.
@@ -121,7 +122,9 @@ exactly those. When the reference site has motion, record it: launch
 Playwright with `recordVideo`, wait out the preloader (~7 s), scroll slowly
 to the bottom in small steps so every scroll-triggered animation fires on
 camera, then extract a filmstrip of frames with ffmpeg (`npm i -D
-ffmpeg-static`, one frame every ~3 s) and Read the frames.
+ffmpeg-static`, one frame every ~3 s) and Read the frames — or call
+`record_site_motion` directly: the filmstrip comes back inline and the .webm
+path as text.
 
 **Filmstrip is the fallback, not the default.** First try Reading the
 video file directly — if your model supports video input, watching the

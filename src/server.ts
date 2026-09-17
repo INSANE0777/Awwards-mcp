@@ -7,7 +7,7 @@ import {
   elementUrl,
 } from "./awwwards.js";
 import type { Cache } from "./cache.js";
-import type { PageStructure } from "./structure.js";
+import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
 
@@ -43,11 +43,13 @@ export interface SearchArgs extends SearchFilters {
 export type CaptureFn = (
   url: string,
   imagesDir: string,
+  opts?: WaitOpts,
 ) => Promise<{ file: string; base64: string } | { error: string }>;
 
 export type AnalyzeFn = (
   url: string,
   maxBands?: number,
+  opts?: WaitOpts,
 ) => Promise<PageStructure | { error: string }>;
 
 export type MotionFn = (
@@ -121,8 +123,12 @@ export interface Handlers {
   get_site_details(args: { slug: string }): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
-  capture_live_site(args: { url: string }): Promise<ToolResponse>;
-  analyze_page_structure(args: { url: string; maxBands?: number }): Promise<ToolResponse>;
+  capture_live_site(args: { url: string; waitStrategy?: WaitStrategy }): Promise<ToolResponse>;
+  analyze_page_structure(args: {
+    url: string;
+    maxBands?: number;
+    waitStrategy?: WaitStrategy;
+  }): Promise<ToolResponse>;
   record_site_motion(args: { url: string; frames?: number }): Promise<ToolResponse>;
 }
 
@@ -477,10 +483,19 @@ export function createHandlers(deps: {
     }
   }
 
-  async function capture_live_site(args: { url: string }): Promise<ToolResponse> {
+  async function capture_live_site(args: {
+    url: string;
+    waitStrategy?: WaitStrategy;
+  }): Promise<ToolResponse> {
     try {
-      const capture = deps.captureFn ?? (await import("./capture.js")).captureLiveSite;
-      const result = await capture(args.url, cache.imagesDir);
+      // Lazy default: playwright is only touched when the tool actually runs.
+      // The default is wrapped because captureLiveSite's third positional is
+      // the injectable playwright loader — opts must land in fourth place.
+      const capture =
+        deps.captureFn ??
+        ((url: string, imagesDir: string, opts?: WaitOpts) =>
+          import("./capture.js").then((m) => m.captureLiveSite(url, imagesDir, undefined, opts)));
+      const result = await capture(args.url, cache.imagesDir, { waitStrategy: args.waitStrategy });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return {
         content: [
@@ -496,6 +511,7 @@ export function createHandlers(deps: {
   async function analyze_page_structure(args: {
     url: string;
     maxBands?: number;
+    waitStrategy?: WaitStrategy;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -503,9 +519,13 @@ export function createHandlers(deps: {
       // caller's cap (falling back to the analyzer's own default of 40).
       const analyze =
         deps.analyzeFn ??
-        ((url: string, maxBands?: number) =>
-          import("./structure.js").then((m) => m.analyzePageStructure(url, undefined, maxBands)));
-      const structure = await analyze(args.url, args.maxBands);
+        ((url: string, maxBands?: number, opts?: WaitOpts) =>
+          import("./structure.js").then((m) =>
+            m.analyzePageStructure(url, undefined, maxBands, opts),
+          ));
+      const structure = await analyze(args.url, args.maxBands, {
+        waitStrategy: args.waitStrategy,
+      });
       if ("error" in structure) return { content: [text(structure.error)], isError: true };
       return { content: [text(JSON.stringify(structure, null, 1))] };
     } catch (err) {
