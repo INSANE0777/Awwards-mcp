@@ -41,6 +41,25 @@ Optional full-page captures:
 npm install -g playwright && npx playwright install chromium
 ```
 
+## Indexing (recommended)
+
+`search_sites` works out of the box, but its depth is limited by polite live
+scraping (~31 sites per filter page). Build a local index once and searches
+draw from thousands of award-winning sites instantly:
+
+```bash
+npx awwwards-index
+```
+
+- Crawls all ~200 tag pages at 1 request/second (~4 minutes) into the local
+  SQLite cache at `~/.awwwards-mcp/`.
+- Resumable: interrupt it and re-run — completed pages are skipped.
+- The MCP server re-indexes automatically in the background whenever the
+  index is older than 7 days (never blocking your session).
+
+Site details (palettes, tech stacks) are still fetched on demand and cached
+for 7 days.
+
 ## How it works
 
 - Live, polite scraping of awwwards.com public pages (max 1 request/second,
