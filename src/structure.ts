@@ -170,6 +170,7 @@ export function collapseBands(cands: RawBand[], totalHeight: number, maxBands = 
 export async function analyzePageStructure(
   url: string,
   loader: () => Promise<any> = () => import("playwright" as string),
+  maxBands?: number,
 ): Promise<PageStructure | { error: string }> {
   let chromium: any;
   try {
@@ -191,7 +192,7 @@ export async function analyzePageStructure(
       url,
       title: raw.title,
       totalHeight: raw.totalHeight,
-      bands: collapseBands(raw.candidates, raw.totalHeight),
+      bands: collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40),
     };
   } finally {
     try {

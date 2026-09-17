@@ -434,4 +434,20 @@ describe("analyze_page_structure", () => {
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("install playwright");
   });
+
+  it("forwards maxBands to the analyzer", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<{ url: string; maxBands?: number }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (url: string, maxBands?: number) => {
+        seen.push({ url, maxBands });
+        return { url, title: "T", totalHeight: 100, bands: [] };
+      },
+    });
+    await h.analyze_page_structure({ url: "https://example.com", maxBands: 10 });
+    expect(seen[0]).toEqual({ url: "https://example.com", maxBands: 10 });
+  });
 });

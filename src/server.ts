@@ -42,7 +42,10 @@ export type CaptureFn = (
   imagesDir: string,
 ) => Promise<{ file: string; base64: string } | { error: string }>;
 
-export type AnalyzeFn = (url: string) => Promise<PageStructure | { error: string }>;
+export type AnalyzeFn = (
+  url: string,
+  maxBands?: number,
+) => Promise<PageStructure | { error: string }>;
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -416,12 +419,13 @@ export function createHandlers(deps: {
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
-      // maxBands is accepted for the tool schema; the analyzer applies its own
-      // default cap (40) unless a custom analyzeFn consumes it.
+      // maxBands from the tool schema is forwarded so the analyzer honors the
+      // caller's cap (falling back to the analyzer's own default of 40).
       const analyze =
         deps.analyzeFn ??
-        ((url: string) => import("./structure.js").then((m) => m.analyzePageStructure(url)));
-      const structure = await analyze(args.url);
+        ((url: string, maxBands?: number) =>
+          import("./structure.js").then((m) => m.analyzePageStructure(url, undefined, maxBands)));
+      const structure = await analyze(args.url, args.maxBands);
       if ("error" in structure) return { content: [text(structure.error)], isError: true };
       return { content: [text(JSON.stringify(structure, null, 1))] };
     } catch (err) {
