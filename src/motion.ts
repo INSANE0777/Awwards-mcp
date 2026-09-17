@@ -250,7 +250,11 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
       // pointer }` would nominate the whole page. The tour then spreads the
       // kept targets evenly down the page (top to bottom), not DOM order.
       const targets: Array<{ x: number; y: number; safeClick: boolean }> = await page.evaluate(
-        () => {
+        // MAX_HOVER_TARGETS is passed as an evaluate argument: page.evaluate
+        // serializes the callback into the browser context, where Node-side
+        // module constants are not in scope (a bare reference is a
+        // ReferenceError at record time).
+        (maxTargets: number) => {
           const g = globalThis as any;
           const doc = g.document;
           const isVisibleBox = (r: any): boolean => r.width >= 24 && r.height >= 16;
@@ -283,7 +287,7 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
           // Pass 2: cursor:pointer discovery — custom interactive surfaces
           // with unknown markup. Skip the pointer region's top (compare
           // against the parent). Bounded by ITERATIONS only (the 3k-element
-          // walk below); no pool cap — dedupe plus the 16-target spread at
+          // walk below); no pool cap — dedupe plus the 12-target spread at
           // the end bound the output anyway, and an out.length cap here would
           // silently disable pointer discovery on link-dense pages.
           let visited = 0;
@@ -295,13 +299,14 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
             push(el);
           }
           out.sort((a: any, b: any) => a.y - b.y);
-          const keep = Math.min(MAX_HOVER_TARGETS, out.length);
+          const keep = Math.min(maxTargets, out.length);
           const spread: any[] = [];
           for (let i = 0; i < keep; i++) {
             spread.push(out[Math.round((i * (out.length - 1)) / Math.max(1, keep - 1))]);
           }
           return spread;
         },
+        MAX_HOVER_TARGETS,
       );
 
       let clicked = 0;

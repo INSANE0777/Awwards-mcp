@@ -34,11 +34,15 @@ const hashOf = (url: string) => createHash("sha1").update(url).digest("hex").sli
 // hit-box probes, cursor moves) are recorded without dispatching.
 // flushVideo, when given, runs on context.close() — the point where a real
 // context flushes its .webm into the (per-call) recordVideo dir.
+// capturedEvals, when given, collects the serialized discovery callback and
+// its forwarded argument ({ fn, arg }) so a test can execute it against a
+// DOM stub (browser scripts must not close over Node-scope bindings).
 function fakeChromium(
   calls: string[],
   mouse: { down: number; up: number },
   contextOpts: any[],
   flushVideo?: (recordVideoDir: string) => void,
+  capturedEvals?: Array<{ fn: any; arg?: any }>,
 ) {
   const page = {
     goto: async (_u: string, o: any) => {
@@ -53,6 +57,7 @@ function fakeChromium(
       // they are matched by source before the arg-carrying fallback.
       if (src.includes("querySelectorAll")) {
         calls.push("eval:discover");
+        capturedEvals?.push({ fn, arg });
         return [
           { x: 60, y: 300, safeClick: true },
           { x: 400, y: 700, safeClick: false },
@@ -169,6 +174,61 @@ describe("recordSiteMotion", () => {
     expect(mouse.up).toBe(1);
     expect(calls[calls.length - 2]).toBe("wait:1500"); // ends back at the top
     expect(calls[calls.length - 1]).toBe("context:close"); // flush point
+  });
+
+  it("discovery script is page-safe: hover cap arrives as an evaluate argument, not a Node-scope free identifier", async () => {
+    // Regression: the discovery callback used to reference the module
+    // constant MAX_HOVER_TARGETS directly — page.evaluate serializes the
+    // callback into the browser, where that binding does not exist, so every
+    // real recording died with "ReferenceError: MAX_HOVER_TARGETS is not
+    // defined". The cap must be passed as an evaluate argument instead.
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const capturedEvals: Array<{ fn: any; arg?: any }> = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, [], (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }, capturedEvals),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+    });
+    expect("error" in res).toBe(false);
+    expect(capturedEvals.length).toBe(1);
+    // The hover-target cap is forwarded as the evaluate argument (the
+    // documented MAX_HOVER_TARGETS of 12) — NOT referenced as a free identifier.
+    const { fn, arg } = capturedEvals[0];
+    expect(arg).toBe(12);
+    // Execute the serialized discovery callback against a minimal DOM stub —
+    // with no Node-scope bindings in reach, exactly as in the browser.
+    const g = globalThis as any;
+    const link = {
+      tagName: "A",
+      parentElement: null,
+      getBoundingClientRect: () => ({ top: 100, left: 20, width: 80, height: 32 }),
+      getAttribute: (name: string) => (name === "href" ? "#section" : null),
+    };
+    const saved = {
+      scrollY: g.scrollY,
+      getComputedStyle: g.getComputedStyle,
+      document: g.document,
+    };
+    g.scrollY = 0;
+    g.getComputedStyle = () => ({ cursor: "pointer" });
+    g.document = { body: { scrollHeight: 1200 }, querySelectorAll: () => [link] };
+    try {
+      const spread = await fn(arg);
+      expect(spread).toEqual([{ x: 60, y: 116, safeClick: true }]);
+    } finally {
+      g.scrollY = saved.scrollY;
+      g.getComputedStyle = saved.getComputedStyle;
+      g.document = saved.document;
+    }
   });
 
   it("returns the ffmpeg hint without launching a browser when ffmpeg is missing", async () => {
