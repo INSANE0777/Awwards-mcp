@@ -31,15 +31,24 @@ Run this loop before building anything visual:
 3. **Search.** Call `search_sites` with 1–3 filters (e.g.
    `{ color: "#404040", tags: ["3d", "portfolio"] }`). Judge the results from
    the inline screenshots, not just titles. Shortlist 2–3 candidates.
-4. **Get the design DNA.** Call `get_site_details` on the top pick for its
+4. **Live reference URL named? Capture it full-page first.** If the user
+   points at a specific live site (e.g. "recreate cerebrium.ai"), call
+   `capture_live_site` on that URL before anything else and design from the
+   full-page PNG — every section, top to bottom. Cached Awwwards screenshots
+   are hero-only crops (~880×660) and hide everything below the fold: the
+   sections that make a site's structure distinctive (pricing, feature
+   layouts, contrast breaks, footer) were never visible in them.
+5. **Get the design DNA.** Call `get_site_details` on the top pick for its
    palette, technologies, design elements, awards, and description. If it
    reports a layout-drift error, fall back to judging the shortlisted
-   screenshots and `get_site_elements` (which uses a different parser) instead.
-5. **Get component-level visuals (when building).** Call `get_site_elements`
+   screenshots, `get_site_elements` (which uses a different parser), or a
+   `capture_live_site` of the site's URL for a first-hand full-page view.
+6. **Get component-level visuals (when building).** Call `get_site_elements`
    on shortlisted sites to see individual design elements — 3D models, video
    content, mobile layouts, microcopy — with poster images inline and video
-   URLs.
-6. **State the design direction before writing code.** In prose: palette
+   URLs. Treat element posters as texture, not structure: they are video
+   frames (often mid-animation or near-black), not full-section layouts.
+7. **State the design direction before writing code.** In prose: palette
    (hexes from the references), type mood, layout patterns, and tech choices,
    each traceable to a reference. Then build.
 
@@ -51,6 +60,9 @@ Run this loop before building anything visual:
   worthless if nothing is derived from them.
 - **Dumping raw tool output at the user** — curate: show the shortlist, the
   chosen direction, and why.
+- **Designing from a thumbnail or element poster** — thumbnails are hero-only
+  crops and posters are video frames; neither shows the page's real
+  structure. When the reference URL is known, capture it full-page (step 4).
 
 ## Tool reference
 
@@ -83,5 +95,25 @@ npm run index                              # from a repo checkout
   index is stale — you rarely need to run this by hand.
 
 **Live captures.** `capture_live_site` needs playwright installed once (see
-table above). Use it when the user wants a screenshot of a URL that is not an
-Awwwards site, or a fresher view than the cached thumbnails.
+table above). Two uses: (1) the user wants a screenshot of a URL that is not
+an Awwwards site, or a fresher view than the cached thumbnails; and (2) —
+the more important one — the user names a live site as the design reference
+for a build: capture it full-page first and derive the structure from that
+image (see step 4 of the loop).
+
+**Motion capture.** Static images can't show preloaders, scroll-driven
+animation, or transitions — and most award-winning sites are built around
+exactly those. When the reference site has motion, record it: launch
+Playwright with `recordVideo`, wait out the preloader (~7 s), scroll slowly
+to the bottom in small steps so every scroll-triggered animation fires on
+camera, then extract a filmstrip of frames with ffmpeg (`npm i -D
+ffmpeg-static`, one frame every ~3 s) and Read the frames.
+
+**Filmstrip is the fallback, not the default.** First try Reading the
+video file directly — if your model supports video input, watching the
+scroll-through gives you timing, easing, and transitions the frames can't.
+If the Read comes back with media omitted / "model does not support video
+input", extract the filmstrip and Read the frames instead. A ready-made
+recorder ships in this repo at
+`scripts/record-scrollthrough.mjs` (run it from the repo root; playwright
+and ffmpeg-static are devDependencies).
