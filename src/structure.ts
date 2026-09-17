@@ -42,6 +42,10 @@ export interface ScanResult {
 // self-contained function returning { title, totalHeight, candidates }
 // (no closures over module scope). The Node tsconfig has no DOM lib, so
 // browser globals are reached through globalThis.
+//
+// The backgroundColor alpha parsing in the visit loop is mirrored in
+// test/structure.test.ts ("SCAN_SNIPPET alpha parsing handles space syntax
+// and percentage alphas") and must stay in sync.
 export const SCAN_SNIPPET = (): ScanResult => {
   const g = globalThis as any;
   const doc = g.document;
@@ -65,8 +69,17 @@ export const SCAN_SNIPPET = (): ScanResult => {
     const r = el.getBoundingClientRect();
     if (el !== doc.body && r.width >= 0.6 * bodyW && r.height >= 120) {
       const s = g.getComputedStyle(el);
-      const m = /rgba?\(([^)]+)\)/.exec(s.backgroundColor);
-      const alpha = m ? (m[1].split(",").length === 4 ? parseFloat(m[1].split(",")[3]) : 1) : 0;
+      const color = s.backgroundColor;
+      // Alpha parse tolerant of legacy comma syntax and CSS Color 4
+      // space syntax: rgb(r g b / a), rgb(r, g, b, a), and percentage alphas.
+      const m = /rgba?\(([^)]+)\)/.exec(color);
+      let alpha = 0;
+      if (m) {
+        const parts = m[1].replace(/\//g, " ").trim().split(/[\s,]+/).filter(Boolean);
+        const aRaw = parts.length >= 4 ? parts[3] : "1";
+        alpha = aRaw.endsWith("%") ? parseFloat(aRaw) / 100 : parseFloat(aRaw);
+        if (Number.isNaN(alpha)) alpha = 0;
+      }
       if (alpha > 0) {
         candidates.push({
           tag: el.tagName.toLowerCase(),
