@@ -79,17 +79,19 @@ describe("search_sites", () => {
 
   it("applies the free-text query client-side", async () => {
     const cache = new Cache(tmpDir());
-    // 8 matching rows ≥ count → cache-serve path; the "boring" row must be
-    // filtered out client-side.
+    // 7 matching rows ≥ count → cache-serve path; the "Boring Corp" row
+    // (upserted over s2) carries a NEWER createdAt, so without the query
+    // check it would sort first into the served window — its absence proves
+    // the query filter excluded it, not the count-6 pagination slice.
     cache.upsertSites([
       ...Array.from({ length: 8 }, (_, i) => site({ slug: `s${i + 1}` })),
-      site({ slug: "boring", title: "Boring Corp", tags: [] }),
+      site({ slug: "s2", title: "Boring Corp", tags: [], createdAt: 1789516800 + 60 }),
     ]);
     const { client } = fakeClient();
     const h = createHandlers({ client, cache });
     const res = await h.search_sites({ query: "cool", count: 6 });
     expect((res.content[0] as any).text).toContain("s1");
-    expect((res.content[0] as any).text).not.toContain("boring");
+    expect((res.content[0] as any).text).not.toContain("s2");
   });
 
   it("paginates with page and count", async () => {
@@ -163,6 +165,24 @@ describe("search_sites", () => {
     const text = (res.content[0] as any).text;
     expect(text).not.toContain("plain");
     expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
+  });
+
+  it("client-checks the award filter when serving from cache", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      ...Array.from({ length: 8 }, (_, i) =>
+        site({ slug: `w${i + 1}`, awards: ["Site of the Day"], createdAt: 1789516800 + i })),
+      site({ slug: "plain", awards: [], createdAt: 1789516800 + 100 }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ award: "sotd", count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("8 site(s) matched");
+    expect(text).not.toContain("plain");
+    const pageCalls = fetchFn.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes("/websites/") || String(c[0]).includes("/sites/"));
+    expect(pageCalls.length).toBe(0);
   });
 });
 
