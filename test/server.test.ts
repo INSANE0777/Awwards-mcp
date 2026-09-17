@@ -79,15 +79,17 @@ describe("search_sites", () => {
 
   it("applies the free-text query client-side", async () => {
     const cache = new Cache(tmpDir());
+    // 8 matching rows ≥ count → cache-serve path; the "boring" row must be
+    // filtered out client-side.
     cache.upsertSites([
-      site(),
-      site({ slug: "s2", title: "Boring Corp", tags: [] }),
+      ...Array.from({ length: 8 }, (_, i) => site({ slug: `s${i + 1}` })),
+      site({ slug: "boring", title: "Boring Corp", tags: [] }),
     ]);
     const { client } = fakeClient();
     const h = createHandlers({ client, cache });
     const res = await h.search_sites({ query: "cool", count: 6 });
     expect((res.content[0] as any).text).toContain("s1");
-    expect((res.content[0] as any).text).not.toContain("s2");
+    expect((res.content[0] as any).text).not.toContain("boring");
   });
 
   it("paginates with page and count", async () => {
@@ -119,7 +121,32 @@ describe("search_sites", () => {
     expect(res.isError).toBeUndefined();
   });
 
-  it("client-side applies the award filter when color wins the URL", async () => {
+  it("client-checks the technology filter when serving from cache", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 8 }, (_, i) => site({ slug: `t${i + 1}`, tags: ["3D"] })));
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ technology: "webgl", count: 6 });
+    const text = (res.content[0] as any).text;
+    // v1 bug: 8 rows ≥ count → served unfiltered with zero fetches. Fixed: the
+    // zero cache matches force a scrape of /websites/webgl/, and results come
+    // from that page.
+    expect(String(fetchFn.mock.calls[0][0])).toContain("/websites/webgl/");
+    expect(text).not.toContain("8 site(s) matched");
+    expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
+  });
+
+  it("never serves a color search from cache", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 8 }, (_, i) => site({ slug: `c${i + 1}` })));
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ color: "#404040", count: 6 });
+    expect(String(fetchFn.mock.calls[0][0])).toContain("%23404040");
+    expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
+  });
+
+  it("applies the award filter client-side on freshly scraped rows", async () => {
     const cache = new Cache(tmpDir());
     cache.upsertSites([
       ...Array.from({ length: 8 }, (_, i) =>
@@ -128,13 +155,14 @@ describe("search_sites", () => {
     ]);
     const { client, fetchFn } = fakeClient();
     const h = createHandlers({ client, cache });
+    // Color can't be verified client-side, so the search scrapes the color
+    // page (color wins the URL); award is NOT the URL source, so it is still
+    // client-checked against the freshly parsed rows.
     const res = await h.search_sites({ color: "#404040", award: "sotd", count: 6 });
+    expect(String(fetchFn.mock.calls[0][0])).toContain("%23404040");
     const text = (res.content[0] as any).text;
-    expect(text).toContain("a1");
     expect(text).not.toContain("plain");
-    const pageCalls = fetchFn.mock.calls.filter((c: any[]) =>
-      String(c[0]).includes("/websites/") || String(c[0]).includes("/sites/"));
-    expect(pageCalls.length).toBe(0);
+    expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
   });
 });
 

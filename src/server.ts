@@ -71,20 +71,29 @@ export function createHandlers(deps: {
   const urlSource = (f: SearchArgs): "color" | "award" | "technology" | "tag" | "none" =>
     f.color ? "color" : f.award ? "award" : f.technology ? "technology" : f.tags?.length ? "tag" : "none";
 
-  function matchesFilters(s: SiteSummary, f: SearchArgs): boolean {
+  // Two modes:
+  // - honorUrlSource=true: rows freshly scraped from the filter page — the URL
+  //   really did apply the highest-priority filter (color > award > technology
+  //   > first tag), so skip re-checking that one and verify the rest.
+  // - honorUrlSource=false: cache/index rows — nothing guarantees the URL
+  //   filter was applied, so check every client-checkable filter. Color is
+  //   never client-checkable (site rows carry no colors); it is handled by
+  //   never serving color searches from cache (see search_sites).
+  function matchesFilters(s: SiteSummary, f: SearchArgs, honorUrlSource: boolean): boolean {
     const source = urlSource(f);
     if (f.tags?.length) {
-      const tagsToCheck = source === "tag" ? f.tags.slice(1) : f.tags;
+      const tagsToCheck =
+        honorUrlSource && source === "tag" ? f.tags.slice(1) : f.tags;
       for (const t of tagsToCheck) {
         const slug = t.toLowerCase();
         if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
       }
     }
-    if (f.technology && source !== "technology") {
+    if (f.technology && !(honorUrlSource && source === "technology")) {
       const slug = f.technology.toLowerCase();
       if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
     }
-    if (f.award && source !== "award") {
+    if (f.award && !(honorUrlSource && source === "award")) {
       if (!s.awards.includes(AWARD_FILTER_LABELS[f.award])) return false;
     }
     if (f.query) {
@@ -114,7 +123,12 @@ export function createHandlers(deps: {
     const count = Math.min(Math.max(args.count ?? 6, 1), 12);
     const page = Math.max(args.page ?? 1, 1);
     try {
-      let sites = cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args));
+      // Color can't be verified client-side (site rows carry no colors), so a
+      // color search always scrapes its filter page; everything else is
+      // client-checkable against the index.
+      let sites = args.color
+        ? []
+        : cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args, false));
       if (sites.length < count * page) {
         const html = await client.getHtml(buildFilterUrl(args));
         const parsed = parseListing(html);
@@ -130,7 +144,11 @@ export function createHandlers(deps: {
           };
         }
         cache.upsertSites(parsed);
-        sites = cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args));
+        // Freshly parsed rows carry the URL filter by construction
+        // (honorUrlSource: true); serve only those, newest-first like getSites.
+        sites = parsed
+          .filter((s) => matchesFilters(s, args, true))
+          .sort((a, b) => b.createdAt - a.createdAt);
       }
 
       const slice = sites.slice((page - 1) * count, page * count);
@@ -159,7 +177,7 @@ export function createHandlers(deps: {
       // itself may be the failure source, so this lookup is guarded too.
       let stale: SiteSummary[] = [];
       try {
-        stale = cache.getSites(Infinity).filter((s) => matchesFilters(s, args));
+        stale = cache.getSites(Infinity).filter((s) => matchesFilters(s, args, false));
       } catch {
         stale = [];
       }
