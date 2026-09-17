@@ -77,6 +77,9 @@ describe("analyzePageStructure", () => {
       launch: async () => ({
         newPage: async () => ({
           goto: async () => {},
+          // settle wait from the load strategy; the fake's evaluate result is
+          // returned for both the pre-scroll and the scan call
+          waitForTimeout: async () => {},
           evaluate: async () => ({
             title: "Test Page",
             totalHeight: 2000,
@@ -105,6 +108,35 @@ describe("analyzePageStructure", () => {
     });
     expect("error" in res).toBe(true);
     if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
+  });
+
+  it("defaults to the load strategy, settles, and scrolls before the scan", async () => {
+    const calls: string[] = [];
+    const fake = {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async (_u: string, o: any) => { calls.push("goto:" + o.waitUntil); },
+          waitForTimeout: async (ms: number) => { calls.push("wait:" + ms); },
+          evaluate: async () => {
+            calls.push("eval");
+            return {
+              title: "Test Page",
+              totalHeight: 2000,
+              candidates: [
+                band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 2000 }),
+              ],
+            };
+          },
+        }),
+        close: async () => {},
+      }),
+    };
+    const res = await analyzePageStructure("https://example.com", async () => ({ chromium: fake }));
+    expect("error" in res).toBe(false);
+    expect(calls[0]).toBe("goto:load"); // default wait strategy is "load"
+    expect(calls.indexOf("wait:3000")).toBe(1); // settle right after load
+    expect(calls.filter((c) => c === "eval").length).toBe(2); // pre-scroll + scan
+    expect(calls[calls.length - 1]).toBe("eval"); // scan runs last, after the scroll
   });
 });
 

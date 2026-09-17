@@ -173,10 +173,34 @@ export function collapseBands(cands: RawBand[], totalHeight: number, maxBands = 
   }));
 }
 
+/** Wait strategy for page.goto: "load" (default, plus a fixed settle) or "networkidle". */
+export type WaitStrategy = "load" | "networkidle";
+
+export interface WaitOpts {
+  waitStrategy?: WaitStrategy;
+}
+
+// Scroll through the page so lazy-rendered sections have layout before a
+// screenshot or band scan (spec requirement; 450px steps, brief settle, back
+// to top). Shared by captureLiveSite and analyzePageStructure — this is the
+// ONE implementation; capture.ts imports it.
+export async function preScroll(page: any): Promise<void> {
+  await page.evaluate(async () => {
+    const step = 450;
+    for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+      window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    window.scrollTo(0, 0);
+    await new Promise((r) => setTimeout(r, 150));
+  });
+}
+
 export async function analyzePageStructure(
   url: string,
   loader: () => Promise<any> = () => import("playwright" as string),
   maxBands?: number,
+  opts?: WaitOpts,
 ): Promise<PageStructure | { error: string }> {
   let chromium: any;
   try {
@@ -191,19 +215,13 @@ export async function analyzePageStructure(
     return { error: CAPTURE_INSTALL_HINT };
   }
   try {
+    const waitStrategy: WaitStrategy = opts?.waitStrategy ?? "load";
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
-    // Scroll through the page so lazy-rendered sections have layout before
-    // the band scan (spec requirement; 450px steps, brief settle, back to top).
-    await page.evaluate(async () => {
-      const step = 450;
-      for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
-        window.scrollTo(0, y);
-        await new Promise((r) => setTimeout(r, 40));
-      }
-      window.scrollTo(0, 0);
-      await new Promise((r) => setTimeout(r, 150));
-    });
+    await page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 });
+    // "load" can fire before late XHRs settle, so give the page a fixed
+    // settle window; networkidle already means the network went quiet.
+    if (waitStrategy === "load") await page.waitForTimeout(3000);
+    await preScroll(page);
     const raw = (await page.evaluate(SCAN_SNIPPET)) as ScanResult;
     return {
       url,
