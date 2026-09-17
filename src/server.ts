@@ -50,6 +50,11 @@ export type AnalyzeFn = (
   maxBands?: number,
 ) => Promise<PageStructure | { error: string }>;
 
+export type MotionFn = (
+  url: string,
+  opts: { cacheImagesDir: string; frames?: number },
+) => Promise<{ file: string; base64: string; frames: number } | { error: string }>;
+
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -118,6 +123,7 @@ export interface Handlers {
   list_categories(): Promise<ToolResponse>;
   capture_live_site(args: { url: string }): Promise<ToolResponse>;
   analyze_page_structure(args: { url: string; maxBands?: number }): Promise<ToolResponse>;
+  record_site_motion(args: { url: string; frames?: number }): Promise<ToolResponse>;
 }
 
 export function createHandlers(deps: {
@@ -125,6 +131,7 @@ export function createHandlers(deps: {
   cache: Cache;
   captureFn?: CaptureFn;
   analyzeFn?: AnalyzeFn;
+  motionFn?: MotionFn;
 }): Handlers {
   const { client, cache } = deps;
 
@@ -506,6 +513,29 @@ export function createHandlers(deps: {
     }
   }
 
+  async function record_site_motion(args: { url: string; frames?: number }): Promise<ToolResponse> {
+    try {
+      // Lazy default: playwright/ffmpeg are only touched when the tool runs.
+      const motion =
+        deps.motionFn ??
+        ((url: string, motionOpts: { cacheImagesDir: string; frames?: number }) =>
+          import("./motion.js").then((m) => m.recordSiteMotion(url, motionOpts)));
+      const result = await motion(args.url, {
+        cacheImagesDir: cache.imagesDir,
+        frames: args.frames,
+      });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return {
+        content: [
+          text(`Motion recording saved to ${result.file}`),
+          { type: "image", data: result.base64, mimeType: "image/jpeg" },
+        ],
+      };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   return {
     search_sites,
     get_site_details,
@@ -513,5 +543,6 @@ export function createHandlers(deps: {
     list_categories,
     capture_live_site,
     analyze_page_structure,
+    record_site_motion,
   };
 }

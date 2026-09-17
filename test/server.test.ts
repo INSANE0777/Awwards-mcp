@@ -546,3 +546,50 @@ describe("analyze_page_structure", () => {
     expect(seen[0]).toEqual({ url: "https://example.com", maxBands: 10 });
   });
 });
+
+describe("record_site_motion", () => {
+  it("returns the filmstrip inline and forwards url + frames to the motion fn", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<{ url: string; opts: { cacheImagesDir: string; frames?: number } }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      motionFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return {
+          file: "/cache/motion-abc1234567.webm",
+          base64: Buffer.from("strip-jpeg").toString("base64"),
+          frames: 16,
+        };
+      },
+    });
+    const res = await h.record_site_motion({ url: "https://example.com", frames: 12 });
+    expect(res.isError).toBeUndefined();
+    expect((res.content[0] as any).text).toBe(
+      "Motion recording saved to /cache/motion-abc1234567.webm",
+    );
+    expect(res.content[1]).toEqual({
+      type: "image",
+      data: Buffer.from("strip-jpeg").toString("base64"),
+      mimeType: "image/jpeg",
+    });
+    expect(seen[0]).toEqual({
+      url: "https://example.com",
+      opts: { cacheImagesDir: cache.imagesDir, frames: 12 },
+    });
+  });
+
+  it("surfaces the install hint as isError when the motion fn reports failure", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({
+      client,
+      cache,
+      motionFn: async () => ({ error: "Install it with:  npm install -D ffmpeg-static" }),
+    });
+    const res = await h.record_site_motion({ url: "https://example.com" });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("ffmpeg-static");
+  });
+});

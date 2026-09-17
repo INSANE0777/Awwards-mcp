@@ -106,6 +106,22 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
 );
 
+server.tool(
+  "record_site_motion",
+  "Record a short motion-through video of a live website — preloader, scroll-triggered and hover/cursor animations — and return an inline filmstrip JPEG plus the .webm path. Requires the optional playwright and ffmpeg-static dependencies.",
+  {
+    url: z.string().url().describe("Absolute URL of the site to record"),
+    frames: z
+      .number()
+      .int()
+      .min(4)
+      .max(36)
+      .default(16)
+      .describe("Filmstrip tile count (default 16 → a 4x4 grid)"),
+  },
+  (args) => asMcpResult(handlers.record_site_motion(args)),
+);
+
 // Auto-refresh: if the index is stale (or absent) and no crawl is running,
 // re-index in the background. Serving is never blocked; errors are stderr-only.
 if (shouldAutoIndex(cache)) {
