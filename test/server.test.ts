@@ -230,6 +230,15 @@ describe("get_site_details", () => {
     expect(text).toContain("WebGL");
     expect(text).toContain("lisa.locomotive.ca");
   });
+
+  it("includes the jury score line when present", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_details({ slug: "l-i-s-a" });
+    // the l-i-s-a fixture (detail.html) has a c-heading-score block
+    expect((res.content[0] as any).text).toMatch(/Jury score: \d\.\d{1,2}\/10/);
+  });
 });
 
 describe("list_categories", () => {

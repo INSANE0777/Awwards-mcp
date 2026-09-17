@@ -18,6 +18,7 @@ export interface SiteDetails {
   technologies: string[];
   elements: string[];
   awards: { title: string; date: string }[];
+  score: number | null; // displayed overall jury score, null when absent
   ogImage: string | null;
   liveUrl: string | null;
 }

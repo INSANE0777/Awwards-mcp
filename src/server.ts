@@ -341,6 +341,7 @@ export function createHandlers(deps: {
             d.awards.length
               ? `Awards: ${d.awards.map((a) => `${a.title} (${a.date})`).join(", ")}`
               : null,
+            d.score != null ? `Jury score: ${d.score.toFixed(2)}/10` : null,
             d.palette.length ? `Color palette: ${d.palette.join(", ")}` : null,
             d.technologies.length ? `Technologies & tools: ${d.technologies.join(", ")}` : null,
             d.elements.length ? `Design elements: ${d.elements.join(", ")}` : null,

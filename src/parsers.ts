@@ -128,7 +128,15 @@ export function parseDetail(html: string, slug: string): SiteDetails {
     awards,
     ogImage: ogMatch ? decodeEntities(ogMatch[1]) : null,
     liveUrl: liveUrl ? decodeEntities(liveUrl) : null,
+    score: parseScore(html),
   };
+}
+
+// Displayed overall jury score, e.g. c-heading-score__note">→ 7.37<sup>/ 10</sup>.
+// Non-award pages have no such heading → null.
+export function parseScore(html: string): number | null {
+  const m = /c-heading-score__note[^>]*>[^<]*?([\d]+(?:\.\d{1,2})?)/.exec(html);
+  return m ? parseFloat(m[1]) : null;
 }
 
 const NON_FILTERS = new Set(["sites_of_the_day"]);

@@ -7,6 +7,7 @@ import {
   parseDetail,
   parseCategories,
   parseElements,
+  parseScore,
 } from "../src/parsers.js";
 
 const FIXTURES = join(__dirname, "fixtures");
@@ -167,5 +168,15 @@ describe("parseDetail against fresh live markup (detail-lxl fixture)", () => {
     expect(els).not.toBeNull();
     expect(els!.length).toBeGreaterThanOrEqual(3);
     expect(els!.every((e) => e.mediaPath.startsWith("element/"))).toBe(true);
+  });
+});
+
+describe("parseScore", () => {
+  it("extracts the displayed overall score from the score heading", () => {
+    const d = readFixture("detail-lxl.html");
+    expect(parseScore(d)).toBeCloseTo(7.37, 2);
+  });
+  it("returns null when no score heading exists", () => {
+    expect(parseScore("<html><body>no score</body></html>")).toBeNull();
   });
 });
