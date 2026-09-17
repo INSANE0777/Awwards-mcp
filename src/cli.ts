@@ -9,6 +9,7 @@ import { AwwwardsClient } from "./awwwards.js";
 import { Cache } from "./cache.js";
 import { createHandlers, type ToolResponse } from "./server.js";
 import { captureLiveSite } from "./capture.js";
+import { runIndexer, shouldAutoIndex } from "./indexer.js";
 
 // The handlers return ToolResponse, which is structurally identical to the
 // SDK's CallToolResult at runtime ({ content, isError? }). CallToolResult's
@@ -29,8 +30,9 @@ try {
   );
   process.exit(1);
 }
+const client = new AwwwardsClient();
 const handlers = createHandlers({
-  client: new AwwwardsClient(),
+  client,
   cache,
   captureFn: captureLiveSite,
 });
@@ -81,5 +83,15 @@ server.tool(
   { url: z.string().url().describe("Absolute URL of the site to capture") },
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
+
+// Auto-refresh: if the index is stale (or absent) and no crawl is running,
+// re-index in the background. Serving is never blocked; errors are stderr-only.
+if (shouldAutoIndex(cache)) {
+  void runIndexer({ client, cache, log: (m) => console.error(m) }).catch((err) => {
+    console.error(
+      `awwwards-mcp: background index failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
+}
 
 await server.connect(new StdioServerTransport());
