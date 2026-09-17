@@ -1,4 +1,4 @@
-import type { Categories, SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
 
 const ENTITIES: Record<string, string> = {
   "&quot;": '"',
@@ -153,4 +153,36 @@ export function parseCategories(html: string): Categories {
     .filter((s) => !NON_FILTERS.has(s))
     .sort();
   return { colors, filters };
+}
+
+// Elements section highlights: null means the page has no Elements section
+// (a legitimate empty); an empty array means the section exists but no blobs
+// parsed — the markup changed and the parser needs updating.
+export function parseElements(html: string): ElementMedia[] | null {
+  const start = html.indexOf(">Elements</h2>");
+  if (start < 0) return null;
+  const end = html.indexOf(">Color Palette</h2>", start);
+  const section = end > start ? html.slice(start, end) : html.slice(start);
+  const elements: ElementMedia[] = [];
+  const parts = section.split('data-collectable-model-value="');
+  for (const part of parts.slice(1)) {
+    const stop = part.indexOf('">');
+    if (stop < 0) continue;
+    let blob: any;
+    try {
+      blob = JSON.parse(decodeEntities(part.slice(0, stop)));
+    } catch {
+      continue;
+    }
+    const mediaPath = blob?.collectableImage;
+    // Only element media (videos/posters live under element/); other blobs
+    // (site card, collections) must not leak in if the end bound is missing.
+    if (typeof mediaPath === "string" && mediaPath.startsWith("element/")) {
+      elements.push({
+        title: decodeEntities(String(blob.collectableTitle ?? "")),
+        mediaPath,
+      });
+    }
+  }
+  return elements;
 }

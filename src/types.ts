@@ -26,3 +26,8 @@ export interface Categories {
   colors: string[]; // hex codes, uppercase
   filters: string[]; // tag/technology slugs, e.g. "3d", "webgl"
 }
+
+export interface ElementMedia {
+  title: string;
+  mediaPath: string; // e.g. "element/2026/08/<hash>.mp4" or ".jpg"
+}

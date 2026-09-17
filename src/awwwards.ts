@@ -38,6 +38,18 @@ export function thumbnailUrl(thumbPath: string, size: 440 | 880 = 880): string {
   return `${ASSETS_URL}/awards/media/cache/thumb_${dim}/${thumbPath}`;
 }
 
+export function elementUrl(mediaPath: string): string {
+  return `${ASSETS_URL}/awards/${mediaPath}`;
+}
+
+// Video elements ship a poster at the same path with .mp4 → _static.jpeg
+// (live-verified on the CDN); image elements are used as-is.
+export function elementPosterPath(mediaPath: string): string {
+  return mediaPath.endsWith(".mp4")
+    ? mediaPath.replace(/\.mp4$/, "_static.jpeg")
+    : mediaPath;
+}
+
 export class BlockedError extends Error {
   constructor(
     url: string,
@@ -105,6 +117,15 @@ export class AwwwardsClient {
       headers: { "User-Agent": USER_AGENT },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching thumbnail ${thumbPath}`);
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  // Asset fetch from the CDN (element posters etc.) — not rate-limited.
+  async getAsset(assetPath: string): Promise<Buffer> {
+    const res = await this.fetchFn(elementUrl(assetPath), {
+      headers: { "User-Agent": USER_AGENT },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching asset ${assetPath}`);
     return Buffer.from(await res.arrayBuffer());
   }
 }

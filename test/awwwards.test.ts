@@ -6,6 +6,8 @@ import {
   BlockedError,
   RateLimiter,
   buildFilterUrl,
+  elementPosterPath,
+  elementUrl,
   thumbnailUrl,
 } from "../src/awwwards.js";
 
@@ -58,6 +60,19 @@ describe("thumbnailUrl", () => {
     const p = "submissions/2026/08/abc.jpg";
     expect(thumbnailUrl(p, 880)).toContain("/thumb_880_660/" + p);
     expect(thumbnailUrl(p, 440)).toContain("/thumb_440_330/" + p);
+  });
+});
+
+describe("elementUrl / elementPosterPath", () => {
+  it("builds CDN urls for element media", () => {
+    expect(elementUrl("element/2026/08/x.mp4")).toBe(
+      "https://assets.awwwards.com/awards/element/2026/08/x.mp4",
+    );
+  });
+
+  it("derives video posters and passes images through unchanged", () => {
+    expect(elementPosterPath("element/2026/08/x.mp4")).toBe("element/2026/08/x_static.jpeg");
+    expect(elementPosterPath("element/2026/08/y.jpg")).toBe("element/2026/08/y.jpg");
   });
 });
 

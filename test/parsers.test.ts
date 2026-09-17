@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseListing, decodeEntities, parseDetail, parseCategories } from "../src/parsers.js";
+import {
+  parseListing,
+  decodeEntities,
+  parseDetail,
+  parseCategories,
+  parseElements,
+} from "../src/parsers.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 
@@ -108,5 +114,29 @@ describe("parseCategories", () => {
   it("excludes award collections from the filter list", () => {
     const cats = parseCategories(listing());
     expect(cats.filters).not.toContain("sites_of_the_day");
+  });
+});
+
+describe("parseElements", () => {
+  it("parses the 6 element blobs from the detail fixture", () => {
+    const els = parseElements(detail())!;
+    expect(els.length).toBe(6);
+    expect(els[0]).toEqual({
+      title: "Virtual assistant",
+      mediaPath: "element/2026/08/6a723caaa57bb151055998.mp4",
+    });
+    expect(els.map((e) => e.title)).toContain("3D model");
+    expect(els.map((e) => e.title)).toContain("Microcopy");
+    expect(els.filter((e) => e.mediaPath.endsWith(".mp4")).length).toBe(4);
+    expect(els.filter((e) => e.mediaPath.endsWith(".jpg")).length).toBe(2);
+  });
+
+  it("returns null when the page has no Elements section", () => {
+    expect(parseElements("<html><body>nothing here</body></html>")).toBeNull();
+  });
+
+  it("returns an empty array when the section exists but no blobs parse", () => {
+    const html = "<h2>Elements</h2><p>broken markup</p><h2>Color Palette</h2>";
+    expect(parseElements(html)).toEqual([]);
   });
 });
