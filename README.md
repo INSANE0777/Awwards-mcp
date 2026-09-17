@@ -49,7 +49,8 @@ search, judge from screenshots, pull design DNA, state a design direction —
 using the awwwards MCP tools. Copy it into your agent's skills directory:
 
 ```bash
-npx -y -p awwwards-mcp sh -c 'mkdir -p ~/.claude/skills && cp -r $(npm root -p)/awwwards-mcp/skills/awwwards-inspiration ~/.claude/skills/'
+npm install awwwards-mcp
+mkdir -p ~/.claude/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration ~/.claude/skills/
 ```
 
 For ZCode, copy to `~/.zcode/skills/` instead of `~/.claude/skills/`.
