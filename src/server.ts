@@ -35,6 +35,9 @@ export interface ToolResponse {
 export interface SearchArgs extends SearchFilters {
   count?: number;
   page?: number;
+  // "newest" (default) = current newest-first behavior; "score" orders scored
+  // sites first (detail-meta score, desc), unscored after, newest-first.
+  sortBy?: "score" | "newest";
 }
 
 export type CaptureFn = (
@@ -49,6 +52,34 @@ export type AnalyzeFn = (
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+// Free-text queries match token-wise: every whitespace-separated token must
+// substring-match the site's title+tags. A single token behaves exactly like
+// the old whole-query substring check.
+export function tokenizeQuery(q: string): string[] {
+  return q.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+// Zero-result suggestions: rank taxonomy slugs against the query's tokens.
+// +2 per token (>=4 chars) the slug contains; +1 when slug and token share a
+// >=4-char prefix (compared via their first 5 chars, in either direction).
+// Ties rank stably by slug; only positive scores are suggested.
+export function suggestTags(tokens: string[], taxonomy: string[], limit = 6): string[] {
+  const scored: [string, number][] = [];
+  for (const slug of taxonomy) {
+    let score = 0;
+    for (const t of tokens) {
+      if (t.length < 4) continue;
+      if (slug.includes(t)) score += 2;
+      else if (slug.startsWith(t.slice(0, 5)) || t.startsWith(slug.slice(0, 5))) score += 1;
+    }
+    if (score > 0) scored.push([slug, score]);
+  }
+  return scored
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([s]) => s);
 }
 
 function text(t: string): Block {
@@ -127,12 +158,10 @@ export function createHandlers(deps: {
       if (!s.awards.includes(AWARD_FILTER_LABELS[f.award])) return false;
     }
     if (f.query) {
-      const q = f.query.toLowerCase();
-      if (
-        !s.title.toLowerCase().includes(q) &&
-        !s.tags.some((st) => st.toLowerCase().includes(q))
-      ) {
-        return false;
+      const queryTokens = tokenizeQuery(f.query);
+      if (queryTokens.length) {
+        const hay = (s.title + " " + s.tags.join(" ")).toLowerCase();
+        if (!queryTokens.every((t) => hay.includes(t))) return false;
       }
     }
     return true;
@@ -149,6 +178,23 @@ export function createHandlers(deps: {
     }
   }
 
+  // sortBy: "score" view. Scores live in detail-meta entries written by
+  // get_site_details, so this reads the cache only — never a live fetch during
+  // search. SiteDetails gains its score field in a later v1.5.0 task, so the
+  // meta read is typed locally. Scored sites come first (desc); unscored ones
+  // follow, newest-first.
+  function orderByScore(list: SiteSummary[], sortBy: SearchArgs["sortBy"]): SiteSummary[] {
+    if (sortBy !== "score") return list;
+    const withScores = list.map((s) => ({
+      s,
+      score: cache.getMeta<{ score?: number }>(`detail:${s.slug}`, SITE_TTL_MS)?.score ?? null,
+    }));
+    withScores.sort(
+      (a, b) => (b.score ?? -1) - (a.score ?? -1) || b.s.createdAt - a.s.createdAt,
+    );
+    return withScores.map((w) => w.s);
+  }
+
   async function search_sites(args: SearchArgs): Promise<ToolResponse> {
     const count = Math.min(Math.max(args.count ?? 6, 1), 12);
     const page = Math.max(args.page ?? 1, 1);
@@ -159,7 +205,12 @@ export function createHandlers(deps: {
       let sites = args.color
         ? []
         : cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args, false));
-      if (sites.length < count * page) {
+      // A scrape REPLACES the matched rows (fresh rows are only guaranteed the
+      // URL filter), so it must run only when the cache cannot serve the
+      // requested page at all — topping up a partial page would discard
+      // already-verified matches (e.g. a tokenized query's cache hits).
+      const pageWindowEmpty = sites.slice((page - 1) * count, page * count).length === 0;
+      if (pageWindowEmpty) {
         const html = await client.getHtml(buildFilterUrl(args));
         const parsed = parseListing(html);
         if (parsed.length === 0) {
@@ -181,8 +232,28 @@ export function createHandlers(deps: {
           .sort((a, b) => b.createdAt - a.createdAt);
       }
 
-      const slice = sites.slice((page - 1) * count, page * count);
+      const ordered = orderByScore(sites, args.sortBy);
+      const slice = ordered.slice((page - 1) * count, page * count);
       if (slice.length === 0) {
+        if (sites.length === 0) {
+          // True zero-result search: suggest the closest taxonomy tags. The
+          // taxonomy comes from the cache only — never a live fetch just to
+          // phrase a suggestion; without a cached taxonomy, keep today's text.
+          const cats = cache.getMeta<Categories>("categories", CATEGORY_TTL_MS);
+          const suggestions = cats
+            ? suggestTags(tokenizeQuery(args.query ?? ""), cats.filters)
+            : [];
+          if (suggestions.length > 0) {
+            return {
+              content: [
+                text(
+                  `No sites matched the search. Closest filter tags: ${suggestions.join(", ")}. ` +
+                    "Run list_categories for the full taxonomy.",
+                ),
+              ],
+            };
+          }
+        }
         return {
           content: [
             text(
@@ -196,7 +267,7 @@ export function createHandlers(deps: {
       const images = await Promise.all(slice.map(siteImage));
       const content: Block[] = [
         text(
-          `${sites.length} site(s) matched; showing ${(page - 1) * count + 1}-${(page - 1) * count + slice.length}:\n\n` +
+          `${ordered.length} site(s) matched; showing ${(page - 1) * count + 1}-${(page - 1) * count + slice.length}:\n\n` +
             slice.map(summarizeSite).join("\n\n"),
         ),
         ...images.filter((b): b is Block => b !== null),
@@ -212,7 +283,8 @@ export function createHandlers(deps: {
         stale = [];
       }
       if (stale.length > 0) {
-        const slice = stale.slice(0, count);
+        const orderedStale = orderByScore(stale, args.sortBy);
+        const slice = orderedStale.slice(0, count);
         const images = await Promise.all(slice.map(siteImage));
         return {
           content: [

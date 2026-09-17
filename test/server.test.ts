@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHandlers, slugifyTag } from "../src/server.js";
+import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import { AwwwardsClient } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import type { SiteSummary } from "../src/types.js";
@@ -394,6 +394,92 @@ describe("get_site_elements", () => {
     const res = await h.get_site_elements({ slug: "weird" });
     expect(res.isError).toBe(true);
     expect(cache.getMeta("elements:weird", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe("search query tokenization", () => {
+  it("splits multi-word queries into tokens (all must match)", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "mag", title: "Editorial Mag", tags: ["Magazine / Newspaper / Blog"] }),
+      site({ slug: "half", title: "Editorial Only", tags: [] }),
+      site({ slug: "other", title: "Unrelated", tags: [] }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "editorial mag", count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("mag");
+    expect(text).not.toContain("half");
+    expect(text).not.toContain("other");
+    const pageCalls = fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"));
+    expect(pageCalls.length).toBe(0);
+  });
+
+  it("suggests taxonomy tags on zero results", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "plain", title: "Nothing Relevant", tags: [] })]);
+    // seed taxonomy meta so suggestions come from the real slugs
+    cache.setMeta("categories", {
+      colors: [],
+      filters: ["magazine-newspaper-blog", "storytelling", "typography", "minimal", "clean", "portfolio"],
+    });
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "magazine editorial", count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("No sites matched");
+    expect(text).toContain("Closest filter tags");
+    expect(text).toContain("magazine-newspaper-blog");
+    // "storytelling" shares no query token and no >=4-char prefix with either
+    // token, so the scoring rule leaves it at 0 and it must not be suggested.
+    expect(text).not.toContain("storytelling");
+  });
+});
+
+describe("suggestTags", () => {
+  it("ranks slugs sharing tokens or prefixes with query tokens", () => {
+    const s = suggestTags(
+      ["magazine", "editorial"],
+      ["magazine-newspaper-blog", "typography", "minimal", "clean", "storytelling"],
+      6,
+    );
+    expect(s[0]).toBe("magazine-newspaper-blog"); // +2: slug contains the token "magazine"
+    // "storytelling" contains neither token and shares no >=4-char prefix with
+    // either, so the exact rule scores it 0 and it must not be suggested.
+    expect(s).not.toContain("storytelling");
+    expect(s.length).toBeLessThanOrEqual(6);
+    // +1 branch: token shares a >=5-char prefix with the slug without being contained
+    expect(suggestTags(["typographic"], ["typography", "minimal"], 6)).toEqual(["typography"]);
+    // +1 branch (reversed): slug is a prefix of the token
+    expect(suggestTags(["minimalism"], ["mini", "clean"], 6)).toEqual(["mini"]);
+    // tokens shorter than 4 chars never score
+    expect(suggestTags(["art"], ["artstation", "clean"], 6)).toEqual([]);
+    // equal scores rank stably by slug
+    expect(suggestTags(["clean"], ["clean-ui", "clean-type"], 6)).toEqual(["clean-type", "clean-ui"]);
+  });
+});
+
+describe("search sortBy score", () => {
+  it("sorts scored sites first (desc) then unscored (newest first)", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "lo", title: "Low Score" }),
+      site({ slug: "hi", title: "High Score" }),
+      site({ slug: "none", title: "No Score", createdAt: 1789516800 + 500 }),
+      site({ slug: "none2", title: "No Score 2", createdAt: 1789516800 + 400 }),
+    ]);
+    cache.setMeta("detail:hi", { slug: "hi", title: null, description: null, palette: [], technologies: [], elements: [], awards: [], ogImage: null, liveUrl: null, score: 8.4 });
+    cache.setMeta("detail:lo", { slug: "lo", title: null, description: null, palette: [], technologies: [], elements: [], awards: [], ogImage: null, liveUrl: null, score: 6.1 });
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ sortBy: "score", count: 6 });
+    const text = (res.content[0] as any).text;
+    const order = ["hi", "lo", "none", "none2"].map((s) => text.indexOf(s));
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+    expect(order[2]).toBeLessThan(order[3]);
+    expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/sites/")).length).toBe(0); // enrichment reads cache only
   });
 });
 
