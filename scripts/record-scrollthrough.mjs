@@ -61,29 +61,57 @@ for (let y = 0; y < totalHeight; y += 450) {
 await page.waitForTimeout(2500);
 
 // ---- Interaction pass: hover + click animations on camera ----
-// Collect visible interactive elements with page-absolute positions.
+// Target discovery works on ANY site's markup: classic interactive selectors
+// PLUS anything whose computed cursor is "pointer" — the browser's own
+// "I'm interactive" signal. Pointer cursor inherits to descendants, so only
+// elements whose PARENT is not pointer count (the top of each pointer region)
+// — otherwise one `body { cursor: pointer }` would nominate the whole page.
 const targets = await page.evaluate(() => {
-  const selector = 'a, button, [role="button"], input, .oval-btn, .btn';
+  const isVisibleBox = (r) => r.width >= 24 && r.height >= 16;
+  const abs = (r) => Math.round(r.top + window.scrollY);
   const out = [];
   const seen = new Set();
-  for (const el of document.querySelectorAll(selector)) {
+  const push = (el) => {
     const r = el.getBoundingClientRect();
-    const top = r.top + window.scrollY;
-    if (r.width < 24 || r.height < 16) continue;
-    if (top < 0 || top > document.body.scrollHeight) continue;
-    // dedupe by screen position (skip overlapping duplicates)
-    const key = `${Math.round(r.left + r.width / 2)},${Math.round(top + r.height / 2)}`;
-    if (seen.has(key)) continue;
+    if (!isVisibleBox(r)) return;
+    const top = abs(r);
+    if (top < 0 || top > document.body.scrollHeight) return;
+    const cx = Math.round(r.left + r.width / 2);
+    const cy = Math.round(top + r.height / 2);
+    const key = `${cx},${cy}`;
+    if (seen.has(key)) return;
     seen.add(key);
     out.push({
-      x: Math.round(r.left + r.width / 2),
-      y: Math.round(top + r.height / 2),
+      x: cx,
+      y: cy,
       safeClick:
         (el.tagName === 'A' && (!el.getAttribute('href') || el.getAttribute('href').startsWith('#'))) ||
         (el.tagName === 'BUTTON' && el.type !== 'submit'),
     });
+  };
+  // Pass 1: classic interactive selectors (always trusted).
+  for (const el of document.querySelectorAll('a, button, [role="button"], input, .oval-btn, .btn')) {
+    push(el);
   }
-  return out.slice(0, 14);
+  // Pass 2: cursor:pointer discovery — custom interactive surfaces with
+  // unknown markup. Skip the pointer region's top (compare against parent).
+  let visited = 0;
+  for (const el of document.querySelectorAll('body *')) {
+    if (++visited > 3000 || out.length > 200) break;
+    const style = getComputedStyle(el);
+    if (style.cursor !== 'pointer') continue;
+    const parent = el.parentElement;
+    if (parent && getComputedStyle(parent).cursor === 'pointer') continue; // inherited
+    push(el);
+  }
+  // Spread the tour evenly down the page (top to bottom), not DOM order.
+  out.sort((a, b) => a.y - b.y);
+  const keep = Math.min(16, out.length);
+  const spread = [];
+  for (let i = 0; i < keep; i++) {
+    spread.push(out[Math.round((i * (out.length - 1)) / Math.max(1, keep - 1))]);
+  }
+  return spread;
 });
 
 let clicked = 0;
