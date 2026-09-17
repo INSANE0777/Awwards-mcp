@@ -396,3 +396,42 @@ describe("get_site_elements", () => {
     expect(cache.getMeta("elements:weird", Number.POSITIVE_INFINITY)).toBeNull();
   });
 });
+
+describe("analyze_page_structure", () => {
+  it("returns the band map as a JSON text block", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const structure = {
+      url: "file:///build/index.html",
+      title: "Build",
+      totalHeight: 2000,
+      bands: [
+        { index: 0, tag: "body", label: "body", background: "rgb(16, 21, 42)", offsetTop: 0, height: 1000, textStart: "" },
+        { index: 1, tag: "section", label: ".shell", background: "rgb(240, 242, 247)", offsetTop: 1000, height: 1000, textStart: "Production speed" },
+      ],
+    };
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async () => structure,
+    });
+    const res = await h.analyze_page_structure({ url: "file:///build/index.html" });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.totalHeight).toBe(2000);
+    expect(parsed.bands.length).toBe(2);
+  });
+
+  it("surfaces the install hint as isError when playwright is missing", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async () => ({ error: "install playwright" }),
+    });
+    const res = await h.analyze_page_structure({ url: "https://example.com" });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("install playwright");
+  });
+});

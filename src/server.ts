@@ -7,6 +7,7 @@ import {
   elementUrl,
 } from "./awwwards.js";
 import type { Cache } from "./cache.js";
+import type { PageStructure } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
 
@@ -40,6 +41,8 @@ export type CaptureFn = (
   url: string,
   imagesDir: string,
 ) => Promise<{ file: string; base64: string } | { error: string }>;
+
+export type AnalyzeFn = (url: string) => Promise<PageStructure | { error: string }>;
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -80,12 +83,14 @@ export interface Handlers {
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
   capture_live_site(args: { url: string }): Promise<ToolResponse>;
+  analyze_page_structure(args: { url: string; maxBands?: number }): Promise<ToolResponse>;
 }
 
 export function createHandlers(deps: {
   client: AwwwardsClient;
   cache: Cache;
   captureFn?: CaptureFn;
+  analyzeFn?: AnalyzeFn;
 }): Handlers {
   const { client, cache } = deps;
 
@@ -405,5 +410,31 @@ export function createHandlers(deps: {
     }
   }
 
-  return { search_sites, get_site_details, get_site_elements, list_categories, capture_live_site };
+  async function analyze_page_structure(args: {
+    url: string;
+    maxBands?: number;
+  }): Promise<ToolResponse> {
+    try {
+      // Lazy default: playwright is only touched when the tool actually runs.
+      // maxBands is accepted for the tool schema; the analyzer applies its own
+      // default cap (40) unless a custom analyzeFn consumes it.
+      const analyze =
+        deps.analyzeFn ??
+        ((url: string) => import("./structure.js").then((m) => m.analyzePageStructure(url)));
+      const structure = await analyze(args.url);
+      if ("error" in structure) return { content: [text(structure.error)], isError: true };
+      return { content: [text(JSON.stringify(structure, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  return {
+    search_sites,
+    get_site_details,
+    get_site_elements,
+    list_categories,
+    capture_live_site,
+    analyze_page_structure,
+  };
 }

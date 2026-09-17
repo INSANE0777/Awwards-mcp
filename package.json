@@ -1,6 +1,6 @@
 {
   "name": "awwwards-mcp",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Free MCP server giving AI agents design inspiration from Awwwards: search award-winning sites with inline screenshots and extract design DNA.",
   "type": "module",
   "license": "MIT",

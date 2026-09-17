@@ -96,6 +96,16 @@ server.tool(
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
 
+server.tool(
+  "analyze_page_structure",
+  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build.",
+  {
+    url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
+    maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
+  },
+  (args) => asMcpResult(handlers.analyze_page_structure(args)),
+);
+
 // Auto-refresh: if the index is stale (or absent) and no crawl is running,
 // re-index in the background. Serving is never blocked; errors are stderr-only.
 if (shouldAutoIndex(cache)) {

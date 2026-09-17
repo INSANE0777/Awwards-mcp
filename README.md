@@ -17,6 +17,7 @@ of any site: color palette, tech stack, design elements, award history.
 | `get_site_elements` | Component-level visuals for one site: each element's poster image inline (3D models, video content, mobile layouts, microcopy…) + video URLs. |
 | `list_categories` | Every filter the agent can search by (200+ tags, 27 colors). |
 | `capture_live_site` | Optional: fresh full-page screenshot of any live URL (needs [playwright](https://playwright.dev)). |
+| `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Compare a reference site's structure against your build. |
 
 ## Setup
 
