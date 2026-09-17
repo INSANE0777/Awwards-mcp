@@ -106,4 +106,13 @@ describe("AwwwardsClient", () => {
     expect(html).toContain("card-site");
     expect(calls.mock.calls.length).toBe(2);
   });
+
+  it("getAsset rejects with the composed HTTP label on non-ok CDN responses", async () => {
+    const client = new AwwwardsClient({ fetchFn: fakeFetch(404) });
+    const err = await client
+      .getAsset("element/2026/08/x.mp4")
+      .catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("HTTP 404 fetching asset element/2026/08/x.mp4");
+  });
 });

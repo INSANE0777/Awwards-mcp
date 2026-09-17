@@ -19,6 +19,9 @@ const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
 export const SITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const CATEGORY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+// The text block lists every element; only this many posters are fetched inline.
+export const MAX_INLINE_POSTERS = 8;
+
 export type Block =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
@@ -49,6 +52,18 @@ function text(t: string): Block {
 function summarizeSite(s: SiteSummary): string {
   const award = s.awards.length ? ` [${s.awards.join(", ")}]` : "";
   return `- ${s.title} (slug: ${s.slug})${award}\n  live: ${s.liveUrl ?? "unknown"}\n  awwwards: https://www.awwwards.com${s.detailPath}\n  tags: ${s.tags.join(", ")}`;
+}
+
+// An all-empty parse means the layout changed (or the page was not found):
+// neither tool may cache such a parse, so the mismatch can still be surfaced.
+function isAllEmptyDetail(d: SiteDetails): boolean {
+  return (
+    d.palette.length === 0 &&
+    d.technologies.length === 0 &&
+    d.elements.length === 0 &&
+    d.awards.length === 0 &&
+    !d.description
+  );
 }
 
 function errorResponse(err: unknown): ToolResponse {
@@ -213,13 +228,7 @@ export function createHandlers(deps: {
       if (!d) {
         const html = await client.getHtml(`/sites/${args.slug}`);
         d = parseDetail(html, args.slug);
-        if (
-          d.palette.length === 0 &&
-          d.technologies.length === 0 &&
-          d.elements.length === 0 &&
-          d.awards.length === 0 &&
-          !d.description
-        ) {
+        if (isAllEmptyDetail(d)) {
           return {
             content: [
               text(
@@ -276,7 +285,7 @@ export function createHandlers(deps: {
     try {
       const elementsKey = `elements:${args.slug}`;
       let elements = cache.getMeta<ElementMedia[]>(elementsKey, SITE_TTL_MS);
-      if (!elements) {
+      if (elements === null) {
         const html = await client.getHtml(`/sites/${args.slug}`);
         const parsed = parseElements(html);
         if (parsed === null) {
@@ -300,10 +309,7 @@ export function createHandlers(deps: {
         // HTML unless it is an all-empty parse (never cached, per contract).
         if (cache.getMeta<SiteDetails>(`detail:${args.slug}`, SITE_TTL_MS) === null) {
           const d = parseDetail(html, args.slug);
-          const empty =
-            d.palette.length === 0 && d.technologies.length === 0 &&
-            d.elements.length === 0 && d.awards.length === 0 && !d.description;
-          if (!empty) cache.setMeta(`detail:${args.slug}`, d);
+          if (!isAllEmptyDetail(d)) cache.setMeta(`detail:${args.slug}`, d);
         }
       }
       const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
@@ -314,7 +320,7 @@ export function createHandlers(deps: {
       if (elements.length === 0) {
         return { content: [text(`No design elements listed for ${title} (${args.slug}).`)] };
       }
-      const shown = elements.slice(0, 8);
+      const shown = elements.slice(0, MAX_INLINE_POSTERS);
       const lines = elements.map((el, i) => {
         const isVideo = el.mediaPath.endsWith(".mp4");
         return `${i + 1}. ${el.title} (${isVideo ? "video" : "image"})` +

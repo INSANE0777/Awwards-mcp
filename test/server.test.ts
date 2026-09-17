@@ -42,6 +42,26 @@ function fakeClient() {
   return { client, fetchFn };
 }
 
+// Synthetic detail page with n element blobs in the fixture's attribute
+// encoding: JSON with `\/` slashes and double quotes entity-escaped, so the
+// blob ends at the first raw `">` — exactly what parseElements expects.
+function elementsPage(n: number): string {
+  const names = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+  const blob = (title: string, mediaPath: string) =>
+    JSON.stringify({ collectableTitle: title, collectableImage: mediaPath })
+      .replace(/\//g, "\\/")
+      .replace(/"/g, "&quot;");
+  const items = Array.from(
+    { length: n },
+    (_, i) =>
+      `<div data-collectable-model-value="${blob(
+        `Element ${names[i]}`,
+        `element/2026/08/el${i + 1}.${i % 2 === 0 ? "mp4" : "jpg"}`,
+      )}"></div>`,
+  ).join("\n");
+  return `<h2>Elements</h2>${items}<h2>Color Palette</h2>`;
+}
+
 describe("slugifyTag", () => {
   it("normalizes site tags to filter slugs", () => {
     expect(slugifyTag("Content architecture")).toBe("content-architecture");
@@ -296,12 +316,56 @@ describe("get_site_elements", () => {
     expect(pageCalls.length).toBe(1);
   });
 
-  it("reports a legitimate empty (and caches it) when there is no Elements section", async () => {
+  it("shares one page fetch with get_site_details when elements runs first", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    await h.get_site_elements({ slug: "l-i-s-a" });
+    await h.get_site_details({ slug: "l-i-s-a" });
+    const pageCalls = fetchFn.mock.calls.filter(
+      (c: any[]) => String(c[0]).includes("/sites/l-i-s-a"),
+    );
+    expect(pageCalls.length).toBe(1); // details served from the cross-seeded cache
+  });
+
+  it("lists every element in text but caps inline posters at 8", async () => {
     const cache = new Cache(tmpDir());
     const client = new AwwwardsClient({
-      fetchFn: (async () =>
-        new Response("<html><body>no sections</body></html>", { status: 200 })) as unknown as typeof fetch,
+      fetchFn: vi.fn(async () => new Response(elementsPage(9), { status: 200 })) as unknown as typeof fetch,
     });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_elements({ slug: "nine-elements" });
+    const body = (res.content[0] as any).text;
+    expect(body).toContain("9 design element(s)");
+    expect(body).toContain("Element nine"); // the 9th is still listed in text
+    expect(res.content.filter((b: any) => b.type === "image").length).toBe(8);
+  });
+
+  it("degrades to text-only when every poster fetch fails", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: vi.fn(async (input: any) => {
+        const url = String(input);
+        if (url.includes("/sites/")) {
+          return new Response(elementsPage(3), { status: 200 });
+        }
+        return new Response("cdn unavailable", { status: 500 }); // asset urls
+      }) as unknown as typeof fetch,
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_elements({ slug: "broken-posters" });
+    expect(res.isError).toBeUndefined();
+    const body = (res.content[0] as any).text;
+    expect(body).toContain("Element one");
+    expect(body).toContain("Element three");
+    expect(res.content.filter((b: any) => b.type === "image").length).toBe(0);
+  });
+
+  it("reports a legitimate empty (and caches it) when there is no Elements section", async () => {
+    const cache = new Cache(tmpDir());
+    const fetchFn = vi.fn(async () =>
+      new Response("<html><body>no sections</body></html>", { status: 200 }));
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
     const h = createHandlers({ client, cache });
     const res = await h.get_site_elements({ slug: "plain-site" });
     expect((res.content[0] as any).text).toContain("No design elements listed");
@@ -309,6 +373,12 @@ describe("get_site_elements", () => {
     expect(
       cache.getMeta<any[]>("elements:plain-site", 7 * 24 * 60 * 60 * 1000),
     ).toEqual([]);
+    // Repeat call is served from the cached empty: zero additional page fetches.
+    await h.get_site_elements({ slug: "plain-site" });
+    const pageCalls = fetchFn.mock.calls.filter(
+      (c: any[]) => String(c[0]).includes("/sites/plain-site"),
+    );
+    expect(pageCalls.length).toBe(1);
   });
 
   it("errors without caching on a section-with-zero-blobs mismatch", async () => {
