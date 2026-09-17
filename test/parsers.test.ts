@@ -140,3 +140,32 @@ describe("parseElements", () => {
     expect(parseElements(html)).toEqual([]);
   });
 });
+
+// Second fixture captured fresh from live awwwards.com (2026-09-17, site
+// "LxL Creative") so the parsers are proven against current markup, not just
+// the August-era detail.html. Floor-based assertions where values may vary
+// between captures; exact only where the contract demands it.
+describe("parseDetail against fresh live markup (detail-lxl fixture)", () => {
+  const lxl = () => parseDetail(readFixture("detail-lxl.html"), "lxl-creative");
+
+  it("extracts a complete design-DNA parse from current live markup", () => {
+    const d = lxl();
+    expect(d.title).toContain("LxL Creative");
+    expect(d.palette.length).toBeGreaterThanOrEqual(1);
+    for (const hex of d.palette) expect(hex).toMatch(/^#[0-9A-F]{6}$/);
+    expect(d.technologies.length).toBeGreaterThanOrEqual(3);
+    expect(d.elements.length).toBeGreaterThanOrEqual(3);
+    expect(d.awards.some((a) => a.title === "Site of the Day")).toBe(true);
+    expect(d.awards[0].date).toMatch(/^[A-Z][a-z]+ \d{1,2}, \d{4}$/);
+    expect(d.description).toContain("LxL Creative");
+    expect(d.ogImage).toContain("assets.awwwards.com");
+    expect(d.liveUrl).toBe("https://www.lxlcreative.co.uk/");
+  });
+
+  it("parseElements still works on the same fresh page", () => {
+    const els = parseElements(readFixture("detail-lxl.html"));
+    expect(els).not.toBeNull();
+    expect(els!.length).toBeGreaterThanOrEqual(3);
+    expect(els!.every((e) => e.mediaPath.startsWith("element/"))).toBe(true);
+  });
+});
