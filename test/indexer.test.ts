@@ -113,11 +113,12 @@ describe("runIndexer", () => {
     const cache = new Cache(tmpDir());
     let t = 1_000_000;
     cache.setMeta("index:lock", { startedAt: t });
-    const { client } = fakeClient();
+    const { client, urls } = fakeClient();
     await expect(
       runIndexer({ client, cache, now: () => t + INDEX_LOCK_STALE_MS - 1 }),
     ).rejects.toBeInstanceOf(IndexLockError);
     // no page was fetched (taxonomy fetch happens after the lock check)
+    expect(urls.length).toBe(0);
     expect(cache.getMeta("index:status", 10_000)).toBeNull();
   });
 

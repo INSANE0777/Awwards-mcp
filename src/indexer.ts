@@ -87,18 +87,26 @@ export async function runIndexer(deps: {
       skipped: result.skipped,
     };
   } catch (err) {
-    const previous = cache.getMeta<IndexStatus>("index:status", Number.POSITIVE_INFINITY);
-    const progress = (cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY) ?? []).length;
-    cache.setMeta("index:status", {
-      startedAt: previous?.startedAt,
-      pagesDone: progress,
-      pagesTotal: tagsCount(cache),
-      sitesIndexed: previous?.sitesIndexed ?? 0,
-      lastError: err instanceof Error ? err.message : String(err),
-    });
+    try {
+      const previous = cache.getMeta<IndexStatus>("index:status", Number.POSITIVE_INFINITY);
+      const progress = (cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY) ?? []).length;
+      cache.setMeta("index:status", {
+        startedAt: previous?.startedAt,
+        pagesDone: progress,
+        pagesTotal: tagsCount(cache),
+        sitesIndexed: previous?.sitesIndexed ?? 0,
+        lastError: err instanceof Error ? err.message : String(err),
+      });
+    } catch {
+      // the store is failing; do not mask the original abort error
+    }
     throw err;
   } finally {
-    cache.deleteMeta("index:lock");
+    try {
+      cache.deleteMeta("index:lock");
+    } catch {
+      // same: never mask the original error with a lock-release failure
+    }
   }
 }
 

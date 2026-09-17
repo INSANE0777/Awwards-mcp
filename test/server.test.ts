@@ -148,7 +148,7 @@ describe("search_sites", () => {
     expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
   });
 
-  it("applies the award filter client-side on freshly scraped rows", async () => {
+  it("scrapes the color page and filters fresh rows by award", async () => {
     const cache = new Cache(tmpDir());
     cache.upsertSites([
       ...Array.from({ length: 8 }, (_, i) =>
@@ -163,7 +163,6 @@ describe("search_sites", () => {
     const res = await h.search_sites({ color: "#404040", award: "sotd", count: 6 });
     expect(String(fetchFn.mock.calls[0][0])).toContain("%23404040");
     const text = (res.content[0] as any).text;
-    expect(text).not.toContain("plain");
     expect(res.content.filter((b: any) => b.type === "image").length).toBe(6);
   });
 

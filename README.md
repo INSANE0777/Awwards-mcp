@@ -48,7 +48,9 @@ scraping (~31 sites per filter page). Build a local index once and searches
 draw from thousands of award-winning sites instantly:
 
 ```bash
-npx awwwards-index
+npx -y -p awwwards-mcp awwwards-index      # once published
+# or, from a local checkout of this repo:
+npm run index
 ```
 
 - Crawls all ~200 tag pages at 1 request/second (~4 minutes) into the local
