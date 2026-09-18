@@ -58,7 +58,12 @@ function applied(fix, detail) {
 }
 
 function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", ...opts });
+  // npm/npx are .cmd shims on Windows: spawnSync can't exec them without a
+  // shell (ENOENT). node must NOT go through a shell — its inline -e scripts
+  // here contain spaces/newlines/quotes that shell-mode's raw arg join would
+  // mangle — so the shell is scoped to the shim commands, and win32 only.
+  const shell = process.platform === "win32" && /^(npm|npx)(\.cmd)?$/.test(cmd);
+  const r = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell, ...opts });
   return { code: r.status ?? 1, out: (r.stdout ?? "") + (r.stderr ?? "") };
 }
 
