@@ -34,6 +34,7 @@ Run this loop before building anything visual:
    Free-text queries are porter-stem + prefix-matched and BM25-ranked
    (`"magazines"` finds Magazine-tagged sites, best matches first); multi-word
    queries keep AND semantics — both tokens must hit the same site.
+3b. **Techniques registry:** `skills/_memory/techniques.json` catalogs researched how-tos per domain (video-understanding, motion-detection, ui-structure, micro-interactions, images). Consult it when a step needs a method — it grows via the flywheel.
 4. **Live reference URL named? Capture it full-page first.** (and later capture
    your own build the same way — compare both against each other) If the user
    points at a specific live site (e.g. "recreate cerebrium.ai"), call
@@ -79,6 +80,8 @@ Run this loop before building anything visual:
    Fix distribution mismatches first — a section that is 3× the reference's height
    is a structural bug no amount of pixel polish fixes. Match the reference's
    band structure, never just its total height.
+
+9. **Close the flywheel:** end every loop pass by recording what the verification caught — `node scripts/skill-memory.mjs record --skill awwwards-inspiration --phase <phase> --symptom "..." --rule "..." [--evidence path]`. "Nothing new learned" is a recorded negative. Then `distill` folds rules seen ≥2× into your installed copy’s managed section; `recall` prints them at loop start.
 
 ### Anti-patterns
 
@@ -160,3 +163,6 @@ input", extract the filmstrip and Read the frames instead. A ready-made
 recorder ships in this repo at
 `scripts/record-scrollthrough.mjs` (run it from the repo root; playwright
 and ffmpeg-static are devDependencies).
+
+<!-- skill-memory:start -->
+<!-- skill-memory:end -->

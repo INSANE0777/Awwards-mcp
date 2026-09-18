@@ -88,6 +88,11 @@ The user's build/research doesn't wait for the repair. Degrade gracefully:
 - After the MCP is healthy again, **re-run the failed calls** and reconcile
   with whatever the fallback produced.
 
+## Close the flywheel
+
+Repairs are the highest-value lessons — they were expensive to learn. After a successful diagnosis + fix:
+`node scripts/skill-memory.mjs record --skill awwwards-doctor --phase repair --symptom "..." --rule "..." [--evidence <report path>]`. Distill folds recurring failure signatures into this installed copy so the next repair starts knowing them.
+
 ## Anti-patterns
 
 - Retrying blocked requests in a loop — politeness rules and block
@@ -98,3 +103,6 @@ The user's build/research doesn't wait for the repair. Degrade gracefully:
   parse that can't find its anchors must error loudly (that is the drift
   signal).
 - Treating the doctor's UNHEALTHY verdict as done because one check passed.
+
+<!-- skill-memory:start -->
+<!-- skill-memory:end -->

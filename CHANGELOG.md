@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Skill-memory flywheel (unreviewed — ships after human review):
+
+- `scripts/skill-memory.mjs` (record/recall/distill/stats): the skills
+  self-improve from what their verification loops catch. Findings journal
+  (episodic, per-machine) + deterministic distiller folding rules seen 2+
+  times into installed skill copies (machine-managed section, LRU-capped).
+- `skills/_memory/techniques.json`: techniques registry seeded from
+  researched video-understanding, motion-detection, UI-structure,
+  micro-interaction and image-analysis methods; grows via the flywheel.
 ## v1.4.0 — 2026-09-19
 
 Search intelligence (FTS5 — no new dependencies):

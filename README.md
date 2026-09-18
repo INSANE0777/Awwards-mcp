@@ -264,6 +264,8 @@ motion film, and the reusable pre-scroll capture script live in
 | `lenis` (library, via skill guidance) | smooth scrolling synced to ScrollTrigger on the Fallow Press home page. |
 | `tailwindcss` / plain CSS | All builds are plain hand-rolled CSS — flat 2D, no frameworks needed. |
 
+**The skills self-improve:** every loop pass records what verification caught (`scripts/skill-memory.mjs record`), and a deterministic distiller folds rules seen 2+ times into your installed skill copy — while the shipped copies only change via human PR. A techniques registry (`skills/_memory/techniques.json`) catalogs researched how-tos per domain (video understanding, motion detection, UI structure, micro-interactions, images).
+
 Reduced-motion, JS-less visits, and capture tools all get graceful fallbacks
 (vertical stacks; progressive-enhancement reveals).
 

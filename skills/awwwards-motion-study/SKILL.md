@@ -48,6 +48,8 @@ Three animation classes must all be on camera:
   (keep them in `ref-motion/` or `_qa/`). Awwwards content and site media
   belong to their creators — study them, don't republish them.
 
+Before recording, fingerprint the motion stack (techniques registry `skills/_memory/techniques.json` → motion-detection): library fingerprints in the captured HTML, hover-pair style diffs, transform-polling — the site names its own animation stack, and scene-detect-first (video-understanding domain) scopes your tiles.
+
 ## 2. How to capture
 
 Fast path first, fall back when it can't:
@@ -148,6 +150,11 @@ Verification is the same skill pointed at yourself:
    transition zones and look broken when they aren't.
 4. Fix what mismatches, re-record, repeat — one loop, not ten.
 
+## Close the flywheel
+
+End every capture/study pass by recording what verification caught:
+`node scripts/skill-memory.mjs record --skill awwwards-motion-study --phase motion-study --symptom "..." --rule "..." [--evidence tile.jpg]`. Distill folds rules seen ≥2× into your installed copy; recall prints them at the next study. The techniques registry (`skills/_memory/techniques.json`) grows from promoted findings — propose better methods by recording them.
+
 ## Anti-patterns
 
 - **Designing from posters or thumbnails** — posters are single frames; the
@@ -161,3 +168,6 @@ Verification is the same skill pointed at yourself:
 - **Studying nothing, animating from vibes** — "it probably fades in" is
   how builds drift from references.
 - **Republishing recordings** — captures are local study evidence.
+
+<!-- skill-memory:start -->
+<!-- skill-memory:end -->
