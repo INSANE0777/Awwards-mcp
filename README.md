@@ -176,6 +176,16 @@ enables, using nothing but the server's tools plus the shipped
 loop — and every correction the loop caught on the way became doctrine in the
 skill.
 
+> **Built in one shot, by a model that can't watch video.** All three sites
+> were built in a single prompt run on **GLM 5.3-flash** — which does not
+> support video input. The loop's motion study worked entirely from
+> frame-tiled filmstrips (ffmpeg, 1–2 fps per element) instead of watching
+> the recordings. With a video-native model, those same `get_site_elements`
+> videos and `record_site_motion` .webm files could be watched directly —
+> timing, easing and overlap read at full fidelity — and the motion-true
+> results would be better still. The skill's frame-tile doctrine is what
+> closes that gap today.
+
 **1. [Fallow Press](fallow-press/index.html)**
 ([source](fallow-press/)) — a flat-2D editorial journal, direction
 **Emergence Magazine** (SOTD): pink `#FF9398` on cream and black, torn-paper
