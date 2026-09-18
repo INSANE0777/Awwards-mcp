@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About — Afjal Hussein</title>
+  <meta name="description" content="About Afjal Hussein — a chrome model pinned center while chapters pass by horizontally." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="page-about">
+
+  <!-- ══════════ ABOUT: horizontal chapters past a pinned chrome model
+       (reference about.avi: the 3D model holds while text columns pass by) —
+       the chapters move SIDEWAYS here per the user's restructure. ══════════ -->
+  <nav class="nav" aria-label="Pages">
+    <a class="nav-mark" href="index.html">AF.77</a>
+    <a class="nav-link" href="projects.html">Projects<sup>2</sup></a>
+    <a class="nav-link is-active" href="about.html">About<sup>3</sup></a>
+  </nav>
+
+  <section class="hwrap" id="aboutWrap" aria-label="About chapters">
+    <div class="htrack about-track" id="aboutTrack">
+      <div class="model-anchor" aria-hidden="true"><!-- model is fixed via CSS; this anchor centers it in the viewport --></div>
+
+      <header class="hpanel about-lead">
+        <p class="kicker">03 &mdash; About</p>
+        <h1 class="about-statement">bold ideas in,<br /><em>stuff that ships</em> out.</h1>
+      </header>
+
+      <section class="hpanel chapter" >
+        <p class="chapter-no">Ch. One</p>
+        <p class="chapter-label"><span class="dropcap">Q</span>uality</p>
+        <p class="col-copy">I don&rsquo;t produce work just to fill space or meet a deadline. Every tool deserves time, care, and intention &mdash; that&rsquo;s where something meaningful takes shape.</p>
+      </section>
+
+      <section class="hpanel chapter">
+        <p class="col-copy">awwwards-mcp exists because agents had Mobbin budgets and humans had taste. A free server giving coding agents design inspiration &mdash; 2,800+ sites, no API key.</p>
+        <p class="chapter-no">Ch. Two</p>
+        <p class="chapter-label"><span class="dropcap">T</span>ools</p>
+      </section>
+
+      <section class="hpanel chapter">
+        <p class="chapter-no">Ch. Three</p>
+        <p class="chapter-label"><span class="dropcap">S</span>tructure</p>
+        <p class="col-copy">The Meridian was built from ORDR and Hearst references the same way &mdash; search, screenshot, band-map compare, then pixels.</p>
+      </section>
+
+      <section class="hpanel chapter">
+        <p class="col-copy">This site itself ran the loop that built it: every color, layout rhythm, and animation traces to a specific awwwards-mcp tool result.</p>
+      </section>
+
+      <footer class="hpanel chapter chapter--end">
+        <p class="end-line">Say hi &mdash;</p>
+        <nav class="end-links" aria-label="Contact links">
+          <a href="https://github.com/INSANE0777" rel="noopener">GitHub</a>
+          <a href="https://www.npmjs.com/package/awwwards-mcp" rel="noopener">npm</a>
+          <a href="mailto:insaneafjal@gmail.com">Email</a>
+        </nav>
+        <a class="cta-chip" href="index.html">&larr; Home</a>
+      </footer>
+    </div>
+  </section>
+
+  <div class="model model--fixed" aria-hidden="true"><span class="model-melt"></span></div>
+
+  <p class="built-chip">Designed via awwwards-mcp tools &middot; <a href="https://github.com/INSANE0777/Awwards-mcp">the loop that built this</a></p>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="about.js"></script>
+</body>
+</html>

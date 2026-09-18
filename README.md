@@ -171,10 +171,12 @@ review awwwards.com's terms yourself.
 ## Built with awwwards-mcp: a real portfolio
 
 This project's own showcase — **[showcase/afjal-portfolio](showcase/afjal-portfolio/)**,
-[open it locally](showcase/afjal-portfolio/index.html) — is a personal portfolio
-built through the full inspiration loop this MCP enables, using nothing but
-the server's tools. View it raw at
-[github.com/INSANE0777/Awwards-mcp/tree/main/showcase/afjal-portfolio](https://github.com/INSANE0777/Awwards-mcp/tree/main/showcase/afjal-portfolio).
+[open index.html locally](showcase/afjal-portfolio/index.html) — is a personal
+portfolio built through the full inspiration loop this MCP enables, using
+nothing but the server's tools. Three pages: the 3D thumbnail-ring home
+(reference preloader), a **horizontal** projects gallery (reference case
+studies, GSAP ScrollTrigger pin), and a **horizontal** about chapter where a
+chrome model holds center while text passes by (reference about).
 
 **The loop, as it ran** (skill used: `awwwards-inspiration`, shipped in this
 package — its 8-step structure-before-pixels doctrine drove every step):
@@ -191,43 +193,66 @@ package — its 8-step structure-before-pixels doctrine drove every step):
 4. `get_site_elements` pulled component-level anatomy — and here the loop
    taught its biggest lesson: **element posters lie**. The first build was
    designed from poster frames alone and rendered the hero as *floating
-   static cards*. Downloading the actual element videos (preloader/case
-   study/about/transition from the CDN URLs the tool returns) and
-   frame-tiling them revealed the truth: the hero is a **spinning 3D
-   thumbnail ring with perspective depth**, projects are **full-bleed tinted
-   panels with giant display type and sliver image reveals**, and the about
-   page is a **pinned chrome 3D blob with text columns alternating past
-   it**. The showcase was rebuilt motion-true (pure CSS 3D — no WebGL).
-5. `capture_live_site` caught the live reference's layout first-hand and two
+   static cards*. Downloading the actual element videos (from the CDN URLs
+   the tool returns) and frame-tiling them revealed the truth: the hero is a
+   **spinning 3D thumbnail ring with perspective depth**, projects are
+   **full-bleed tinted panels with giant display type and sliver image
+   reveals**, and the about page is a **pinned chrome 3D model with text
+   passing by**. The showcase was rebuilt motion-true (pure CSS 3D, no
+   WebGL) — and restructured into separate horizontal pages per review.
+5. `capture_live_site` caught the live reference's layout first-hand and
    build bugs (invisible `.reveal` content → fixed with progressive
    enhancement; `file://` capture caching → `?v=N` cache-buster).
 6. `analyze_page_structure` ran on BOTH the reference and the build — band
    maps compared, never just total height.
-7. `record_site_motion` filmed the finished build twice (v1 caught hover
-   inversion; v2 caught the spinning ring mid-rotation, the cobalt
-   AWWWARDS-MCP panel, and the chrome blob — motion proof the rebuild is
-   faithful).
+7. `record_site_motion` filmed all three pages: the spinning ring mid-
+   rotation, the projects gallery sliding past the cobalt and mint panels,
+   and the chrome model holding center while chapters pass (with the
+   recorder's own hover interactions on camera).
 
-Prompt count: **1** design prompt + **1** correction ("did you see how the
-preloader animates? the hero is a 3D image gallery…") — that second prompt is
-the element-video lesson encoded as user feedback. Every design decision
-traces to a tool result; nothing is invented.
+Prompt count: **3** — (1) the build ask, (2) the motion correction that
+exposed the poster-lie ("did you see how the preloader animates?"), (3) the
+structure pass ("projects and about should be horizontal pages… capture
+live sites and animation BEFORE building"). Each correction became doctrine
+in the shipped `awwwards-inspiration` skill: frame-study element videos
+before animating; judge page architecture from the studied passages; tile
+per element, not one giant filmstrip.
 
-**Anti-pattern the loop now encodes** (candidate for the next skill
-revision): *never design motion from element posters — download the element
-videos and tile frames before animating.* Posters are single frames of
-motion; the motion IS the design.
+**Frontend skills engaged during the build** (from ZCode's skill library):
+`awwwards-inspiration` (the loop itself) and `gsap-scrolltrigger` (the
+horizontal pin + containerAnimation pattern). Reduced-motion, JS-less
+visits, and capture tools all get graceful fallbacks (`no-h` vertical
+stacks; progressive-enhancement reveals).
 
 **What the verification loop caught** — proof the structure-before-pixels
 doctrine is load-bearing:
 
-- Full-page captures initially showed three blank sections: `.reveal`
-  animation state vs capture's no-scroll reality (a tooling interplay worth
-  a post-merge capture wait, noted in the backlog). The build now ships
-  content-visible-without-JS progressive enhancement — one lesson from the
-  loop feeding back into every future build.
-- Band-map compare kept the reference's white-canvas → cluster → index →
-  statement → black-band rhythm instead of drifting on section heights.
+- Full-page captures initially showed blank sections: `.reveal` animation
+  state vs capture's no-scroll reality. The build ships
+  content-visible-without-JS progressive enhancement.
+- The v2 motion film caught the preload scroll-lock interacting with
+  reduced-motion; the lock now never applies to capture tools or JS-less
+  visits.
+- Band-map compare kept the reference's rhythm instead of drifting on
+  section heights.
+
+## Can awwwards-mcp crawl the sitemap? (robots.txt notes)
+
+The awwwards.com `robots.txt` advertises
+`Sitemap: https://www.awwwards.com/sitemap.xml` and — verified live
+2026-09-18 — **that sitemap URL returns a soft-404 HTML page** (as do common
+child names like `/sitemap-websites.xml`). So sitemap discovery isn't
+currently a path to more data; the polite crawl surface is exactly what the
+indexer uses:
+
+- **Allowed and used**: `/websites/`, `/websites/<filter>/`, `/sites/<slug>`
+  (one filter per URL; deep pagination stays un-crawled).
+- **Disallowed and never fetched**: `/tag/`, `/search-websites`,
+  `/websites/?` (query-string pagination), `/elements/*`, `/vote/`,
+  favourites/likes/follows, and the rest of the 33 rules.
+- Our client (`src/awwwards.ts` `buildFilterUrl`) constructs **only**
+  `/websites/…` paths at 1 request/second — the loop stays inside the
+  published rules by construction, not by convention.
 
 ## Contributing
 

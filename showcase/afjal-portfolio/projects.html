@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Projects — Afjal Hussein</title>
+  <meta name="description" content="Selected projects — a horizontal gallery: awwwards-mcp, The Meridian, Cerebrium Recreation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="page-projects">
+
+  <!-- ══════════ PROJECTS: horizontal scroll chapter (reference casestudy.avi:
+       full-bleed tinted panels passed side-to-side, display type over tint,
+       images reveal through slivers) — GSAP ScrollTrigger pin + xPercent. ══════════ -->
+  <nav class="nav" aria-label="Pages">
+    <a class="nav-mark" href="index.html">AF.77</a>
+    <a class="nav-link is-active" href="projects.html">Projects<sup>2</sup></a>
+    <a class="nav-link" href="about.html">About<sup>3</sup></a>
+  </nav>
+
+  <section class="hwrap" id="hwrap" aria-label="Projects gallery">
+    <div class="htrack" id="htrack">
+      <header class="hpanel hpanel--lead">
+        <p class="kicker">02 &mdash; Projects</p>
+        <h1 class="projects-lead">A Curated Selection<br />of <em>things that ship</em></h1>
+        <p class="hint">Scroll &mdash; the gallery moves sideways &rarr;</p>
+      </header>
+
+      <article class="hpanel panel--cobalt" data-tint>
+        <div class="panel-media" data-sliver><img src="" data-art="phone" alt="awwwards-mcp render" width="1200" height="900" /></div>
+        <div class="panel-copy">
+          <h2 class="panel-type">awwwards-<br />mcp</h2>
+          <p class="panel-meta">MCP server &middot; TypeScript &middot; SQLite<br /><a href="https://www.npmjs.com/package/awwwards-mcp" rel="noopener">npm &rarr;</a></p>
+        </div>
+      </article>
+
+      <article class="hpanel panel--mint" data-tint>
+        <div class="panel-media" data-sliver><img src="" data-art="pirate" alt="The Meridian editorial build" width="1200" height="900" /></div>
+        <div class="panel-copy">
+          <h2 class="panel-type">The<br />Meridian</h2>
+          <p class="panel-meta">Editorial journal &middot; GSAP &middot; ORDR &amp; Hearst references</p>
+        </div>
+      </article>
+
+      <article class="hpanel panel--red" data-tint>
+        <div class="panel-media" data-sliver><img src="" data-art="engine" alt="Cerebrium recreation render" width="1200" height="900" /></div>
+        <div class="panel-copy">
+          <h2 class="panel-type outline">Cerebrium<br />Recreation</h2>
+          <p class="panel-meta">Pixel study &middot; 10,871px vs 10,870px reference</p>
+        </div>
+      </article>
+
+      <article class="hpanel hpanel--outro">
+        <p class="outro-line">More ships<br /><em>soon&trade;</em></p>
+        <a class="cta-chip" href="about.html">About &rarr;</a>
+      </article>
+    </div>
+  </section>
+
+  <noscript><p class="noscript-note">Enable JS for the horizontal gallery — panels are stacked below otherwise.</p></noscript>
+
+  <p class="built-chip">Designed via awwwards-mcp tools &middot; <a href="https://github.com/INSANE0777/Awwards-mcp">the loop that built this</a></p>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="projects.js"></script>
+</body>
+</html>

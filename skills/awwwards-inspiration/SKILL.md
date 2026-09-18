@@ -44,14 +44,27 @@ Run this loop before building anything visual:
    reports a layout-drift error, fall back to judging the shortlisted
    screenshots, `get_site_elements` (which uses a different parser), or a
    `capture_live_site` of the site's URL for a first-hand full-page view.
-6. **Get component-level visuals (when building).** Call `get_site_elements`
-   on shortlisted sites to see individual design elements — 3D models, video
-   content, mobile layouts, microcopy — with poster images inline and video
-   URLs. Treat element posters as texture, not structure: they are video
-   frames (often mid-animation or near-black), not full-section layouts.
+6. **Study MOTION before building (element videos, not posters).** Call
+   `get_site_elements` on shortlisted sites — it returns per-element video
+   URLs (preloader, page transition, case study, about…). **Download those
+   videos and tile them at 1–2 fps BEFORE writing any animation code**:
+   `curl -o e.mp4 <video-url> && ffmpeg -i e.mp4 -vf "fps=2,scale=480:-1,tile=6x4" -frames:v 1 tile-e.jpg`,
+   then Read the tile. Element **posters are single frames** — they show
+   layout, not motion; a 3D carousel looks like floating static cards in a
+   poster (this exact mis-build happened). One tile per element shows you the
+   whole animation arc (easing, overlap, entrance order). If a marquee
+   animation needs finer study, re-tile that video at higher fps. The motion
+   IS the design: every reference animation you ship must trace to frames
+   you actually studied, and reference videos pass through
+   `showcase/ref-motion/` as the design's evidence trail.
 7. **State the design direction before writing code.** In prose: palette
-   (hexes from the references), type mood, layout patterns, and tech choices,
-   each traceable to a reference. Then build.
+   (hexes from the references), type mood, layout patterns, page
+   architecture (one page vs separate horizontal sections — judge this from
+   the reference passages you studied in steps 4–6, not habit), and tech
+   choices, each traceable to a reference. Then build. For a site's own
+   marquee frontend skills, prefer proven patterns (GSAP ScrollTrigger for
+   horizontal scroll chapters, Lenis for smooth scroll) over hand-rolled
+   scroll math.
 8. **Verify structure, then polish.** After building, capture your own build
    full-page (`capture_live_site` on its `file://` or served URL) and run
    `analyze_page_structure` on BOTH the reference and the build. Compare band
@@ -69,8 +82,14 @@ Run this loop before building anything visual:
 - **Dumping raw tool output at the user** — curate: show the shortlist, the
   chosen direction, and why.
 - **Designing from a thumbnail or element poster** — thumbnails are hero-only
-  crops and posters are video frames; neither shows the page's real
-  structure. When the reference URL is known, capture it full-page (step 4).
+  crops, posters are single video frames, and neither shows real structure OR
+  motion. When the reference URL is known, capture it full-page (step 4);
+  when an element has motion, tile its video (step 6) — never animate from
+  posters.
+- **One filmstrip for everything** — a single N×N tiling of the *whole
+  recording* makes late tiles tiny and animation arcs illegible. Tile per
+  element/per passage at 1–2 fps instead; re-tile finer passages at higher
+  fps when easing or overlap matters.
 - **Padding empty bands to match total height** — if your build's total height
   matches the reference but a spacer/background band is far taller than the
   reference's equivalent, the height was stolen from real content sections.

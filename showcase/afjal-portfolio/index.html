@@ -12,112 +12,39 @@
 </head>
 <body class="preload-locked">
 
-  <!-- ══════════ PRELOADER + HERO: the 3D thumb carousel ══════════
-       Reference preloader.avi: thumbnails fly scattered → form a 3D ring
-       that spins (perspective depth: near cards big, far cards small),
-       center label sits in the ring; settles as the hero. -->
+  <!-- ══════════ HOME: the 3D thumb ring (reference preloader.avi) ══════════ -->
   <header class="stage" id="top">
     <div class="backdrop-type" aria-hidden="true">
       <span class="ghost ghost-a">bold ideas</span>
       <span class="ghost ghost-b">ships&trade;</span>
     </div>
 
-    <!-- 3D ring: JS builds the .orb-card transforms (CSS carries perspective) -->
-    <div class="orbit" id="orbit" aria-label="Selected work carousel">
+    <nav class="nav" aria-label="Pages">
+      <a class="nav-mark" href="index.html">AF.77</a>
+      <a class="nav-link" href="projects.html">Projects<sup>2</sup></a>
+      <a class="nav-link" href="about.html">About<sup>3</sup></a>
+    </nav>
+
+    <div class="orbit" id="orbit" aria-hidden="true">
       <div class="orbit-ring" id="orbitRing">
-        <div class="orbit-label" aria-hidden="true">AF<br />&rsquo;26</div>
+        <div class="orbit-label">AF<br />&rsquo;26</div>
       </div>
     </div>
-
-    <nav class="nav" aria-label="Sections">
-      <a class="nav-mark" href="#top">AF.77</a>
-      <a class="nav-link" href="#work">Projects<sup>2</sup></a>
-      <a class="nav-link" href="#about">About<sup>3</sup></a>
-    </nav>
 
     <div class="hero-copy">
       <p class="kicker">01 &mdash; Home</p>
       <h1 class="hero-statement">A <em>Multi-Disciplinary</em><br />Developer</h1>
       <p class="hero-meta">Afjal Hussein &mdash; currently building MCP tools for AI agents</p>
+      <p class="hero-cta">
+        <a class="cta-chip" href="projects.html">Projects &rarr;</a>
+        <a class="cta-chip cta-ghost" href="about.html">About &rarr;</a>
+      </p>
     </div>
   </header>
 
-  <!-- ══════════ PROJECTS: tinted full-bleed panels + sliver-reveal ══════════
-       Reference casestudy.avi/transition.avi: each project is a full-bleed
-       tinted panel (crystal cobalt / engine red), the project image reveals
-       through horizontal slivers on scroll, giant Archivo display type over
-       the tint with outlined display moments. -->
-  <section class="projects" id="work" aria-label="Projects">
-    <p class="projects-lead reveal-node">A Curated Selection of <em>things that ship</em></p>
+  <p class="built-chip">Designed via awwwards-mcp tools &middot; <a href="https://github.com/INSANE0777/Awwards-mcp">the loop that built this</a></p>
 
-    <article class="panel panel--cobalt" data-tint>
-      <div class="panel-media" data-sliver>
-        <img src="" data-art="phone" alt="awwwards-mcp interface render" width="1200" height="1500" />
-      </div>
-      <h2 class="panel-type">awwwards-<br />mcp</h2>
-      <p class="panel-meta reveal-node">MCP server &middot; TypeScript &middot; SQLite &middot; <a href="https://www.npmjs.com/package/awwwards-mcp" rel="noopener">npm</a></p>
-    </article>
-
-    <article class="panel panel--mint" data-tint>
-      <div class="panel-media" data-sliver>
-        <img src="" data-art="pirate" alt="The Meridian editorial build" width="1600" height="1000" />
-      </div>
-      <h2 class="panel-type">The<br />Meridian</h2>
-      <p class="panel-meta reveal-node">Editorial journal &middot; GSAP &middot; ORDR &amp; Hearst references</p>
-    </article>
-
-    <article class="panel panel--red" data-tint>
-      <div class="panel-media" data-sliver>
-        <img src="" data-art="engine" alt="Cerebrium recreation render" width="1600" height="1000" />
-      </div>
-      <h2 class="panel-type outline">Cerebrium<br />Recreation</h2>
-      <p class="panel-meta reveal-node">Pixel study &middot; 10,871px vs 10,870px reference</p>
-    </article>
-  </section>
-
-  <!-- ══════════ ABOUT: pinned 3D model + infinite alternating columns ══════════
-       Reference about.avi: a chrome 3D blob stays pinned center while
-       text columns alternate left/right passing by as you scroll, endlessly. -->
-  <section class="about" id="about" aria-label="About">
-    <div class="about-pin" id="aboutPin">
-      <div class="model-wrap" aria-hidden="true">
-        <div class="model" id="model"> <!-- chrome blob: layered radial-gradients + highlights -->
-          <span class="model-melt" aria-hidden="true"></span>
-        </div>
-      </div>
-      <div class="about-track" id="aboutTrack">
-        <div class="col col--left">
-          <p class="chapter reveal-node">Ch. One</p>
-          <p class="chapter-label reveal-node"><span class="dropcap">Q</span>uality</p>
-          <p class="col-copy reveal-node">I don&rsquo;t produce work just to fill space. Every tool deserves time, care, and intention &mdash; that&rsquo;s where something meaningful takes shape.</p>
-        </div>
-        <div class="col col--right">
-          <p class="col-copy reveal-node">awwwards-mcp exists because agents had Mobbin budgets and humans had taste. A free server that gives coding agents design inspiration &mdash; 2,800+ sites, no API key.</p>
-          <p class="chapter reveal-node">Ch. Two</p>
-          <p class="chapter-label reveal-node"><span class="dropcap">T</span>ools</p>
-        </div>
-        <div class="col col--left">
-          <p class="col-copy reveal-node">The Meridian was built from ORDR and Hearst references the same way &mdash; search, screenshot, band-map compare, then pixels. The loop IS the portfolio.</p>
-          <p class="chapter reveal-node">Ch. Three</p>
-          <p class="chapter-label reveal-node"><span class="dropcap">S</span>tructure</p>
-        </div>
-        <div class="col col--right">
-          <p class="col-copy reveal-node">This site itself ran the loop that built it: every color, layout rhythm, and animation on this page traces to a specific awwwards-mcp tool result.</p>
-        </div>
-      </div>
-      <div class="about-end reveal-node">
-        <p class="about-statement">bold ideas in,<br /><em>stuff that ships</em> out.</p>
-        <nav class="end-links" aria-label="Contact links">
-          <a href="https://github.com/INSANE0777" rel="noopener">GitHub</a>
-          <a href="https://www.npmjs.com/package/awwwards-mcp" rel="noopener">npm</a>
-          <a href="mailto:insaneafjal@gmail.com">Email</a>
-        </nav>
-      </div>
-    </div>
-  </section>
-
-  <p class="built-chip">This page: designed via awwwards-mcp tools, one prompt &middot; <a href="https://github.com/INSANE0777/Awwards-mcp">the loop that built it</a></p>
-
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
