@@ -168,73 +168,110 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
-## Built with awwwards-mcp: a real portfolio
+## Built with awwwards-mcp: three real sites
 
-This project's own showcase — **[showcase/afjal-portfolio](showcase/afjal-portfolio/)**,
-[open index.html locally](showcase/afjal-portfolio/index.html) — is a personal
-portfolio built through the full inspiration loop this MCP enables, using
-nothing but the server's tools. Three pages: the 3D thumbnail-ring home
-(reference preloader), a **horizontal** projects gallery (reference case
-studies, GSAP ScrollTrigger pin), and a **horizontal** about chapter where a
-chrome model holds center while text passes by (reference about).
+Three complete sites were built through the full inspiration loop this MCP
+enables, using nothing but the server's tools plus the shipped
+`awwwards-inspiration` skill. Each one exercised a different corner of the
+loop — and every correction the loop caught on the way became doctrine in the
+skill.
 
-**The loop, as it ran** (skill used: `awwwards-inspiration`, shipped in this
-package — its 8-step structure-before-pixels doctrine drove every step):
+**1. [Fallow Press](fallow-press/index.html)**
+([source](fallow-press/)) — a flat-2D editorial journal, direction
+**Emergence Magazine** (SOTD): pink `#FF9398` on cream and black, torn-paper
+masthead (pure CSS `clip-path`, zero WebGL), giant grotesque display over
+grayscale photography, serif-italic brand, three pages with **separate
+horizontal** projects/about pages (GSAP ScrollTrigger pin +
+`containerAnimation`).
 
-1. `list_categories` grounded the filter vocabulary (two combined-filter
-   searches came back empty first — that's what step 2 of the skill is for).
-2. `search_sites` `{ award: "sotd", tags: ["portfolio", "typography"] }`
-   returned 25 proven portfolios with **inline screenshots** — shortlist
-   judged from the images, not titles.
-3. `get_site_details` on the pick,
-   [Gionatan Nese '26](https://www.awwwards.com/sites/gionatan-nese-26)
-   (SOTD, jury 7.32) — design DNA: palette `#000`/`#FFF`, serif
-   statement-over-canvas, tiny metadata rhythm.
-4. `get_site_elements` pulled component-level anatomy — and here the loop
-   taught its biggest lesson: **element posters lie**. The first build was
-   designed from poster frames alone and rendered the hero as *floating
-   static cards*. Downloading the actual element videos (from the CDN URLs
-   the tool returns) and frame-tiling them revealed the truth: the hero is a
-   **spinning 3D thumbnail ring with perspective depth**, projects are
-   **full-bleed tinted panels with giant display type and sliver image
-   reveals**, and the about page is a **pinned chrome 3D model with text
-   passing by**. The showcase was rebuilt motion-true (pure CSS 3D, no
-   WebGL) — and restructured into separate horizontal pages per review.
-5. `capture_live_site` caught the live reference's layout first-hand and
-   build bugs (invisible `.reveal` content → fixed with progressive
-   enhancement; `file://` capture caching → `?v=N` cache-buster).
-6. `analyze_page_structure` ran on BOTH the reference and the build — band
-   maps compared, never just total height.
-7. `record_site_motion` filmed all three pages: the spinning ring mid-
-   rotation, the projects gallery sliding past the cobalt and mint panels,
-   and the chrome model holding center while chapters pass (with the
-   recorder's own hover interactions on camera).
+| Torn-paper masthead (home) | Horizontal gallery (Fields) | Horizontal chapters (Practices) |
+|---|---|---|
+| ![Fallow Press home — torn-paper masthead over grayscale photography](docs/images/fallow-home.jpg) | ![Fallow Press Fields — pinned horizontal gallery panel](docs/images/fallow-fields.jpg) | ![Fallow Press Practices — pink quote chapter](docs/images/fallow-practices.jpg) |
 
-Prompt count: **3** — (1) the build ask, (2) the motion correction that
-exposed the poster-lie ("did you see how the preloader animates?"), (3) the
-structure pass ("projects and about should be horizontal pages… capture
-live sites and animation BEFORE building"). Each correction became doctrine
-in the shipped `awwwards-inspiration` skill: frame-study element videos
-before animating; judge page architecture from the studied passages; tile
-per element, not one giant filmstrip.
+The loop as it ran:
 
-**Frontend skills engaged during the build** (from ZCode's skill library):
-`awwwards-inspiration` (the loop itself) and `gsap-scrolltrigger` (the
-horizontal pin + containerAnimation pattern). Reduced-motion, JS-less
-visits, and capture tools all get graceful fallbacks (`no-h` vertical
-stacks; progressive-enhancement reveals).
+1. `search_sites` (magazine filters) → shortlist judged from inline
+   screenshots → `get_site_details` on Emergence Magazine.
+2. **Capture before building**: `capture_live_site` + `record_site_motion`
+   on the live site *first*; full-page PNG and motion .webm kept in
+   [fallow-press/ref-motion/](fallow-press/ref-motion/) as the evidence trail.
+3. Build, then verify: full-page capture plus **panel-center pin shots** of
+   both horizontal pages (13 stops each, in
+   [fallow-press/_qa/](fallow-press/_qa/) — `capture-qa.mjs` is reusable).
+4. The pin shots caught a real bug: horizontal-panel entrances used
+   `toggleActions: "play none none reverse"`, and 100vw panels hide content
+   at midpoints on the way back — copy disappeared mid-view. Fix
+   (one-shot play entrances) is now doctrine: **full-viewport panels get
+   one-shot entrances**; QA pin shots land at panel **centers**, not uniform
+   fractions, or you photograph empty transition zones.
+
+**2. Cerebrium recreation** (`C:/Users/Afjal/cerebrium-recreation/`) — a
+fidelity-first recreation of cerebrium.ai, pixel-checked against the live
+reference: full-page captures of both sides, `analyze_page_structure` band
+compare, and SVG icon/legend fixes until the build matched the reference to
+within 1px of total page height (10,871px vs 10,870px). This is the
+**structure-before-pixels** doctrine at its strictest — band maps compared,
+never just totals.
+
+![Cerebrium recreation — full-page build capture](docs/images/cerebrium-build.jpg)
+
+**3. The Meridian** (`C:/Users/Afjal/editorial-site/`) — an editorial journal
+built from ORDR/Hearst references: the first build to run the whole loop
+end-to-end. `analyze_page_structure` caught a masthead band bug by comparing
+the build's band map against the reference's; the reference captures,
+motion film, and the reusable pre-scroll capture script live in
+`editorial-site/_qa/`.
+
+![The Meridian editorial journal — full-page build capture](docs/images/meridian-build.jpg)
+
+![The Meridian — motion filmstrip from record_site_motion](docs/images/meridian-filmstrip.jpg)
+
+**An early lesson in one image** — the original showcase build's hero,
+designed from element *posters* alone, rendered a spinning 3D ring as
+floating static cards. The frame-tiled videos exposed the motion truth and
+became the skill's poster-lie doctrine:
+
+![Frame-tiled preloader video — the 3D thumbnail ring mid-rotation](docs/images/ex-showcase-ring.jpg)
+
+## Skills used to build these
+
+| Skill | Role in the builds |
+|---|---|
+| `awwwards-inspiration` | The 8-step loop itself (ships with this package): search → judge from screenshots → design DNA → capture/motion study → state direction → build → band-map verify. |
+| `gsap-scrolltrigger` | The horizontal pin + `containerAnimation` pattern (ease `"none"`, one-shot entrances) driving both Fallow Press horizontal pages. |
+| `gsap-core` / `gsap-timeline` | Tween composition and sequenced hero entrances (torn-paper drop, panel copy rises). |
+| `frontend-design` | Typography, palette and layout judgment applied when translating reference DNA into original pages. |
+| `lenis` (library, via skill guidance) | smooth scrolling synced to ScrollTrigger on the Fallow Press home page. |
+| `tailwindcss` / plain CSS | All builds are plain hand-rolled CSS — flat 2D, no frameworks needed. |
+
+Reduced-motion, JS-less visits, and capture tools all get graceful fallbacks
+(vertical stacks; progressive-enhancement reveals).
 
 **What the verification loop caught** — proof the structure-before-pixels
 doctrine is load-bearing:
 
-- Full-page captures initially showed blank sections: `.reveal` animation
-  state vs capture's no-scroll reality. The build ships
+- Element **posters lie**: the first showcase build was designed from poster
+  frames alone and rendered a spinning 3D ring as *floating static cards*.
+  Downloading the element videos (`get_site_elements`) and frame-tiling them
+  revealed the motion truth — now the skill mandates studying motion before
+  animating.
+- Full-page captures of reveal-on-scroll builds showed blank sections: `.reveal`
+  animation state vs capture's no-scroll reality. Builds ship
   content-visible-without-JS progressive enhancement.
-- The v2 motion film caught the preload scroll-lock interacting with
-  reduced-motion; the lock now never applies to capture tools or JS-less
-  visits.
-- Band-map compare kept the reference's rhythm instead of drifting on
-  section heights.
+- Horizontal-panel copy vanished **mid-view** on the Fallow Press pages:
+  `toggleActions` reverse reverts entrances while a 100vw panel is still
+  holding the viewport (see above).
+- Band-map compare kept the references' rhythm instead of drifting on
+  section heights (Cerebrium, The Meridian).
+
+Prompt counts: **3** for the original showcase build (the build ask, the
+motion correction that exposed the poster-lie, the structure pass) and
+**1** for Fallow Press ("create a new website using our MCP and skills… no
+3D websites") — its two follow-ups were caught by the QA loop, not by the
+user. Each correction became doctrine in the shipped `awwwards-inspiration`
+skill: frame-study element videos before animating; judge page architecture
+from the studied passages; tile per element, not one giant filmstrip;
+capture live sites and animation **before** building.
 
 ## Can awwwards-mcp crawl the sitemap? (robots.txt notes)
 
