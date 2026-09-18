@@ -49,7 +49,7 @@ Run this loop before building anything visual:
    URLs (preloader, page transition, case study, about…). **Download those
    videos and tile them at 1–2 fps BEFORE writing any animation code**:
    `curl -o e.mp4 <video-url> && ffmpeg -i e.mp4 -vf "fps=2,scale=480:-1,tile=6x4" -frames:v 1 tile-e.jpg`,
-   then Read the tile. Element **posters are single frames** — they show
+   then Read the tile. (The full capture→review→build procedure — what to record, what to skip, motion inventories, build verification — is the `awwwards-motion-study` skill.) Element **posters are single frames** — they show
    layout, not motion; a 3D carousel looks like floating static cards in a
    poster (this exact mis-build happened). One tile per element shows you the
    whole animation arc (easing, overlap, entrance order). If a marquee

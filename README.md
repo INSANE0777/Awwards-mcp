@@ -118,18 +118,19 @@ package automatically if present.
 
 ## Skills
 
-This package ships two agent skills. Any agent that follows the
+This package ships three agent skills. Any agent that follows the
 [Agent Skills standard](https://agentskills.io) can load them; copy them into
 your agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-doctor ~/.agents/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study ~/.agents/skills/
 ```
 
 | Skill | What it teaches |
 |-------|-----------------|
 | `awwwards-inspiration` | The inspiration loop: search, judge from screenshots, pull design DNA, state a design direction, capture/motion-first builds. |
+| `awwwards-motion-study` | The full video chain: what to record from a live site (and what to skip), frame-by-frame review (video input or tile-per-element), the motion inventory, and build verification by re-recording. |
 | `awwwards-doctor` | Repair: run `npm run doctor`, apply its fixes, re-anchor parsers after real awwwards.com drift, recover the in-flight task that surfaced the failure. |
 
 | Agent | Skills directory |
