@@ -68,6 +68,9 @@ Capture rules that prevent re-shoots:
 - **Capture BEFORE building** — the doctrine step. Review first, code second.
 - Use a **consistent viewport** (1440×900 matches the QA scripts) so your
   reference tiles and build tiles are comparable.
+- For phone-class references pass `record_site_motion` a `viewport: "mobile"`
+  (390×844 @3x with isMobile + hasTouch) — and capture BOTH viewports when
+  the desktop and mobile designs diverge.
 - **Pre-scroll** to fire lazy content, scroll back to top, then record —
   otherwise reveal-on-scroll sections record as blank boxes.
 - For multi-page sites, record **each page** you'll rebuild (home, projects,

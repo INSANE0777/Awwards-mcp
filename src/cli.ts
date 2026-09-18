@@ -28,6 +28,13 @@ const waitStrategySchema = z
   .default("load")
   .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet");
 
+const viewportSchema = z
+  .enum(["desktop", "mobile"])
+  .default("desktop")
+  .describe(
+    "desktop = 1440x900 (default); mobile = 390x844 iPhone-class with deviceScaleFactor 3, isMobile + hasTouch",
+  );
+
 const cacheRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
 let cache: Cache;
 try {
@@ -118,6 +125,7 @@ server.tool(
   {
     url: z.string().url().describe("Absolute URL of the site to capture"),
     waitStrategy: waitStrategySchema,
+    viewport: viewportSchema,
   },
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
@@ -129,6 +137,7 @@ server.tool(
     url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
     maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
     waitStrategy: waitStrategySchema,
+    viewport: viewportSchema,
   },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
 );
@@ -146,6 +155,7 @@ server.tool(
       .default(16)
       .describe("Filmstrip tile count (default 16 → a 4x4 grid)"),
     waitStrategy: waitStrategySchema,
+    viewport: viewportSchema,
   },
   (args) => asMcpResult(handlers.record_site_motion(args)),
 );

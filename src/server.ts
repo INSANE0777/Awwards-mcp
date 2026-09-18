@@ -9,6 +9,7 @@ import {
 import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
+import type { ViewportName } from "./viewport.js";
 import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
@@ -54,7 +55,12 @@ export type AnalyzeFn = (
 
 export type MotionFn = (
   url: string,
-  opts: { cacheImagesDir: string; frames?: number; waitStrategy?: WaitStrategy },
+  opts: {
+    cacheImagesDir: string;
+    frames?: number;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+  },
 ) => Promise<{ file: string; base64: string; frames: number } | { error: string }>;
 
 export function slugifyTag(s: string): string {
@@ -123,16 +129,22 @@ export interface Handlers {
   get_site_details(args: { slug: string }): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
-  capture_live_site(args: { url: string; waitStrategy?: WaitStrategy }): Promise<ToolResponse>;
+  capture_live_site(args: {
+    url: string;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+  }): Promise<ToolResponse>;
   analyze_page_structure(args: {
     url: string;
     maxBands?: number;
     waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
   }): Promise<ToolResponse>;
   record_site_motion(args: {
     url: string;
     frames?: number;
     waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
   }): Promise<ToolResponse>;
 }
 
@@ -517,6 +529,7 @@ export function createHandlers(deps: {
   async function capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -526,7 +539,12 @@ export function createHandlers(deps: {
         deps.captureFn ??
         ((url: string, imagesDir: string, opts?: WaitOpts) =>
           import("./capture.js").then((m) => m.captureLiveSite(url, imagesDir, undefined, opts)));
-      const result = await capture(args.url, cache.imagesDir, { waitStrategy: args.waitStrategy });
+      // The tool schema defaults viewport to "desktop" (zod); the ?? keeps
+      // direct handler calls on the same explicit path.
+      const result = await capture(args.url, cache.imagesDir, {
+        waitStrategy: args.waitStrategy,
+        viewport: args.viewport ?? "desktop",
+      });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return {
         content: [
@@ -543,6 +561,7 @@ export function createHandlers(deps: {
     url: string;
     maxBands?: number;
     waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -556,6 +575,7 @@ export function createHandlers(deps: {
           ));
       const structure = await analyze(args.url, args.maxBands, {
         waitStrategy: args.waitStrategy,
+        viewport: args.viewport ?? "desktop",
       });
       if ("error" in structure) return { content: [text(structure.error)], isError: true };
       return { content: [text(JSON.stringify(structure, null, 1))] };
@@ -568,19 +588,28 @@ export function createHandlers(deps: {
     url: string;
     frames?: number;
     waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright/ffmpeg are only touched when the tool runs.
-      // The default forwards motionOpts wholesale, so waitStrategy flows into
-      // recordSiteMotion's MotionOpts (which already accepts it).
+      // The default forwards motionOpts wholesale, so waitStrategy and viewport
+      // flow into recordSiteMotion's MotionOpts (which already accepts both).
       const motion =
         deps.motionFn ??
-        ((url: string, motionOpts: { cacheImagesDir: string; frames?: number; waitStrategy?: WaitStrategy }) =>
-          import("./motion.js").then((m) => m.recordSiteMotion(url, motionOpts)));
+        ((
+          url: string,
+          motionOpts: {
+            cacheImagesDir: string;
+            frames?: number;
+            waitStrategy?: WaitStrategy;
+            viewport?: ViewportName;
+          },
+        ) => import("./motion.js").then((m) => m.recordSiteMotion(url, motionOpts)));
       const result = await motion(args.url, {
         cacheImagesDir: cache.imagesDir,
         frames: args.frames,
         waitStrategy: args.waitStrategy,
+        viewport: args.viewport ?? "desktop",
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return {

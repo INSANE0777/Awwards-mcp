@@ -557,20 +557,33 @@ describe("analyze_page_structure", () => {
     expect((res.content[0] as any).text).toContain("install playwright");
   });
 
-  it("forwards maxBands to the analyzer", async () => {
+  it("forwards maxBands and the viewport to the analyzer", async () => {
     const cache = new Cache(tmpDir());
     const { client } = fakeClient();
-    const seen: Array<{ url: string; maxBands?: number }> = [];
+    const seen: Array<{
+      url: string;
+      maxBands?: number;
+      opts?: { waitStrategy?: string; viewport?: string };
+    }> = [];
     const h = createHandlers({
       client,
       cache,
-      analyzeFn: async (url: string, maxBands?: number) => {
-        seen.push({ url, maxBands });
+      analyzeFn: async (
+        url: string,
+        maxBands?: number,
+        opts?: { waitStrategy?: string; viewport?: string },
+      ) => {
+        seen.push({ url, maxBands, opts });
         return { url, title: "T", totalHeight: 100, bands: [] };
       },
     });
-    await h.analyze_page_structure({ url: "https://example.com", maxBands: 10 });
-    expect(seen[0]).toEqual({ url: "https://example.com", maxBands: 10 });
+    await h.analyze_page_structure({
+      url: "https://example.com",
+      maxBands: 10,
+      viewport: "mobile",
+    });
+    expect(seen[0]?.maxBands).toBe(10);
+    expect(seen[0]?.opts).toMatchObject({ viewport: "mobile" });
   });
 });
 
@@ -580,7 +593,7 @@ describe("record_site_motion", () => {
     const { client } = fakeClient();
     const seen: Array<{
       url: string;
-      opts: { cacheImagesDir: string; frames?: number; waitStrategy?: string };
+      opts: { cacheImagesDir: string; frames?: number; waitStrategy?: string; viewport?: string };
     }> = [];
     const h = createHandlers({
       client,
@@ -598,6 +611,7 @@ describe("record_site_motion", () => {
       url: "https://example.com",
       frames: 12,
       waitStrategy: "networkidle",
+      viewport: "mobile",
     });
     expect(res.isError).toBeUndefined();
     expect((res.content[0] as any).text).toBe(
@@ -610,7 +624,12 @@ describe("record_site_motion", () => {
     });
     expect(seen[0]).toEqual({
       url: "https://example.com",
-      opts: { cacheImagesDir: cache.imagesDir, frames: 12, waitStrategy: "networkidle" },
+      opts: {
+        cacheImagesDir: cache.imagesDir,
+        frames: 12,
+        waitStrategy: "networkidle",
+        viewport: "mobile",
+      },
     });
   });
 
@@ -625,5 +644,59 @@ describe("record_site_motion", () => {
     const res = await h.record_site_motion({ url: "https://example.com" });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("ffmpeg-static");
+  });
+});
+
+describe("viewport threading", () => {
+  it("threads viewport: mobile through capture_live_site to the capture fn", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<{ url: string; opts?: { waitStrategy?: string; viewport?: string } }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      captureFn: async (url: string, imagesDir: string, opts?: { viewport?: string }) => {
+        seen.push({ url, opts });
+        return { file: join(imagesDir, "shot.png"), base64: Buffer.from("png").toString("base64") };
+      },
+    });
+    const res = await h.capture_live_site({ url: "https://example.com", viewport: "mobile" });
+    expect(res.isError).toBeUndefined();
+    expect(seen[0]?.url).toBe("https://example.com");
+    expect(seen[0]?.opts).toMatchObject({ viewport: "mobile" });
+  });
+
+  it("arrives as desktop when viewport is omitted (zod default path)", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const captured: {
+      capture?: unknown;
+      analyze?: unknown;
+      motion?: unknown;
+    } = {};
+    const h = createHandlers({
+      client,
+      cache,
+      captureFn: async (_url: string, _imagesDir: string, opts?: unknown) => {
+        captured.capture = opts;
+        return { file: "shot.png", base64: Buffer.from("png").toString("base64") };
+      },
+      analyzeFn: async (_url: string, _maxBands?: number, opts?: unknown) => {
+        captured.analyze = opts;
+        return { url: "https://example.com", title: "T", totalHeight: 100, bands: [] };
+      },
+      motionFn: async (_url: string, opts?: unknown) => {
+        captured.motion = opts;
+        return { file: "m.webm", base64: Buffer.from("strip").toString("base64"), frames: 16 };
+      },
+    });
+    // Tool callers omitting viewport get zod's "desktop" default; the handler
+    // normalizes direct calls to the same explicit value.
+    await h.capture_live_site({ url: "https://example.com" });
+    await h.analyze_page_structure({ url: "https://example.com" });
+    await h.record_site_motion({ url: "https://example.com" });
+    expect(captured.capture).toMatchObject({ viewport: "desktop" });
+    expect(captured.analyze).toMatchObject({ viewport: "desktop" });
+    expect(captured.motion).toMatchObject({ viewport: "desktop" });
   });
 });

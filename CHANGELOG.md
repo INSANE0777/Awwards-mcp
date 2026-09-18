@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.0 — 2026-09-19
+
+Mobile viewports:
+
+- `capture_live_site`, `analyze_page_structure` and `record_site_motion`
+  accept `viewport: "desktop" | "mobile"` (mobile = 390×844 @3x with
+  isMobile + hasTouch; desktop 1440×900 default, byte-identical).
+- Motion recordings render at the selected viewport — no more pillarboxed
+  mobile filmstrips.
+
 ## v1.2.0 — 2026-09-19
 
 Adoption kit:

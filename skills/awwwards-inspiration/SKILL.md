@@ -38,7 +38,9 @@ Run this loop before building anything visual:
    full-page PNG — every section, top to bottom. Cached Awwwards screenshots
    are hero-only crops (~880×660) and hide everything below the fold: the
    sections that make a site's structure distinctive (pricing, feature
-   layouts, contrast breaks, footer) were never visible in them.
+   layouts, contrast breaks, footer) were never visible in them. For
+   mobile-excellence references pass `viewport: "mobile"` — and capture BOTH
+   viewports when the desktop and mobile designs diverge.
 5. **Get the design DNA.** Call `get_site_details` on the top pick for its
    palette, technologies, design elements, awards, and description. If it
    reports a layout-drift error, fall back to judging the shortlisted
@@ -68,8 +70,10 @@ Run this loop before building anything visual:
 8. **Verify structure, then polish.** After building, capture your own build
    full-page (`capture_live_site` on its `file://` or served URL) and run
    `analyze_page_structure` on BOTH the reference and the build. Compare band
-   maps section by section (count, order, backgrounds, heights). Fix
-   distribution mismatches first — a section that is 3× the reference's height
+   maps section by section (count, order, backgrounds, heights). Match the
+   reference's viewport when comparing: for mobile-excellence references pass
+   `viewport: "mobile"`, and capture BOTH viewports when the design diverges.
+   Fix distribution mismatches first — a section that is 3× the reference's height
    is a structural bug no amount of pixel polish fixes. Match the reference's
    band structure, never just its total height.
 
