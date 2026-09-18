@@ -9,12 +9,15 @@ sourced from the web's best award-winning websites.
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
 e-commerce"), sees **real screenshots inline**, and can pull the **design DNA**
 of any site: color palette, tech stack, design elements, award history.
+Free-text queries are full-text (FTS5) and BM25-ranked — multi-word input like
+"editorial magazine" matches words scattered across titles and tags, with title
+hits leading the results.
 
 ## Tools
 
 | Tool | What it does |
 |------|--------------|
-| `search_sites` | Search by color, tags, technology or award type. Returns site cards with inline screenshots. |
+| `search_sites` | Search by color, tags, technology, award type or free-text query. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Returns site cards with inline screenshots. |
 | `get_site_details` | Full design DNA for one site: palette, technologies, elements, awards, description. |
 | `get_site_elements` | Component-level visuals for one site: each element's poster image inline (3D models, video content, mobile layouts, microcopy…) + video URLs. |
 | `list_categories` | Every filter the agent can search by (200+ tags, 27 colors). |

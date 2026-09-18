@@ -31,6 +31,8 @@ Run this loop before building anything visual:
 3. **Search.** Call `search_sites` with 1–3 filters (e.g.
    `{ color: "#404040", tags: ["3d", "portfolio"] }`). Judge the results from
    the inline screenshots, not just titles. Shortlist 2–3 candidates.
+   Multi-word queries work (`"editorial magazine"`); results are BM25-ranked
+   (title hits lead).
 4. **Live reference URL named? Capture it full-page first.** (and later capture
    your own build the same way — compare both against each other) If the user
    points at a specific live site (e.g. "recreate cerebrium.ai"), call

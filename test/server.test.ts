@@ -471,6 +471,67 @@ describe("search query tokenization", () => {
     // token, so the scoring rule leaves it at 0 and it must not be suggested.
     expect(text).not.toContain("storytelling");
   });
+
+  it("matches multi-word queries against the FTS cache (historical failure)", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "mag", title: "Editorial Mag", tags: ["Magazine / Newspaper / Blog"] })]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "editorial magazine", count: 6 });
+    expect(res.content[0]).toHaveProperty("text");
+    expect((res.content[0] as any).text).toContain("mag");
+    // 1 FTS row < count 6: the partial-window top-up merge still fires under
+    // FTS routing (the scraped rows are client-checked and dropped here).
+    const pageCalls = fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"));
+    expect(pageCalls.length).toBe(1);
+    // The porter stem matches where substring search cannot: "magazines"
+    // appears nowhere in the title/tag text ("Magazine" does).
+    const stemmed = await h.search_sites({ query: "editorial magazines", count: 6 });
+    expect((stemmed.content[0] as any).text).toContain("mag");
+  });
+
+  it("orders query results by bm25 rank, not createdAt (title hit leads)", async () => {
+    const cache = new Cache(tmpDir());
+    // The tag-only-style longer-title hit is NEWER, so the legacy
+    // newest-first sort would serve it first; bm25 ranks the short-title
+    // exact hit first. This goes through the partial-window merge (2 rows <
+    // count 6), so it also pins the merge's keep-rank-order behavior.
+    cache.upsertSites([
+      site({ slug: "magazine-post", title: "A Magazine Post About Editorial Things", createdAt: 1789516800 + 500 }),
+      site({ slug: "editorial-mag", title: "Editorial Mag", createdAt: 1789516800 }),
+    ]);
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "editorial", count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text.indexOf("editorial-mag")).toBeLessThan(text.indexOf("magazine-post"));
+  });
+
+  it("falls back to the legacy substring path when FTS5 is unavailable", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "mag", title: "Editorial Mag", tags: ["Magazine / Newspaper / Blog"] })]);
+    // Simulate an FTS-less Node build: drop the derived table via the test
+    // hook and flip the cached capability flag so the probe never re-fires.
+    cache.withDbForTest((db) => db.exec("DROP TABLE sites_fts"));
+    cache.ftsAvailable = false;
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "editorial", count: 6 });
+    expect((res.content[0] as any).text).toContain("mag");
+  });
+
+  it("hints loose OR matches on FTS zero results", async () => {
+    const cache = new Cache(tmpDir());
+    // "half" matches the "editorial" token but not the AND of both tokens,
+    // so the strict search is empty while the loose hint names it.
+    cache.upsertSites([site({ slug: "half", title: "Editorial Only", tags: [] })]);
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "editorial magazine", count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("No sites matched");
+    expect(text).toContain("Loose matches (any token): half");
+  });
 });
 
 describe("suggestTags", () => {

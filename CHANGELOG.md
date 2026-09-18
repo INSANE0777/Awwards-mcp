@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.0 — 2026-09-19
+
+Search intelligence (FTS5 — no new dependencies):
+
+- `search_sites` queries now match multi-word input ("editorial magazine"
+  historically returned nothing), rank by BM25 (title hits lead), and match
+  prefixes + porter stems ("edito" finds "editorial").
+- Zero-result queries gain loose OR-matched hints alongside the taxonomy
+  suggestions. Live top-up merge and client-side filters unchanged.
+
 ## v1.3.0 — 2026-09-19
 
 Mobile viewports:

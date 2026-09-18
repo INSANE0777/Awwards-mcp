@@ -181,12 +181,19 @@ export class Cache {
     });
   }
 
-  // Full-text search over cached sites. Each token is ANDed as a
-  // porter-stemmed prefix term, so multi-word queries match rows where the
-  // words are scattered across title/tags/awards. Results are bm25-ascending
-  // (best match first). Returns null when FTS5 is unavailable on this build
-  // or the query has no usable tokens — callers fall back to legacy search.
-  searchSites(query: string, maxAgeMs: number, limit = 200): SiteSummary[] | null {
+  // Full-text search over cached sites. matchMode "AND" (default) requires
+  // every token; "OR" matches rows containing any token (the server uses OR
+  // for its zero-result "loose matches" hint). Each token is a porter-stemmed
+  // prefix term, so multi-word queries match rows where the words are
+  // scattered across title/tags/awards. Results are bm25-ascending (best
+  // match first). Returns null when FTS5 is unavailable on this build or the
+  // query has no usable tokens — callers fall back to legacy search.
+  searchSites(
+    query: string,
+    maxAgeMs: number,
+    limit = 200,
+    matchMode: "AND" | "OR" = "AND",
+  ): SiteSummary[] | null {
     // Sanitization strips quotes/parens/operators, leaving [a-z0-9-] only —
     // the quoted `"tok"*` MATCH string below cannot inject FTS syntax.
     const tokens = query.toLowerCase().split(/\s+/)
@@ -195,7 +202,7 @@ export class Cache {
     if (!tokens.length) return null;
     return this.withDb((db) => {
       if (!this.ftsAvailable) return null;
-      const match = tokens.map((t) => `"${t}"*`).join(" AND ");
+      const match = tokens.map((t) => `"${t}"*`).join(matchMode === "OR" ? " OR " : " AND ");
       const min = this.now() - maxAgeMs;
       const rows = db.prepare(
         `SELECT s.* FROM sites_fts

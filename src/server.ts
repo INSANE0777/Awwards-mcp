@@ -169,7 +169,17 @@ export function createHandlers(deps: {
   //   filter was applied, so check every client-checkable filter. Color is
   //   never client-checkable (site rows carry no colors); it is handled by
   //   never serving color searches from cache (see search_sites).
-  function matchesFilters(s: SiteSummary, f: SearchArgs, honorUrlSource: boolean): boolean {
+  // skipQueryCheck=true: the rows already matched the free-text query through
+  // FTS (prefix+stem semantics); re-checking with substring semantics would
+  // wrongly drop stem matches ("magazines" → "Magazine"), so only the
+  // non-query filters run. Scraped rows keep the check (default false) — they
+  // never came from FTS.
+  function matchesFilters(
+    s: SiteSummary,
+    f: SearchArgs,
+    honorUrlSource: boolean,
+    skipQueryCheck = false,
+  ): boolean {
     const source = urlSource(f);
     if (f.tags?.length) {
       const tagsToCheck =
@@ -186,7 +196,7 @@ export function createHandlers(deps: {
     if (f.award && !(honorUrlSource && source === "award")) {
       if (!s.awards.includes(AWARD_FILTER_LABELS[f.award])) return false;
     }
-    if (f.query) {
+    if (f.query && !skipQueryCheck) {
       const queryTokens = tokenizeQuery(f.query);
       if (queryTokens.length) {
         const hay = (s.title + " " + s.tags.join(" ")).toLowerCase();
@@ -231,18 +241,41 @@ export function createHandlers(deps: {
       // Color can't be verified client-side (site rows carry no colors), so a
       // color search always scrapes its filter page; everything else is
       // client-checkable against the index.
-      let sites = args.color
-        ? []
-        : cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args, false));
+      let sites: SiteSummary[];
+      let ftsRows = false; // query served from FTS-ranked rows (bm25 order)
+      let ftsEmpty = false; // FTS ran and matched nothing → loose hints apply
+      if (args.color) {
+        sites = [];
+      } else if (args.query) {
+        const ranked = cache.searchSites(args.query, SITE_TTL_MS);
+        if (ranked) {
+          ftsRows = true;
+          ftsEmpty = ranked.length === 0;
+          // FTS already applied the query (prefix+stem, bm25-ranked). Re-check
+          // only the non-query filters; re-checking the query here with
+          // substring semantics would wrongly drop prefix/stem matches.
+          // Array.filter preserves the bm25 order.
+          sites = ranked.filter((s) => matchesFilters(s, args, false, true));
+        } else {
+          // FTS5 unavailable or no usable tokens: legacy substring path.
+          sites = cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args, false));
+        }
+      } else {
+        sites = cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args, false));
+      }
       // A scrape normally REPLACES the matched rows (fresh rows are only
       // guaranteed the URL filter), so it must run when the cache cannot serve
       // the requested page window at all. When the window is only PARTIALLY
-      // filled (e.g. a tokenized query matched 3 cached rows for count 6),
-      // replacing would discard already-verified matches — those runs scrape
-      // the filter page and MERGE instead: dedupe by slug, verified cache rows
-      // win duplicate slugs, scraped-only rows appended, all newest-first like
-      // getSites; the merge result is client-checked as before (cache rows
-      // already passed matchesFilters(false), scraped rows matchesFilters(true)).
+      // filled (e.g. a query matched 3 cached rows for count 6), replacing
+      // would discard already-verified matches — those runs scrape the filter
+      // page and MERGE instead: dedupe by slug, verified cache rows win
+      // duplicate slugs, scraped-only rows appended; the merge result is
+      // client-checked as before (cache rows already passed matchesFilters,
+      // scraped rows matchesFilters(true)). Non-FTS runs sort everything
+      // newest-first like getSites; FTS runs keep the bm25-ranked cache rows
+      // first in rank order and append the scraped-only rows newest-first
+      // among themselves — re-sorting ranked rows by createdAt would destroy
+      // the ranking the query asked for.
       const pageWindowEmpty = sites.slice((page - 1) * count, page * count).length === 0;
       const pageWindowPartial = !pageWindowEmpty && sites.length < page * count;
       if (pageWindowEmpty) {
@@ -276,12 +309,23 @@ export function createHandlers(deps: {
           if (parsed.length > 0) {
             cache.upsertSites(parsed);
             const fresh = parsed.filter((s) => matchesFilters(s, args, true));
-            const bySlug = new Map<string, SiteSummary>();
-            // Scraped rows seed the map; verified cache rows then overwrite any
-            // duplicate slug, so they always win.
-            for (const s of fresh) bySlug.set(s.slug, s);
-            for (const s of sites) bySlug.set(s.slug, s);
-            sites = [...bySlug.values()].sort((a, b) => b.createdAt - a.createdAt);
+            if (ftsRows) {
+              // Ranked cache rows keep their bm25 order; scraped-only rows
+              // append newest-first (cache rows win duplicate slugs, as
+              // everywhere — a slug in the ranked set is never re-added).
+              const rankedSlugs = new Set(sites.map((s) => s.slug));
+              const scrapedOnly = fresh
+                .filter((s) => !rankedSlugs.has(s.slug))
+                .sort((a, b) => b.createdAt - a.createdAt);
+              sites = [...sites, ...scrapedOnly];
+            } else {
+              const bySlug = new Map<string, SiteSummary>();
+              // Scraped rows seed the map; verified cache rows then overwrite any
+              // duplicate slug, so they always win.
+              for (const s of fresh) bySlug.set(s.slug, s);
+              for (const s of sites) bySlug.set(s.slug, s);
+              sites = [...bySlug.values()].sort((a, b) => b.createdAt - a.createdAt);
+            }
           }
         } catch {
           /* keep cached rows; an empty parse is equally tolerated above */
@@ -291,6 +335,17 @@ export function createHandlers(deps: {
       const ordered = orderByScore(sites, args.sortBy);
       const slice = ordered.slice((page - 1) * count, page * count);
       if (slice.length === 0) {
+        // Loose-match hint, computed once: only for genuine FTS zero results
+        // (FTS ran and matched nothing) — rows dropped by the non-query
+        // filters are not "loose matches". Up to 3 OR-relaxed slugs.
+        let looseHint = "";
+        if (ftsEmpty && args.query) {
+          const orSlugs = (cache.searchSites(args.query, SITE_TTL_MS, 3, "OR") ?? [])
+            .map((s) => s.slug);
+          if (orSlugs.length > 0) {
+            looseHint = `\nLoose matches (any token): ${orSlugs.join(", ")}.`;
+          }
+        }
         if (sites.length === 0) {
           // True zero-result search: suggest the closest taxonomy tags. The
           // taxonomy comes from the cache only — never a live fetch just to
@@ -304,7 +359,7 @@ export function createHandlers(deps: {
               content: [
                 text(
                   `No sites matched the search. Closest filter tags: ${suggestions.join(", ")}. ` +
-                    "Run list_categories for the full taxonomy.",
+                    `Run list_categories for the full taxonomy.${looseHint}`,
                 ),
               ],
             };
@@ -313,8 +368,10 @@ export function createHandlers(deps: {
         return {
           content: [
             text(
-              "No sites matched the search on this page. Try fewer filters or run list_categories. " +
-                "(Deep pagination is unavailable by design: awwwards.com's robots.txt disallows it.)",
+              `No sites matched the search on this page. Try fewer filters or run list_categories. ` +
+                "(Deep pagination is unavailable by design: awwwards.com's robots.txt disallows it.)" +
+                // looseHint is empty unless this is a true FTS zero result.
+                looseHint,
             ),
           ],
         };
