@@ -188,23 +188,35 @@ package — its 8-step structure-before-pixels doctrine drove every step):
    [Gionatan Nese '26](https://www.awwwards.com/sites/gionatan-nese-26)
    (SOTD, jury 7.32) — design DNA: palette `#000`/`#FFF`, serif
    statement-over-canvas, tiny metadata rhythm.
-4. `get_site_elements` pulled component-level anatomy: the About, Creative
-   Space and 404 posters defined the hero statement, floating-card cluster,
-   and black footer inversion the build previews.
-5. `capture_live_site` caught the live reference's scattered-card layout
-   first-hand, and later caught **two real bugs** in the build: invisible
-   `.reveal` content in full-page captures (fixed with progressive
-   enhancement — content visible without JS), and a cache gotcha (re-captures
-   of the same `file://` URL return the cached PNG; append `?v=2`).
+4. `get_site_elements` pulled component-level anatomy — and here the loop
+   taught its biggest lesson: **element posters lie**. The first build was
+   designed from poster frames alone and rendered the hero as *floating
+   static cards*. Downloading the actual element videos (preloader/case
+   study/about/transition from the CDN URLs the tool returns) and
+   frame-tiling them revealed the truth: the hero is a **spinning 3D
+   thumbnail ring with perspective depth**, projects are **full-bleed tinted
+   panels with giant display type and sliver image reveals**, and the about
+   page is a **pinned chrome 3D blob with text columns alternating past
+   it**. The showcase was rebuilt motion-true (pure CSS 3D — no WebGL).
+5. `capture_live_site` caught the live reference's layout first-hand and two
+   build bugs (invisible `.reveal` content → fixed with progressive
+   enhancement; `file://` capture caching → `?v=N` cache-buster).
 6. `analyze_page_structure` ran on BOTH the reference and the build — band
    maps compared, never just total height.
-7. `record_site_motion` filmed the finished build: the work-index **hover
-   inversion** and backdrop parallax are on camera in the returned filmstrip.
+7. `record_site_motion` filmed the finished build twice (v1 caught hover
+   inversion; v2 caught the spinning ring mid-rotation, the cobalt
+   AWWWARDS-MCP panel, and the chrome blob — motion proof the rebuild is
+   faithful).
 
-Prompt count: **1** — *the user's ask to "use our mcp and take inspiration,
-build a portfolio"*. Every step after that was the skill + tools driving
-autonomously. Six MCP calls powered the whole design phase; zero design
-decisions trace to nothing.
+Prompt count: **1** design prompt + **1** correction ("did you see how the
+preloader animates? the hero is a 3D image gallery…") — that second prompt is
+the element-video lesson encoded as user feedback. Every design decision
+traces to a tool result; nothing is invented.
+
+**Anti-pattern the loop now encodes** (candidate for the next skill
+revision): *never design motion from element posters — download the element
+videos and tile frames before animating.* Posters are single frames of
+motion; the motion IS the design.
 
 **What the verification loop caught** — proof the structure-before-pixels
 doctrine is load-bearing:
