@@ -1,0 +1,69 @@
+name: parser-drift
+
+# Watches awwwards.com for markup changes that break src/parsers.ts, so drift
+# is caught within a day instead of by the next user who searches. The probe
+# hits only the two page shapes the indexer already crawls, at the same
+# 1 request/second politeness as the client. Nothing is stored in git;
+# failures are reported to a single tracking issue that stays open until the
+# parsers catch up and a subsequent run passes.
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # daily 04:17 UTC (off the hour, off common cron minutes)
+  workflow_dispatch: {} # manual runs for debugging
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Run parser-drift probe (live)
+        id: probe
+        run: |
+          set +e
+          npm run drift
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "## parser-drift probe $(date -u +%FT%TZ)" > .drift/report.md
+          cat .drift/status.json >> .drift/report.md 2>/dev/null || true
+          exit 0 # the reporter step reads exit_code; never fail the job here
+      - name: Report (open or update tracking issue on drift/fetch-fail)
+        if: steps.probe.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODE: ${{ steps.probe.outputs.exit_code }}
+        run: |
+          TITLE="parser-drift: awwwards.com markup changed — parsers need updating"
+          LABEL="parser-drift"
+          KIND=$([ "$CODE" = "1" ] && echo "drift" || echo "fetch-fail")
+          BODY=$(printf 'Automated probe failed (exit %s, kind: %s).\n\nRun: <a href="%s">%s</a>\n\n```\n' \
+            "$CODE" "$KIND" \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ github.workflow }} #${{ github.run_number }}")
+          BODY="$BODY$(node -e 'const s=require("fs").readFileSync(".drift/status.json","utf8");const j=JSON.parse(s);console.log(j.verdict+" — "+j.driftCount+" drifted anchors of "+j.probes.length);for(const p of j.probes){if(p.drift)console.log("DRIFT  "+p.name+" ("+p.parser+") — "+p.note)}for(const p of j.pages){if(!p.ok)console.log("PAGE   "+p.url+" status "+p.status)}console.log("")')"
+          BODY="$BODY\`\`\`"
+          gh label create "$LABEL" --color D93F0B --description "awwwards.com markup drift" --force 2>/dev/null || true
+          NUMBER=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number')
+          if [ -z "$NUMBER" ]; then
+            gh issue create --title "$TITLE" --label "$LABEL" --body "$BODY"
+          else
+            gh issue comment "$NUMBER" --body "$BODY"
+          fi
+      - name: Auto-close tracking issue when probe is green again
+        if: steps.probe.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LABEL: parser-drift
+        run: |
+          NUMBER=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number')
+          if [ -n "$NUMBER" ]; then
+            gh issue close "$NUMBER" --comment "Probe is green again on schedule — parsers catch up with current awwwards.com markup. Closing automatically."
+          fi

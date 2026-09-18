@@ -8,3 +8,6 @@ capture-build.mjs
 
 # reference motion study artifacts (videos stay in showcase/ref-motion only)
 /*.mp4
+
+# parser-drift probe run state (regenerated per run; not tracked)
+.drift/

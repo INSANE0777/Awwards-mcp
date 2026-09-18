@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "tsx test/live-smoke.ts",
+    "drift": "node scripts/parser-drift-probe.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

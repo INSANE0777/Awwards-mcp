@@ -301,6 +301,19 @@ awwwards.com markup changes, a fresh HTML snapshot attached to an issue often
 becomes the new test fixture and the fastest merged PR. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide:
 
+**Parser-drift is monitored automatically.** A probe script
+([scripts/parser-drift-probe.mjs](scripts/parser-drift-probe.mjs),
+`npm run drift`) checks every markup anchor the parsers depend on — the
+`split`/`indexOf`/regex literals in `src/parsers.ts` — against the live
+listing and detail pages (2 fetches, 1 request/second, same politeness as
+the client). A daily GitHub Action ([.github/workflows/parser-drift.yml](.github/workflows/parser-drift.yml))
+runs it and, on drift, opens/updates a single tracking issue with the exact
+anchors that changed (and auto-closes it when a later run is green). To run
+it yourself: `npm run drift` (live, exit code 0/1/2) or `npm run drift -- --fixture`
+(offline, checks the committed fixtures still feed every anchor). Raw HTML
+is never diffed or stored — anchors only fire when the parsers actually
+break, so there are no false alarms from cosmetic tweaks.
+
 - Development setup & project layout (offline fixture-tested, no network in tests)
 - How to create a PR: fork → `fix/`/`feat/`/`docs/` branch → typecheck + tests → PR template
 - The politeness constraints new code must keep (1 req/s, robots.txt paths, light runtime deps)
