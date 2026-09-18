@@ -1,0 +1,41 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+      - name: Gate — tag matches CHANGELOG section
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          grep -q "^## v${VERSION}" CHANGELOG.md || { echo "CHANGELOG.md has no '## v${VERSION}' section — add release notes before tagging"; exit 1; }
+      - name: Gate — version not already on npm
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "awwwards-mcp@${VERSION}" version 2>/dev/null; then
+            echo "awwwards-mcp@${VERSION} already published — bump the version instead of re-tagging"; exit 1
+          fi
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: GitHub Release from CHANGELOG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk "/^## v${VERSION}/{flag=1;next} /^## v/{flag=0} flag" CHANGELOG.md > body.md
+          gh release create "$GITHUB_REF_NAME" --title "awwwards-mcp ${GITHUB_REF_NAME}" --notes-file body.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

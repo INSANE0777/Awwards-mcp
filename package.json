@@ -13,6 +13,10 @@
     "README.md",
     "skills"
   ],
+  "keywords": ["mcp", "model-context-protocol", "awwwards", "design", "inspiration", "web-design", "screenshots", "agent-tools"],
+  "repository": { "type": "git", "url": "git+https://github.com/INSANE0777/Awwwards-mcp.git" },
+  "bugs": { "url": "https://github.com/INSANE0777/Awwwards-mcp/issues" },
+  "homepage": "https://github.com/INSANE0777/Awwwards-mcp#readme",
   "engines": {
     "node": ">=22.13.0"
   },
