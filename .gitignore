@@ -15,3 +15,6 @@ capture-build.mjs
 
 # controller scratch (plans, specs, drift-snapshot captures) — local-only
 docs/
+
+# demo GIF raw frames + recording artifacts (only the encoded assets/demo.gif is tracked)
+assets/demo-src/
