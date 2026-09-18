@@ -168,6 +168,23 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
+## Contributing
+
+PRs welcome! The project especially needs **parser-drift fixes** — when live
+awwwards.com markup changes, a fresh HTML snapshot attached to an issue often
+becomes the new test fixture and the fastest merged PR. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full guide:
+
+- Development setup & project layout (offline fixture-tested, no network in tests)
+- How to create a PR: fork → `fix/`/`feat/`/`docs/` branch → typecheck + tests → PR template
+- The politeness constraints new code must keep (1 req/s, robots.txt paths, light runtime deps)
+
+Bugs and feature ideas start as
+[issues](https://github.com/INSANE0777/Awwwards-mcp/issues/new/choose) with
+templates. Security problems go privately — see
+[SECURITY.md](SECURITY.md). By participating you agree to the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Development
 
 ```bash

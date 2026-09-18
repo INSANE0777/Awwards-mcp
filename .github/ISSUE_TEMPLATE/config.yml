@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/INSANE0777/Awwards-mcp/discussions
+    about: Ask how to wire awwwards-mcp into your coding agent, or share your setup.
+  - name: Security vulnerability
+    url: https://github.com/INSANE0777/Awwwards-mcp/security/advisories/new
+    about: Please report security issues privately — see SECURITY.md. Do not open a public issue.
