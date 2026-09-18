@@ -1,0 +1,354 @@
+/* awwwards-mcp showcase build — inspiration: Gionatan Nese '26 (SOTD 7.32)
+   Palette #000/#FFF + #ECECEA canvas backdrop; Newsreader + IBM Plex Mono. */
+
+:root {
+  --bg: #ececea;
+  --canvas: #fdfdfc;
+  --ink: #000000;
+  --ink-soft: #6b6b68;
+  --hairline: rgba(0, 0, 0, 0.14);
+  --serif: "Newsreader", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-optical-sizing: auto;
+  min-height: 100vh;
+}
+
+/* ---------- backdrop ghost type ---------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ghost {
+  position: absolute;
+  font-size: clamp(72px, 11vw, 168px);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.055);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ghost-a { top: 4vh; left: -2vw; transform: rotate(-1.2deg); }
+.ghost-b { bottom: 6vh; right: -4vw; transform: rotate(0.8deg); font-style: italic; }
+
+/* ---------- the floating canvas ---------- */
+
+.canvas {
+  position: relative;
+  z-index: 1;
+  background: var(--canvas);
+  margin: 6.5vh 4.5vw 10vh;
+  min-height: 83vh;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 18px 60px rgba(0, 0, 0, 0.09);
+  border-radius: 3px;
+}
+
+.corner-dot {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+/* ---------- micro-nav ---------- */
+
+.nav {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 26px;
+  padding: 38px 0 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.nav-mark { font-weight: 500; text-decoration: none; color: var(--ink); letter-spacing: 0.04em; }
+.nav-link { color: var(--ink); text-decoration: none; position: relative; }
+.nav-link sup { color: var(--ink-soft); margin-left: 2px; font-size: 9px; }
+.nav-link:hover::after,
+.nav-mark:hover::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -4px;
+  height: 1px;
+  background: var(--ink);
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  padding: min(17vh, 200px) 8vw min(11vh, 130px);
+  text-align: center;
+}
+
+.hero-statement {
+  font-size: clamp(38px, 4.6vw, 68px);
+  font-weight: 300;
+  letter-spacing: -0.015em;
+  line-height: 1.18;
+}
+
+.hero-statement em { font-style: italic; font-weight: 400; }
+
+.hero-meta {
+  margin-top: 34px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+/* ---------- floating cluster ---------- */
+
+.cluster-section { padding: 4vh 0 10vh; }
+
+.cluster-caption {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-bottom: 3vh;
+}
+
+.cluster {
+  position: relative;
+  height: clamp(420px, 62vh, 640px);
+  margin: 0 auto;
+  max-width: 860px;
+}
+
+.cluster-center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-align: center;
+  color: var(--ink);
+  z-index: 2;
+  background: var(--canvas);
+  padding: 10px 12px;
+}
+
+.card {
+  position: absolute;
+  width: var(--card-w, 92px);
+  height: var(--card-h, 116px);
+  background: #fff;
+  border: 1px solid var(--hairline);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.5s;
+  animation: card-float var(--dur, 7s) ease-in-out var(--delay, 0s) infinite alternate;
+}
+
+.card svg { display: block; width: 100%; height: 100%; }
+.card:hover { transform: scale(1.14) rotate(0deg) !important; box-shadow: 0 14px 44px rgba(0, 0, 0, 0.18); z-index: 5; }
+
+@keyframes card-float {
+  from { translate: 0 -4px; }
+  to { translate: 0 5px; }
+}
+
+/* ---------- work index ---------- */
+
+.index-section { padding: 2vh 10vw 12vh; }
+
+.work-index { list-style: none; }
+
+.work-index a {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: baseline;
+  gap: 24px;
+  padding: 26px 10px;
+  border-top: 1px solid var(--hairline);
+  text-decoration: none;
+  color: var(--ink);
+  transition: background 0.35s, color 0.35s;
+}
+
+.work-index li:last-child a { border-bottom: 1px solid var(--hairline); }
+
+.idx-no { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+.idx-title { font-size: clamp(24px, 2.6vw, 36px); font-weight: 300; letter-spacing: -0.01em; }
+.idx-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-soft); text-align: right; }
+
+.work-index a:hover { background: var(--ink); color: var(--canvas); }
+.work-index a:hover .idx-no,
+.work-index a:hover .idx-meta { color: rgba(253, 253, 252, 0.7); }
+
+/* ---------- section statements (MCP / About) ---------- */
+
+.mcp-section, .about-section { padding: 10vh 10vw; border-top: 1px solid var(--hairline); }
+
+.section-kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin-bottom: 18px;
+}
+
+.section-statement {
+  font-size: clamp(30px, 3.6vw, 52px);
+  font-weight: 300;
+  line-height: 1.16;
+  letter-spacing: -0.012em;
+  margin-bottom: 7vh;
+}
+
+.section-statement em { font-style: italic; }
+
+/* ---------- MCP tool grid ---------- */
+
+.mcp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+}
+
+.tool {
+  background: var(--canvas);
+  padding: 30px 26px 34px;
+  transition: background 0.35s;
+}
+
+.tool:hover { background: #f4f4f1; }
+
+.tool h3 { font-family: var(--mono); font-size: 12.5px; font-weight: 500; margin-bottom: 10px; }
+.tool p { font-size: 15px; font-weight: 300; line-height: 1.45; color: var(--ink-soft); }
+
+/* ---------- about ---------- */
+
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 32px;
+}
+
+.about-grid dt {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.about-grid dd { font-size: 16px; font-weight: 300; line-height: 1.4; }
+
+/* ---------- footer inversion band ---------- */
+
+.footer-band {
+  position: relative;
+  margin: 4vh 4.5vw 6vh;
+  background: #000;
+  color: #fff;
+  border-radius: 3px;
+  padding: 12vh 8vw 8vh;
+  text-align: center;
+  overflow: hidden;
+}
+
+.footer-ghost {
+  position: absolute;
+  top: 12px; left: 0; right: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.footer-statement {
+  font-size: clamp(30px, 3.4vw, 50px);
+  font-weight: 300;
+  line-height: 1.18;
+  letter-spacing: -0.012em;
+}
+
+.footer-links {
+  margin-top: 6vh;
+  display: flex;
+  justify-content: center;
+  gap: 34px;
+}
+
+.footer-links a {
+  color: #fff;
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+  padding-bottom: 2px;
+  transition: border-color 0.3s;
+}
+
+.footer-links a:hover { border-color: #fff; }
+
+.url-chip {
+  display: inline-block;
+  margin-top: 7vh;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 7px 14px;
+}
+
+/* ---------- reveal-on-scroll ----------
+   Progressive enhancement: content is visible by default; js-enabled
+   documents get the hidden pre-state via .js on <html>. Full-page capture
+   tools that never fire IntersectionObserver below the fold still see
+   everything. */
+.js .reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 0.9s cubic-bezier(0.2, 0.65, 0.2, 1), transform 0.9s cubic-bezier(0.2, 0.65, 0.2, 1);
+}
+
+.js .reveal.is-in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .card { animation: none; }
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .mcp-grid { grid-template-columns: 1fr; }
+  .about-grid { grid-template-columns: 1fr 1fr; }
+  .work-index a { grid-template-columns: 40px 1fr; }
+  .idx-meta { display: none; }
+}
+
+@media (max-width: 600px) {
+  .canvas { margin: 4vh 4vw 6vh; }
+  .about-grid { grid-template-columns: 1fr; }
+  .cluster { height: 380px; }
+  :root { --cluster-scale: 0.72; }
+}

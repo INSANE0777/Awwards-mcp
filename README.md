@@ -168,6 +168,55 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
+## Built with awwwards-mcp: a real portfolio
+
+This project's own showcase — **[showcase/afjal-portfolio](showcase/afjal-portfolio/)**,
+[open it locally](showcase/afjal-portfolio/index.html) — is a personal portfolio
+built through the full inspiration loop this MCP enables, using nothing but
+the server's tools. View it raw at
+[github.com/INSANE0777/Awwards-mcp/tree/main/showcase/afjal-portfolio](https://github.com/INSANE0777/Awwards-mcp/tree/main/showcase/afjal-portfolio).
+
+**The loop, as it ran** (skill used: `awwwards-inspiration`, shipped in this
+package — its 8-step structure-before-pixels doctrine drove every step):
+
+1. `list_categories` grounded the filter vocabulary (two combined-filter
+   searches came back empty first — that's what step 2 of the skill is for).
+2. `search_sites` `{ award: "sotd", tags: ["portfolio", "typography"] }`
+   returned 25 proven portfolios with **inline screenshots** — shortlist
+   judged from the images, not titles.
+3. `get_site_details` on the pick,
+   [Gionatan Nese '26](https://www.awwwards.com/sites/gionatan-nese-26)
+   (SOTD, jury 7.32) — design DNA: palette `#000`/`#FFF`, serif
+   statement-over-canvas, tiny metadata rhythm.
+4. `get_site_elements` pulled component-level anatomy: the About, Creative
+   Space and 404 posters defined the hero statement, floating-card cluster,
+   and black footer inversion the build previews.
+5. `capture_live_site` caught the live reference's scattered-card layout
+   first-hand, and later caught **two real bugs** in the build: invisible
+   `.reveal` content in full-page captures (fixed with progressive
+   enhancement — content visible without JS), and a cache gotcha (re-captures
+   of the same `file://` URL return the cached PNG; append `?v=2`).
+6. `analyze_page_structure` ran on BOTH the reference and the build — band
+   maps compared, never just total height.
+7. `record_site_motion` filmed the finished build: the work-index **hover
+   inversion** and backdrop parallax are on camera in the returned filmstrip.
+
+Prompt count: **1** — *the user's ask to "use our mcp and take inspiration,
+build a portfolio"*. Every step after that was the skill + tools driving
+autonomously. Six MCP calls powered the whole design phase; zero design
+decisions trace to nothing.
+
+**What the verification loop caught** — proof the structure-before-pixels
+doctrine is load-bearing:
+
+- Full-page captures initially showed three blank sections: `.reveal`
+  animation state vs capture's no-scroll reality (a tooling interplay worth
+  a post-merge capture wait, noted in the backlog). The build now ships
+  content-visible-without-JS progressive enhancement — one lesson from the
+  loop feeding back into every future build.
+- Band-map compare kept the reference's white-canvas → cluster → index →
+  statement → black-band rhythm instead of drifting on section heights.
+
 ## Contributing
 
 PRs welcome! The project especially needs **parser-drift fixes** — when live

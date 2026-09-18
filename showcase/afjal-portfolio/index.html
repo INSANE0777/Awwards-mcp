@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Afjal Hussein — Multi-Disciplinary Developer</title>
+  <meta name="description" content="Portfolio of Afjal Hussein — turning bold agent tooling into stuff that actually ships. Built with the awwwards-mcp inspiration loop." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Backdrop layer: ghost serif type bleeding around the frame, from the
+       reference's floating-canvas-over-ghost-type composition -->
+  <div class="backdrop" aria-hidden="true">
+    <span class="ghost ghost-a">bold ideas</span>
+    <span class="ghost ghost-b">stuff that sticks&trade;</span>
+  </div>
+
+  <!-- The floating white canvas (reference: full-bleed inset sheet) -->
+  <main class="canvas">
+    <span class="corner-dot" aria-hidden="true">&#9662;</span>
+
+    <!-- Micro-nav: monogram + numbered superscript links, centered -->
+    <nav class="nav" aria-label="Sections">
+      <a class="nav-mark" href="#top">AF.77</a>
+      <a class="nav-link" href="#work">Work<sup>1</sup></a>
+      <a class="nav-link" href="#mcp">MCP<sup>2</sup></a>
+      <a class="nav-link" href="#about">About<sup>3</sup></a>
+    </nav>
+
+    <!-- Hero: centered serif statement + tiny metadata line -->
+    <header class="hero" id="top">
+      <h1 class="hero-statement reveal">
+        Turning bold ideas into<br />
+        <em>ambitiously engineered</em><br />
+        stuff that actually ships.
+      </h1>
+      <p class="hero-meta reveal">Afjal Hussein &mdash; multi-disciplinary developer, currently building MCP tools for AI agents</p>
+    </header>
+
+    <!-- Work: floating cluster of small artwork cards around the center
+         monogram (reference "Creative Space" element anatomy) -->
+    <section class="cluster-section" id="work" aria-label="Selected work">
+      <p class="cluster-caption">Selected Work<sup>1</sup></p>
+      <div class="cluster" id="cluster">
+        <div class="cluster-center" aria-hidden="true">AH<br />&rsquo;26</div>
+        <!-- Cards are positioned by script in a scattered ring -->
+      </div>
+    </section>
+
+    <!-- Work index: numbered rows, hover inverts (editorial rhythm) -->
+    <section class="index-section" aria-label="Work index">
+      <ol class="work-index">
+        <li class="reveal"><a href="#mcp"><span class="idx-no">01</span><span class="idx-title">awwwards-mcp</span><span class="idx-meta">MCP server &middot; TypeScript &middot; 2026</span></a></li>
+        <li class="reveal"><a href="#mcp"><span class="idx-no">02</span><span class="idx-title">The Meridian</span><span class="idx-meta">Editorial journal &middot; GSAP &middot; 2026</span></a></li>
+        <li class="reveal"><a href="#mcp"><span class="idx-no">03</span><span class="idx-title">Cerebrium Recreation</span><span class="idx-meta">Pixel study &middot; 10,871px &middot; 2026</span></a></li>
+        <li class="reveal"><a href="#mcp"><span class="idx-no">04</span><span class="idx-title">SPORTS BU</span><span class="idx-meta">Event platform &middot; React &middot; 2026</span></a></li>
+      </ol>
+    </section>
+
+    <!-- MCP band: what the tools do (pixel-derived SVG art cards) -->
+    <section class="mcp-section" id="mcp" aria-label="MCP tools">
+      <p class="section-kicker reveal">02 &mdash; MCP</p>
+      <h2 class="section-statement reveal">Six tools that give<br />agents <em>taste.</em></h2>
+      <div class="mcp-grid">
+        <article class="tool reveal"><h3>search_sites</h3><p>Color, tags, technology, award &mdash; results arrive as inline screenshots</p></article>
+        <article class="tool reveal"><h3>get_site_details</h3><p>One site&rsquo;s design DNA: palette, stack, elements, awards</p></article>
+        <article class="tool reveal"><h3>get_site_elements</h3><p>Component-level visuals with poster images and video URLs</p></article>
+        <article class="tool reveal"><h3>list_categories</h3><p>Every filter the agent can search by, as vocabulary</p></article>
+        <article class="tool reveal"><h3>capture_live_site</h3><p>Full-page screenshots of any live URL, pre-scroll included</p></article>
+        <article class="tool reveal"><h3>analyze_page_structure</h3><p>Section band maps: compare a reference to the build</p></article>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section class="about-section" id="about" aria-label="About">
+      <p class="section-kicker reveal">03 &mdash; About</p>
+      <h2 class="section-statement reveal">I build <em>websites, tools and agent infrastructure</em> &mdash; and photo-accurate recreations when the mood strikes.</h2>
+      <dl class="about-grid reveal">
+        <div><dt>Focus</dt><dd>Agent tooling &middot; MCP &middot; front-of-the-front-end</dd></div>
+        <div><dt>Stack</dt><dd>TypeScript &middot; React &middot; GSAP &middot; Three.js &middot; SQLite</dd></div>
+        <div><dt>Location</dt><dd>Remote &middot; UTC+5:30</dd></div>
+        <div><dt>Currently</dt><dd>awwwards-mcp &mdash; free design inspiration for agents</dd></div>
+      </dl>
+    </section>
+
+    <!-- Footer: black inversion band (reference 404 element anatomy) -->
+    <footer class="footer-band" id="contact" aria-label="Contact">
+      <p class="footer-ghost" aria-hidden="true">404 &rarr; say hi instead</p>
+      <h2 class="footer-statement">Got bold ideas?<br />Let&rsquo;s make them stick.</h2>
+      <nav class="footer-links" aria-label="Contact links">
+        <a href="https://github.com/INSANE0777" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/awwwards-mcp" rel="noopener">npm</a>
+        <a href="mailto:insaneafjal@gmail.com">Email</a>
+      </nav>
+      <p class="url-chip">github.com/INSANE0777/Awwards-mcp</p>
+    </footer>
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>
