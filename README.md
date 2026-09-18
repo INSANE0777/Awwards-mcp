@@ -226,13 +226,6 @@ motion film, and the reusable pre-scroll capture script live in
 
 ![The Meridian — motion filmstrip from record_site_motion](docs/images/meridian-filmstrip.jpg)
 
-**An early lesson in one image** — the original showcase build's hero,
-designed from element *posters* alone, rendered a spinning 3D ring as
-floating static cards. The frame-tiled videos exposed the motion truth and
-became the skill's poster-lie doctrine:
-
-![Frame-tiled preloader video — the 3D thumbnail ring mid-rotation](docs/images/ex-showcase-ring.jpg)
-
 ## Skills used to build these
 
 | Skill | Role in the builds |
