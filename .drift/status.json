@@ -1,0 +1,467 @@
+{
+  "at": "2026-09-18T17:49:06.235Z",
+  "mode": "live",
+  "pages": [
+    {
+      "url": "https://www.awwwards.com/websites/",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://www.awwwards.com/sites/ciup",
+      "status": 200,
+      "ok": true
+    }
+  ],
+  "probes": [
+    {
+      "name": "parseListing[card JSON blob]",
+      "parser": "parseListing (site cards)",
+      "url": "https://www.awwwards.com/websites/",
+      "drift": false,
+      "count": 31
+    },
+    {
+      "name": "parseListing[rollover live-url]",
+      "parser": "parseListing (live-site URL)",
+      "url": "https://www.awwwards.com/websites/",
+      "drift": false,
+      "count": 62
+    },
+    {
+      "name": "parseListing[detail href]",
+      "parser": "parseListing (detail link)",
+      "url": "https://www.awwwards.com/websites/",
+      "drift": false,
+      "count": 31
+    },
+    {
+      "name": "parseListing[award tag]",
+      "parser": "parseListing (award labels)",
+      "url": "https://www.awwwards.com/websites/",
+      "drift": false,
+      "count": 56
+    },
+    {
+      "name": "parseCategories[rollover links]",
+      "parser": "parseCategories (taxonomy page)",
+      "url": "https://www.awwwards.com/websites/",
+      "drift": false,
+      "count": 423
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "count": 7,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/gionatan-nese-26",
+      "count": 7,
+      "drift": false
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "count": 2,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/emergence-magazine",
+      "count": 2,
+      "drift": false
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "count": 6,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/l-i-s-a",
+      "count": 6,
+      "drift": false
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "count": 2,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/black-music-project",
+      "count": 2,
+      "drift": false
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "count": 3,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/cadillac-formula-1-team",
+      "count": 3,
+      "drift": false
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "count": 2,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/ciup",
+      "count": 2,
+      "drift": false
+    }
+  ],
+  "driftCount": 0,
+  "verdict": "ok"
+}

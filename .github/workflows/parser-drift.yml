@@ -3,9 +3,10 @@ name: parser-drift
 # Watches awwwards.com for markup changes that break src/parsers.ts, so drift
 # is caught within a day instead of by the next user who searches. The probe
 # hits only the two page shapes the indexer already crawls, at the same
-# 1 request/second politeness as the client. Nothing is stored in git;
-# failures are reported to a single tracking issue that stays open until the
-# parsers catch up and a subsequent run passes.
+# 1 request/second politeness as the client. Each run commits .drift/status.json
+# so drift history is diffable in git; failures are reported to a single
+# tracking issue that stays open until the parsers catch up and a subsequent
+# run passes.
 
 on:
   schedule:
@@ -14,7 +15,7 @@ on:
 
 permissions:
   issues: write
-  contents: read
+  contents: write
 
 jobs:
   probe:
@@ -35,6 +36,15 @@ jobs:
           echo "## parser-drift probe $(date -u +%FT%TZ)" > .drift/report.md
           cat .drift/status.json >> .drift/report.md 2>/dev/null || true
           exit 0 # the reporter step reads exit_code; never fail the job here
+      - name: Commit probe status (drift history)
+        if: always()
+        run: |
+          git config user.name "awwwards-mcp-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add .drift/status.json
+          git commit -m "chore(drift): probe status [skip ci]" || echo "nothing to commit"
+          git pull --rebase origin main || true
+          git push origin HEAD:main || echo "status push failed (non-fatal)"
       - name: Report (open or update tracking issue on drift/fetch-fail)
         if: steps.probe.outputs.exit_code != '0'
         env:

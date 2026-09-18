@@ -65,6 +65,11 @@ function run(cmd, args, opts = {}) {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 awwwards-mcp/1.1 doctor";
 
+// Pinned detail page (the same stable target the drift probe pins), fetched
+// 1 s after the listing so the doctor keeps the client's 1 request/second
+// politeness promise.
+const DETAIL_URL = "https://www.awwwards.com/sites/gionatan-nese-26/";
+
 // ---------- 1. NETWORK: can we reach awwwards.com at all? ----------
 async function checkNetwork() {
   if (!JSON_OUT) console.log("\n[1/5] network — reachability");
@@ -76,15 +81,31 @@ async function checkNetwork() {
     const html = await res.text().catch(() => "");
     const challenge = res.status !== 200 || html.includes("cf-chl") || html.includes("Assert Your Humanity");
     check("network", !challenge, challenge ? `blocked (HTTP ${res.status}${html.includes("cf-chl") ? ", challenge page" : ""}) — retry later; the client never retries through blocks; for deployment, egress IPs may need allowlisting` : `reachable (HTTP ${res.status})`);
-    return { html, challenge };
+    // Detail page, fetched 1 s later (politeness: 1 req/s, same as client & probe).
+    let detailHtml = "";
+    if (!challenge) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const dres = await fetch(DETAIL_URL, {
+          headers: { "user-agent": UA },
+          signal: AbortSignal.timeout(15000),
+        });
+        detailHtml = await dres.text().catch(() => "");
+        const dchallenge = dres.status !== 200 || detailHtml.includes("cf-chl") || detailHtml.includes("Assert Your Humanity");
+        if (!JSON_OUT) console.log(`  detail page: HTTP ${dres.status}${dchallenge ? " (blocked/challenge)" : ""}`);
+      } catch (err) {
+        if (!JSON_OUT) console.log(`  detail page: unreachable (${err instanceof Error ? err.message : String(err)})`);
+      }
+    }
+    return { html, detailHtml, challenge };
   } catch (err) {
     check("network", false, `unreachable: ${err instanceof Error ? err.message : String(err)} — check DNS/proxy/firewall`);
-    return { html: "", challenge: true };
+    return { html: "", detailHtml: "", challenge: true };
   }
 }
 
 // ---------- 2. DRIFT: do the parser anchors still exist on live pages? ----------
-async function checkDrift(liveHtml) {
+async function checkDrift(liveHtml, detailHtml) {
   if (!JSON_OUT) console.log("\n[2/5] parser-drift — anchors on live pages");
   const anchors = [
     { name: "parseListing[card JSON blob]", anchor: 'data-collectable-model-value="' },
@@ -93,10 +114,37 @@ async function checkDrift(liveHtml) {
     { name: "parseListing[award tag]", anchor: "budget-tag--" },
   ];
   const drifted = anchors.filter((a) => !liveHtml || liveHtml.indexOf(a.anchor) < 0);
-  check("parser-drift", drifted.length === 0, drifted.length === 0
+  const listingOk = drifted.length === 0;
+  check("parser-drift", listingOk, listingOk
     ? "all listing anchors present on live page"
     : driftFixHint(drifted), true);
-  return drifted.length === 0;
+
+  // Elements-section blob verdict on the detail page — same signal as the
+  // probe's parseElements[section blobs] row (sectionBlobCount in
+  // scripts/parser-drift-probe.mjs), duplicated inline so this script stays
+  // standalone. Section absent = legitimate; present with 0 collectable
+  // blobs = drift (the emergence-magazine incident signal).
+  const blocked = !detailHtml || detailHtml.includes("cf-chl") || detailHtml.includes("Assert Your Humanity");
+  let elementsOk = true;
+  if (blocked) {
+    check("parser-drift-elements", true, "detail page not captured (blocked/challenge or fetch failed) — Elements-section verdict inconclusive");
+  } else {
+    const start = detailHtml.indexOf(">Elements</h2>");
+    const end = start < 0 ? -1 : detailHtml.indexOf(">Color Palette</h2>", start);
+    const section = start < 0 ? null : end > start ? detailHtml.slice(start, end) : detailHtml.slice(start);
+    const BLOB = 'data-collectable-model-value="';
+    let blobs = 0;
+    if (section !== null) {
+      for (let i = section.indexOf(BLOB); i >= 0; i = section.indexOf(BLOB, i + BLOB.length)) blobs++;
+    }
+    elementsOk = section === null || blobs > 0;
+    check("parser-drift-elements", elementsOk, section === null
+      ? "no elements section (legitimate)"
+      : blobs > 0
+        ? `elements blobs present (${blobs})`
+        : "Elements section present but zero collectable blobs — detail markup drift", true);
+  }
+  return listingOk && elementsOk;
 }
 
 function driftFixHint(drifted) {
@@ -104,11 +152,11 @@ function driftFixHint(drifted) {
   return "live page no longer carries parser anchors — awwwards.com markup changed";
 }
 
-// Drift fix: capture the exact raw page the parsers can't read into docs/
-// (gitignored) so the parser-drift issue/PR has its fixture without bloating git.
-function fixDrift(liveHtml) {
+// Drift fix: capture the exact raw pages the parsers can't read into docs/
+// (gitignored) so the parser-drift issue/PR has its fixtures without bloating git.
+function fixDrift(liveHtml, detailHtml) {
   if (!FIX) return;
-  if (!liveHtml) {
+  if (!liveHtml && !detailHtml) {
     applied("drift-snapshot", "skipped — no live HTML captured (network failed first)");
     return;
   }
@@ -116,10 +164,18 @@ function fixDrift(liveHtml) {
   const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
   const captureDir = join(root, "docs", `drift-${stamp}`);
   mkdirSync(captureDir, { recursive: true });
-  writeFileSync(join(captureDir, "listing.html"), liveHtml);
+  const wrote = [];
+  if (liveHtml) {
+    writeFileSync(join(captureDir, "listing.html"), liveHtml);
+    wrote.push("listing.html");
+  }
+  if (detailHtml) {
+    writeFileSync(join(captureDir, "detail.html"), detailHtml);
+    wrote.push("detail.html");
+  }
   applied(
     "drift-snapshot",
-    `captured live listing page → ${join("docs", `drift-${stamp}`, "listing.html")} ` +
+    `captured ${wrote.join(" + ")} → ${join("docs", `drift-${stamp}`)} ` +
       "— attach to the parser-drift tracking issue; re-anchor src/parsers.ts, update test/fixtures, then npm test",
   );
 }
@@ -248,9 +304,10 @@ function checkBoot() {
 }
 
 // ---------- main ----------
-const { html } = await checkNetwork();
+const { html, detailHtml } = await checkNetwork();
 if (!JSON_OUT) console.log("");
-checkDrift(html);
+const driftOk = await checkDrift(html, detailHtml);
+if (FIX && !driftOk) fixDrift(html, detailHtml); // the documented --fix for DRIFT: snapshot both pages
 checkDeps();
 checkCache();
 checkBoot();
