@@ -372,8 +372,10 @@ describe("recordSiteMotion", () => {
       isMobile: true,
       hasTouch: true,
     });
-    // The existing context fields survive the spread untouched.
-    expect(contextOpts[0].recordVideo).toMatchObject({ size: { width: 1440, height: 900 } });
+    // The existing context fields survive the spread untouched, and the video
+    // canvas is derived from the same profile: a mobile recording films the
+    // 390x844 viewport onto a matching 390x844 canvas (no pillarboxing).
+    expect(contextOpts[0].recordVideo).toMatchObject({ size: { width: 390, height: 844 } });
     expect(typeof contextOpts[0].recordVideo.dir).toBe("string");
   });
 
@@ -396,10 +398,12 @@ describe("recordSiteMotion", () => {
     });
     expect("error" in res).toBe(false);
     expect(contextOpts).toHaveLength(1);
-    // Desktop default: exact viewport, existing recordVideo preserved, and no
-    // mobile flags injected into the context.
+    // Desktop default: exact viewport, recordVideo canvas unchanged at
+    // 1440x900 (derived from the same desktop profile), and no mobile flags
+    // injected into the context.
     expect(contextOpts[0].viewport).toEqual({ width: 1440, height: 900 });
-    expect(contextOpts[0].recordVideo).toBeDefined();
+    expect(contextOpts[0].recordVideo).toMatchObject({ size: { width: 1440, height: 900 } });
+    expect(typeof contextOpts[0].recordVideo.dir).toBe("string");
     expect(contextOpts[0].deviceScaleFactor).toBeUndefined();
     expect(contextOpts[0].isMobile).toBeUndefined();
     expect(contextOpts[0].hasTouch).toBeUndefined();

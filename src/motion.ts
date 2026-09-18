@@ -219,12 +219,13 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
     // Viewport profile split (same as structure/capture): width/height fill
     // the `viewport` key; the mobile-profile flags (deviceScaleFactor/
     // isMobile/hasTouch) spread in as sibling context options AFTER the
-    // existing fields, which are kept untouched. The desktop profile resolves
-    // to no extra fields, so the default call shape is unchanged.
+    // existing fields. recordVideo.size derives from the same profile so the
+    // video canvas matches the viewport (desktop keeps the 1440x900 canvas; a
+    // mobile recording gets a 390x844 canvas instead of a pillarboxed one).
     const { width, height, ...contextOpts } = resolveViewport(opts.viewport);
     const context = await browser.newContext({
       viewport: { width, height },
-      recordVideo: { dir: videoTmp, size: { width: 1440, height: 900 } },
+      recordVideo: { dir: videoTmp, size: { width, height } },
       ...contextOpts,
     });
     try {
