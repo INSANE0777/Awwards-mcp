@@ -40,7 +40,7 @@ const handlers = createHandlers({
   captureFn: (url, imagesDir, opts) => captureLiveSite(url, imagesDir, undefined, opts),
 });
 
-const server = new McpServer({ name: "awwwards-mcp", version: "1.0.0" });
+const server = new McpServer({ name: "awwwards-mcp", version: "1.5.0" });
 
 server.tool(
   "search_sites",
