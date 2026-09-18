@@ -312,6 +312,11 @@ checkDeps();
 checkCache();
 checkBoot();
 
+if (FIX) {
+  fixDeps();
+  fixCache();
+}
+
 if (JSON_OUT) {
   console.log(JSON.stringify(report, null, 2));
 } else {
