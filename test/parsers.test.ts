@@ -140,6 +140,20 @@ describe("parseElements", () => {
     const html = "<h2>Elements</h2><p>broken markup</p><h2>Color Palette</h2>";
     expect(parseElements(html)).toEqual([]);
   });
+
+  it("parses legacy external/ media paths (live-broken case: emergence-magazine)", () => {
+    // 2018-era sites store element media under external/YYYY/MM/<hash>.mp4;
+    // the parser historically accepted only element/ and returned 0 for them.
+    const els = parseElements(readFixture("detail-emergence.html"))!;
+    expect(els).not.toBeNull();
+    expect(els.length).toBeGreaterThanOrEqual(1);
+    for (const el of els) {
+      expect(el.mediaPath).toMatch(/^(element|external)\//);
+      expect(el.title.length).toBeGreaterThan(0);
+    }
+    expect(els.map((e) => e.title)).toContain("Amplifying Circles Hover Interaction");
+    expect(els.map((e) => e.title)).toContain("Elegant Typography Combination on Scroll");
+  });
 });
 
 // Second fixture captured fresh from live awwwards.com (2026-09-17, site

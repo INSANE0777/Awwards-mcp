@@ -183,9 +183,12 @@ export function parseElements(html: string): ElementMedia[] | null {
       continue;
     }
     const mediaPath = blob?.collectableImage;
-    // Only element media (videos/posters live under element/); other blobs
-    // (site card, collections) must not leak in if the end bound is missing.
-    if (typeof mediaPath === "string" && mediaPath.startsWith("element/")) {
+    // Only element media; other blobs (site card, collections) must not leak
+    // in if the end bound is missing. Media paths come in two schemes: modern
+    // sites store them under element/YYYY/MM/..., 2018-era sites under
+    // external/YYYY/MM/... (both verified live 2026-09-18 — the CDN serves
+    // both prefixes and their _static.jpeg posters).
+    if (typeof mediaPath === "string" && /^(element|external)\//.test(mediaPath)) {
       elements.push({
         title: decodeEntities(String(blob.collectableTitle ?? "")),
         mediaPath,
