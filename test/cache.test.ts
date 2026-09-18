@@ -15,17 +15,22 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-const site = (slug: string): SiteSummary => ({
-  id: 1,
-  slug,
-  title: "Test Site",
-  createdAt: 1789516800,
-  tags: ["3D", "WebGL"],
-  thumbnailPath: "submissions/2026/08/abc.jpg",
-  liveUrl: "https://example.com",
-  detailPath: `/sites/${slug}`,
-  awards: ["Site of the Day"],
-});
+// Accepts a bare slug or an overrides object (e.g. site({ slug, title, tags })).
+const site = (spec: string | Partial<SiteSummary>): SiteSummary => {
+  const over: Partial<SiteSummary> = typeof spec === "string" ? { slug: spec } : spec;
+  return {
+    id: 1,
+    slug: over.slug ?? "a",
+    title: "Test Site",
+    createdAt: 1789516800,
+    tags: ["3D", "WebGL"],
+    thumbnailPath: "submissions/2026/08/abc.jpg",
+    liveUrl: "https://example.com",
+    detailPath: `/sites/${over.slug ?? "a"}`,
+    awards: ["Site of the Day"],
+    ...over,
+  };
+};
 
 describe("Cache", () => {
   it("round-trips sites and honors TTL", () => {
@@ -80,5 +85,64 @@ describe("Cache", () => {
     expect(cache.getMeta("index:lock", 10_000)).toBeNull();
     cache.deleteMeta("index:lock"); // idempotent
     expect(cache.getMeta("index:lock", 10_000)).toBeNull();
+  });
+});
+
+describe("searchSites (FTS5)", () => {
+  const seed = (cache: Cache) =>
+    cache.upsertSites([
+      site({ slug: "editorial-mag", title: "Editorial Mag", tags: ["Magazine / Newspaper / Blog"] }),
+      site({ slug: "webgl-studio", title: "WebGL Studio", tags: ["3d", "webgl"] }),
+      site({ slug: "magazine-post", title: "A Magazine Post About Editorial Things", tags: [] }),
+    ]);
+
+  it("matches multi-word queries that substring search could never match", () => {
+    const cache = new Cache(tmpDir());
+    seed(cache);
+    // "magazine" is in the tag of row 1 and the title of row 3; "editorial"
+    // in the title of row 1 and the title of row 3 — no single substring span.
+    const rows = cache.searchSites("editorial magazine", 1000)!;
+    expect(rows.map((r) => r.slug)).toContain("editorial-mag");
+    expect(rows.map((r) => r.slug)).toContain("magazine-post");
+  });
+
+  it("ranks title hits above tag-only hits (bm25)", () => {
+    const cache = new Cache(tmpDir());
+    seed(cache);
+    const rows = cache.searchSites("editorial", 1000)!;
+    expect(rows[0]!.slug).toBe("editorial-mag"); // title hit leads
+  });
+
+  it("matches prefixes and porter stems (editor → Editorial)", () => {
+    const cache = new Cache(tmpDir());
+    seed(cache);
+    const rows = cache.searchSites("edito", 1000)!;
+    expect(rows.map((r) => r.slug)).toContain("editorial-mag");
+    const stemmed = cache.searchSites("magazines", 1000)!; // stem ≡ magazine
+    expect(stemmed.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("respects maxAgeMs and sanitizes FTS operators out of tokens", () => {
+    const cache = new Cache(tmpDir());
+    seed(cache);
+    expect(cache.searchSites('editorial" OR NEAR (', 1000)).not.toBeNull();
+    expect(cache.searchSites("editorial", 0)).toEqual([]); // all expired
+  });
+
+  it("backfills the fts table on first open of a legacy DB (rows exist, fts empty)", () => {
+    // simulate a pre-FTS DB: drop the insert-sync trigger BEFORE seeding so
+    // rows land in sites while sites_fts stays empty, then reopen a Cache on
+    // the same dir and query — the backfill at open must make search work.
+    const dir = tmpDir();
+    const cache = new Cache(dir);
+    cache.withDbForTest((db) => db.exec("DROP TRIGGER sites_fts_ai"));
+    seed(cache);
+    const reopened = new Cache(dir);
+    const rows = reopened.searchSites("editorial", 1000)!;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    reopened.withDbForTest((db) => {
+      const { n } = db.prepare("SELECT COUNT(*) AS n FROM sites_fts").get() as unknown as { n: number };
+      expect(n).toBe(3);
+    });
   });
 });

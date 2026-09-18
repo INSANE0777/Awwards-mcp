@@ -21,6 +21,29 @@ const SCHEMA = `
   );
 `;
 
+// FTS5 full-text layer over the sites table (derived — rebuildable at any
+// time). Probe-guarded: if this Node build ships without FTS5, every fts
+// statement is skipped and searchSites returns null (server keeps the legacy
+// substring path). Columns mirror sites; tags/awards stay JSON strings —
+// unicode61 tokenizes around brackets/quotes, so tokens extract cleanly.
+const FTS_SCHEMA = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS sites_fts USING fts5(
+    slug UNINDEXED, title, tags, awards, tokenize='porter unicode61'
+  );
+  CREATE TRIGGER IF NOT EXISTS sites_fts_ai AFTER INSERT ON sites BEGIN
+    INSERT INTO sites_fts (slug, title, tags, awards)
+    VALUES (new.slug, new.title, new.tags, new.awards);
+  END;
+  CREATE TRIGGER IF NOT EXISTS sites_fts_au AFTER UPDATE OF title, tags, awards ON sites BEGIN
+    DELETE FROM sites_fts WHERE slug = new.slug;
+    INSERT INTO sites_fts (slug, title, tags, awards)
+    VALUES (new.slug, new.title, new.tags, new.awards);
+  END;
+  CREATE TRIGGER IF NOT EXISTS sites_fts_ad AFTER DELETE ON sites BEGIN
+    DELETE FROM sites_fts WHERE slug = old.slug;
+  END;
+`;
+
 interface SiteRow {
   slug: string;
   id: number;
@@ -52,6 +75,12 @@ export class Cache {
   private readonly dbPath: string;
   private readonly now: () => number;
   readonly imagesDir: string;
+  // FTS5 capability of this Node build, probed on the first DB open (the
+  // constructor's eager withDb). null = not yet probed; false = FTS5 compiled
+  // out → searchSites returns null and callers keep the legacy substring
+  // path. Instance-cached so searchSites never re-probes; public so the
+  // server layer and tests can branch on it.
+  ftsAvailable: boolean | null = null;
 
   constructor(rootDir: string, now: () => number = Date.now) {
     this.now = now;
@@ -72,10 +101,33 @@ export class Cache {
     const db = new DatabaseSync(this.dbPath);
     try {
       db.exec(SCHEMA);
+      if (this.ftsAvailable === null) {
+        try {
+          db.exec(FTS_SCHEMA);
+          this.ftsAvailable = true;
+        } catch {
+          this.ftsAvailable = false; // FTS5 compiled out → legacy fallback
+        }
+      }
+      if (this.ftsAvailable) {
+        // The fts table is derived and must never gate correctness: if sites
+        // has rows but sites_fts is empty (pre-FTS database opened for the
+        // first time), rebuild the index. Afterwards triggers keep it synced.
+        const { s: sitesN } = db.prepare("SELECT COUNT(*) AS s FROM sites").get() as { s: number };
+        const { s: ftsN } = db.prepare("SELECT COUNT(*) AS s FROM sites_fts").get() as { s: number };
+        if (sitesN > 0 && ftsN === 0) {
+          db.exec("INSERT INTO sites_fts (slug, title, tags, awards) SELECT slug, title, tags, awards FROM sites");
+        }
+      }
       return fn(db);
     } finally {
       db.close();
     }
+  }
+
+  /** @visibleForTesting */
+  withDbForTest(fn: (db: DatabaseSync) => void): void {
+    this.withDb(fn);
   }
 
   upsertSites(sites: SiteSummary[]): void {
@@ -126,6 +178,33 @@ export class Cache {
         | undefined;
       if (!row || row.fetchedAt <= this.now() - maxAgeMs) return null;
       return rowToSite(row);
+    });
+  }
+
+  // Full-text search over cached sites. Each token is ANDed as a
+  // porter-stemmed prefix term, so multi-word queries match rows where the
+  // words are scattered across title/tags/awards. Results are bm25-ascending
+  // (best match first). Returns null when FTS5 is unavailable on this build
+  // or the query has no usable tokens — callers fall back to legacy search.
+  searchSites(query: string, maxAgeMs: number, limit = 200): SiteSummary[] | null {
+    // Sanitization strips quotes/parens/operators, leaving [a-z0-9-] only —
+    // the quoted `"tok"*` MATCH string below cannot inject FTS syntax.
+    const tokens = query.toLowerCase().split(/\s+/)
+      .map((t) => t.replace(/[^a-z0-9-]/g, ""))
+      .filter((t) => t.length > 0);
+    if (!tokens.length) return null;
+    return this.withDb((db) => {
+      if (!this.ftsAvailable) return null;
+      const match = tokens.map((t) => `"${t}"*`).join(" AND ");
+      const min = this.now() - maxAgeMs;
+      const rows = db.prepare(
+        `SELECT s.* FROM sites_fts
+         JOIN sites s ON s.slug = sites_fts.slug
+         WHERE sites_fts MATCH ? AND s.fetchedAt > ?
+         ORDER BY bm25(sites_fts) ASC
+         LIMIT ?`,
+      ).all(match, min, limit) as unknown as SiteRow[];
+      return rows.map(rowToSite);
     });
   }
 
