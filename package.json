@@ -23,6 +23,7 @@
     "test": "vitest run",
     "smoke": "tsx test/live-smoke.ts",
     "drift": "node scripts/parser-drift-probe.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

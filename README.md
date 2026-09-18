@@ -25,6 +25,13 @@ of any site: color palette, tech stack, design elements, award history.
 Any MCP-compatible coding agent can use awwwards-mcp — no API key, no account.
 Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
 
+**Updates**: the server checks the npm registry once a day and prints an
+stderr notice when a newer `awwwards-mcp` exists (stdout stays clean for the
+JSON-RPC channel — your agent sees the notice as a log line). Set
+`AWWWARDS_AUTO_UPDATE=1` in the server's `env` to opt into background
+self-update; restart your agent afterwards to load it. Nothing is fetched
+more than once a day and serving never waits on the check.
+
 **Claude Code**
 
 ```bash
@@ -111,16 +118,19 @@ package automatically if present.
 
 ## Skills
 
-This package ships an agent skill that teaches the inspiration workflow —
-search, judge from screenshots, pull design DNA, state a design direction —
-using the awwwards MCP tools. Any agent that follows the
-[Agent Skills standard](https://agentskills.io) can load it; copy it into your
-agent's skills directory:
+This package ships two agent skills. Any agent that follows the
+[Agent Skills standard](https://agentskills.io) can load them; copy them into
+your agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration ~/.agents/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-doctor ~/.agents/skills/
 ```
+
+| Skill | What it teaches |
+|-------|-----------------|
+| `awwwards-inspiration` | The inspiration loop: search, judge from screenshots, pull design DNA, state a design direction, capture/motion-first builds. |
+| `awwwards-doctor` | Repair: run `npm run doctor`, apply its fixes, re-anchor parsers after real awwwards.com drift, recover the in-flight task that surfaced the failure. |
 
 | Agent | Skills directory |
 |-------|------------------|
@@ -196,7 +206,7 @@ horizontal** projects/about pages (GSAP ScrollTrigger pin +
 
 | Torn-paper masthead (home) | Horizontal gallery (Fields) | Horizontal chapters (Practices) |
 |---|---|---|
-| ![Fallow Press home — torn-paper masthead over grayscale photography](docs/images/fallow-home.jpg) | ![Fallow Press Fields — pinned horizontal gallery panel](docs/images/fallow-fields.jpg) | ![Fallow Press Practices — pink quote chapter](docs/images/fallow-practices.jpg) |
+| ![Fallow Press home — torn-paper masthead over grayscale photography](assets/fallow-home.jpg) | ![Fallow Press Fields — pinned horizontal gallery panel](assets/fallow-fields.jpg) | ![Fallow Press Practices — pink quote chapter](assets/fallow-practices.jpg) |
 
 The loop as it ran:
 
@@ -223,7 +233,7 @@ within 1px of total page height (10,871px vs 10,870px). This is the
 **structure-before-pixels** doctrine at its strictest — band maps compared,
 never just totals.
 
-![Cerebrium recreation — full-page build capture](docs/images/cerebrium-build.jpg)
+![Cerebrium recreation — full-page build capture](assets/cerebrium-build.jpg)
 
 **3. The Meridian** (`C:/Users/Afjal/editorial-site/`) — an editorial journal
 built from ORDR/Hearst references: the first build to run the whole loop
@@ -232,9 +242,9 @@ the build's band map against the reference's; the reference captures,
 motion film, and the reusable pre-scroll capture script live in
 `editorial-site/_qa/`.
 
-![The Meridian editorial journal — full-page build capture](docs/images/meridian-build.jpg)
+![The Meridian editorial journal — full-page build capture](assets/meridian-build.jpg)
 
-![The Meridian — motion filmstrip from record_site_motion](docs/images/meridian-filmstrip.jpg)
+![The Meridian — motion filmstrip from record_site_motion](assets/meridian-filmstrip.jpg)
 
 ## Skills used to build these
 

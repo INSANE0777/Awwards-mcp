@@ -11,3 +11,6 @@ capture-build.mjs
 
 # parser-drift probe run state (regenerated per run; not tracked)
 .drift/
+
+# controller scratch (plans, specs, drift-snapshot captures) — local-only
+docs/

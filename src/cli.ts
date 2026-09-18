@@ -13,6 +13,7 @@ import { Cache } from "./cache.js";
 import { createHandlers, type ToolResponse } from "./server.js";
 import { captureLiveSite } from "./capture.js";
 import { runIndexer, shouldAutoIndex } from "./indexer.js";
+import { checkForUpdate } from "./version-check.js";
 
 // The handlers return ToolResponse, which is structurally identical to the
 // SDK's CallToolResult at runtime ({ content, isError? }). CallToolResult's
@@ -158,5 +159,9 @@ if (shouldAutoIndex(cache)) {
     );
   });
 }
+
+// Update notice: once a day, compare against the npm registry; stderr-only,
+// never blocks serving. AWWWARDS_AUTO_UPDATE=1 opts into background install.
+checkForUpdate(pkgJson.version);
 
 await server.connect(new StdioServerTransport());
