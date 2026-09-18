@@ -1,6 +1,6 @@
 {
   "name": "awwwards-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Free MCP server giving AI agents design inspiration from Awwwards: search award-winning sites with inline screenshots and extract design DNA.",
   "type": "module",
   "license": "MIT",
@@ -13,9 +13,23 @@
     "README.md",
     "skills"
   ],
-  "keywords": ["mcp", "model-context-protocol", "awwwards", "design", "inspiration", "web-design", "screenshots", "agent-tools"],
-  "repository": { "type": "git", "url": "git+https://github.com/INSANE0777/Awwwards-mcp.git" },
-  "bugs": { "url": "https://github.com/INSANE0777/Awwwards-mcp/issues" },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "awwwards",
+    "design",
+    "inspiration",
+    "web-design",
+    "screenshots",
+    "agent-tools"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/INSANE0777/Awwwards-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/INSANE0777/Awwwards-mcp/issues"
+  },
   "homepage": "https://github.com/INSANE0777/Awwwards-mcp#readme",
   "engines": {
     "node": ">=22.13.0"
