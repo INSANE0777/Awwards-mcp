@@ -137,6 +137,10 @@ server.tool(
       .max(36)
       .default(16)
       .describe("Filmstrip tile count (default 16 → a 4x4 grid)"),
+    waitStrategy: z
+      .enum(["load", "networkidle"])
+      .default("load")
+      .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet"),
   },
   (args) => asMcpResult(handlers.record_site_motion(args)),
 );

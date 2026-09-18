@@ -48,7 +48,7 @@ export interface MotionOpts {
 // (7s dwell, 600ms scroll steps, 750ms hover dwells, 16 targets, 4 clicks),
 // so the tool constrains every dial:
 //   goto ....................... (network; not budgeted — waitStrategy decides)
-//   preloader dwell ............ 5.0s   (script: 7s; also covers the fixed
+//   preloader dwell ............ 4.0s   (script: 7s; also covers the fixed
 //                                       "load" settle capture.ts applies —
 //                                       one top-of-page wait serves both)
 //   lazy-render pre-scroll ...... ≤ ~1s  (bounded 40ms-step pass, back to top:
@@ -65,9 +65,10 @@ export interface MotionOpts {
 //                                       + cursor move + 500ms hover dwell]
 //                                       ≈ 10.2s, ≤3 safe clicks × 650ms ≈ 2s,
 //                                       1.5s return-to-top)
-// Recording worst case ≈ 28s, then context.close() flush + the ffmpeg strip
-// pass ≈ 1–2s — inside the 30s ceiling.
-const DWELL_MS = 5000;
+// Recording worst case ≈ 27s, then context.close() flush + the ffmpeg strip
+// pass ≈ 1–2s — inside the 30s ceiling with ~3s genuine headroom for goto
+// variance (slow networks, heavy preloads).
+const DWELL_MS = 4000;
 const SCROLL_STEP = 450;
 const SCROLL_SETTLE_MS = 350;
 const MAX_SCROLL_STEPS = 24;
@@ -183,6 +184,18 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   // still flushes a partial .webm) or a concurrent run's video can never be
   // globbed and filmed under this URL's hash.
   mkdirSync(opts.cacheImagesDir, { recursive: true });
+  // Stale-tmp sweep: a SIGKILLed run never reaches the finally below, so its
+  // per-call tmp dir (and any partial .webm in it) leaks. Best-effort hygiene:
+  // unlink leftover .video-tmp-* dirs before creating this run's own.
+  try {
+    for (const entry of readdirSync(opts.cacheImagesDir)) {
+      if (entry.startsWith(".video-tmp-")) {
+        rmSync(join(opts.cacheImagesDir, entry), { recursive: true, force: true });
+      }
+    }
+  } catch {
+    /* sweep is best-effort; mkdtemp below still proceeds */
+  }
   const videoTmp = mkdtempSync(join(opts.cacheImagesDir, ".video-tmp-"));
 
   const waitStrategy: WaitStrategy = opts.waitStrategy ?? "load";

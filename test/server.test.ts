@@ -407,6 +407,31 @@ describe("get_site_elements", () => {
 });
 
 describe("search query tokenization", () => {
+  it("merges a top-up scrape into a partially filled window instead of replacing it", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "ed1", title: "Editorial Thing 1", tags: [], createdAt: 1789516800 }),
+      site({ slug: "ed2", title: "Editorial Thing 2", tags: [], createdAt: 1789516800 + 1 }),
+      site({ slug: "ed3", title: "Editorial Thing 3", tags: [], createdAt: 1789516800 + 2 }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    // 3 verified cache matches < count*page (6): the window is partial. The
+    // old no-scrape behavior under-served (returned 3 forever); the old
+    // REPLACE behavior scraped and discarded the verified rows (returned 0 —
+    // no fixture title matches "editorial"). The merge path must scrape AND
+    // keep the cache rows.
+    const res = await h.search_sites({ query: "editorial", count: 6 });
+    expect(String(fetchFn.mock.calls[0][0])).toContain("/websites/"); // top-up scrape fired
+    const text = (res.content[0] as any).text;
+    // The verified cache rows survive the merge...
+    expect(text).toContain("ed1");
+    expect(text).toContain("ed2");
+    expect(text).toContain("ed3");
+    // ...while the scraped fixture-only rows are client-filtered out.
+    expect(text).not.toContain("l-i-s-a");
+  });
+
   it("splits multi-word queries into tokens (all must match)", async () => {
     const cache = new Cache(tmpDir());
     cache.upsertSites([
@@ -421,8 +446,10 @@ describe("search query tokenization", () => {
     expect(text).toContain("mag");
     expect(text).not.toContain("half");
     expect(text).not.toContain("other");
+    // 1 verified cache match < 6 → partial window → a top-up scrape fires, but
+    // every scraped row fails the all-tokens check, so only the cache row serves.
     const pageCalls = fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"));
-    expect(pageCalls.length).toBe(0);
+    expect(pageCalls.length).toBe(1);
   });
 
   it("suggests taxonomy tags on zero results", async () => {
@@ -551,7 +578,10 @@ describe("record_site_motion", () => {
   it("returns the filmstrip inline and forwards url + frames to the motion fn", async () => {
     const cache = new Cache(tmpDir());
     const { client } = fakeClient();
-    const seen: Array<{ url: string; opts: { cacheImagesDir: string; frames?: number } }> = [];
+    const seen: Array<{
+      url: string;
+      opts: { cacheImagesDir: string; frames?: number; waitStrategy?: string };
+    }> = [];
     const h = createHandlers({
       client,
       cache,
@@ -564,7 +594,11 @@ describe("record_site_motion", () => {
         };
       },
     });
-    const res = await h.record_site_motion({ url: "https://example.com", frames: 12 });
+    const res = await h.record_site_motion({
+      url: "https://example.com",
+      frames: 12,
+      waitStrategy: "networkidle",
+    });
     expect(res.isError).toBeUndefined();
     expect((res.content[0] as any).text).toBe(
       "Motion recording saved to /cache/motion-abc1234567.webm",
@@ -576,7 +610,7 @@ describe("record_site_motion", () => {
     });
     expect(seen[0]).toEqual({
       url: "https://example.com",
-      opts: { cacheImagesDir: cache.imagesDir, frames: 12 },
+      opts: { cacheImagesDir: cache.imagesDir, frames: 12, waitStrategy: "networkidle" },
     });
   });
 

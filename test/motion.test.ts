@@ -158,12 +158,12 @@ describe("recordSiteMotion", () => {
     // cacheImagesDir, NOT a shared fixed dir) with the capture viewport.
     expect(recordVideoDir.startsWith(join(dir, ".video-tmp-"))).toBe(true);
     expect(contextOpts[0].viewport).toEqual({ width: 1440, height: 900 });
-    // Flow shape: goto(load) → 5s preloader dwell → pre-scroll → scroll tour
+    // Flow shape: goto(load) → 4s preloader dwell → pre-scroll → scroll tour
     // (350ms steps) → discovery → hover tour (500ms dwells, one safe click)
     // → return to top → context.close() flush.
     expect(calls[0]).toBe("goto:load");
-    expect(calls[1]).toBe("wait:5000");
-    expect(calls.indexOf("eval:page")).toBeGreaterThan(calls.indexOf("wait:5000")); // preScroll after dwell
+    expect(calls[1]).toBe("wait:4000");
+    expect(calls.indexOf("eval:page")).toBeGreaterThan(calls.indexOf("wait:4000")); // preScroll after dwell
     expect(calls.indexOf("eval:discover")).toBeGreaterThan(calls.indexOf("eval:page")); // discovery after pre-render
     expect(calls.filter((c) => c === "eval:height").length).toBe(1); // tour height probe
     expect(calls.filter((c) => c === "wait:350").length).toBe(3); // 1200px page / 450px steps

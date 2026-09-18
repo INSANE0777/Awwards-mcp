@@ -54,7 +54,7 @@ export type AnalyzeFn = (
 
 export type MotionFn = (
   url: string,
-  opts: { cacheImagesDir: string; frames?: number },
+  opts: { cacheImagesDir: string; frames?: number; waitStrategy?: WaitStrategy },
 ) => Promise<{ file: string; base64: string; frames: number } | { error: string }>;
 
 export function slugifyTag(s: string): string {
@@ -129,7 +129,11 @@ export interface Handlers {
     maxBands?: number;
     waitStrategy?: WaitStrategy;
   }): Promise<ToolResponse>;
-  record_site_motion(args: { url: string; frames?: number }): Promise<ToolResponse>;
+  record_site_motion(args: {
+    url: string;
+    frames?: number;
+    waitStrategy?: WaitStrategy;
+  }): Promise<ToolResponse>;
 }
 
 export function createHandlers(deps: {
@@ -218,11 +222,17 @@ export function createHandlers(deps: {
       let sites = args.color
         ? []
         : cache.getSites(SITE_TTL_MS).filter((s) => matchesFilters(s, args, false));
-      // A scrape REPLACES the matched rows (fresh rows are only guaranteed the
-      // URL filter), so it must run only when the cache cannot serve the
-      // requested page at all — topping up a partial page would discard
-      // already-verified matches (e.g. a tokenized query's cache hits).
+      // A scrape normally REPLACES the matched rows (fresh rows are only
+      // guaranteed the URL filter), so it must run when the cache cannot serve
+      // the requested page window at all. When the window is only PARTIALLY
+      // filled (e.g. a tokenized query matched 3 cached rows for count 6),
+      // replacing would discard already-verified matches — those runs scrape
+      // the filter page and MERGE instead: dedupe by slug, verified cache rows
+      // win duplicate slugs, scraped-only rows appended, all newest-first like
+      // getSites; the merge result is client-checked as before (cache rows
+      // already passed matchesFilters(false), scraped rows matchesFilters(true)).
       const pageWindowEmpty = sites.slice((page - 1) * count, page * count).length === 0;
+      const pageWindowPartial = !pageWindowEmpty && sites.length < page * count;
       if (pageWindowEmpty) {
         const html = await client.getHtml(buildFilterUrl(args));
         const parsed = parseListing(html);
@@ -243,6 +253,21 @@ export function createHandlers(deps: {
         sites = parsed
           .filter((s) => matchesFilters(s, args, true))
           .sort((a, b) => b.createdAt - a.createdAt);
+      } else if (pageWindowPartial) {
+        // Top-up scrape: best-effort, so an empty parse here must not error —
+        // the cache rows can still serve the request.
+        const html = await client.getHtml(buildFilterUrl(args));
+        const parsed = parseListing(html);
+        if (parsed.length > 0) {
+          cache.upsertSites(parsed);
+          const fresh = parsed.filter((s) => matchesFilters(s, args, true));
+          const bySlug = new Map<string, SiteSummary>();
+          // Scraped rows seed the map; verified cache rows then overwrite any
+          // duplicate slug, so they always win.
+          for (const s of fresh) bySlug.set(s.slug, s);
+          for (const s of sites) bySlug.set(s.slug, s);
+          sites = [...bySlug.values()].sort((a, b) => b.createdAt - a.createdAt);
+        }
       }
 
       const ordered = orderByScore(sites, args.sortBy);
@@ -533,16 +558,23 @@ export function createHandlers(deps: {
     }
   }
 
-  async function record_site_motion(args: { url: string; frames?: number }): Promise<ToolResponse> {
+  async function record_site_motion(args: {
+    url: string;
+    frames?: number;
+    waitStrategy?: WaitStrategy;
+  }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright/ffmpeg are only touched when the tool runs.
+      // The default forwards motionOpts wholesale, so waitStrategy flows into
+      // recordSiteMotion's MotionOpts (which already accepts it).
       const motion =
         deps.motionFn ??
-        ((url: string, motionOpts: { cacheImagesDir: string; frames?: number }) =>
+        ((url: string, motionOpts: { cacheImagesDir: string; frames?: number; waitStrategy?: WaitStrategy }) =>
           import("./motion.js").then((m) => m.recordSiteMotion(url, motionOpts)));
       const result = await motion(args.url, {
         cacheImagesDir: cache.imagesDir,
         frames: args.frames,
+        waitStrategy: args.waitStrategy,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return {
