@@ -254,19 +254,25 @@ export function createHandlers(deps: {
           .filter((s) => matchesFilters(s, args, true))
           .sort((a, b) => b.createdAt - a.createdAt);
       } else if (pageWindowPartial) {
-        // Top-up scrape: best-effort, so an empty parse here must not error —
-        // the cache rows can still serve the request.
-        const html = await client.getHtml(buildFilterUrl(args));
-        const parsed = parseListing(html);
-        if (parsed.length > 0) {
-          cache.upsertSites(parsed);
-          const fresh = parsed.filter((s) => matchesFilters(s, args, true));
-          const bySlug = new Map<string, SiteSummary>();
-          // Scraped rows seed the map; verified cache rows then overwrite any
-          // duplicate slug, so they always win.
-          for (const s of fresh) bySlug.set(s.slug, s);
-          for (const s of sites) bySlug.set(s.slug, s);
-          sites = [...bySlug.values()].sort((a, b) => b.createdAt - a.createdAt);
+        // Top-up scrape: best-effort in the fullest sense — a fetch failure
+        // (HTTP error, BlockedError) must not escape to the outer catch, whose
+        // stale-fallback always slices page 1 and would silently discard the
+        // requested page window's cached rows. Keep those rows instead.
+        try {
+          const html = await client.getHtml(buildFilterUrl(args));
+          const parsed = parseListing(html);
+          if (parsed.length > 0) {
+            cache.upsertSites(parsed);
+            const fresh = parsed.filter((s) => matchesFilters(s, args, true));
+            const bySlug = new Map<string, SiteSummary>();
+            // Scraped rows seed the map; verified cache rows then overwrite any
+            // duplicate slug, so they always win.
+            for (const s of fresh) bySlug.set(s.slug, s);
+            for (const s of sites) bySlug.set(s.slug, s);
+            sites = [...bySlug.values()].sort((a, b) => b.createdAt - a.createdAt);
+          }
+        } catch {
+          /* keep cached rows; an empty parse is equally tolerated above */
         }
       }
 

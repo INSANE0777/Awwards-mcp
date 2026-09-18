@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -301,5 +302,45 @@ describe("recordSiteMotion", () => {
     expect(existsSync(recordVideoDir)).toBe(false);
     // ...and the decoy in the shared parent location is left untouched.
     expect(readFileSync(decoy, "utf8")).toBe("decoy-webm");
+  });
+
+  it("stale-tmp sweep is age-guarded: a concurrent run's young tmp dir survives, a leaked old one is swept", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const mouse = { down: 0, up: 0 };
+    const contextOpts: any[] = [];
+    // "Concurrent" run: a .video-tmp-* dir written moments ago must survive
+    // the sweep — deleting it would starve that in-flight recording.
+    const liveDir = join(dir, ".video-tmp-live");
+    mkdirSync(liveDir, { recursive: true });
+    const liveVideo = join(liveDir, "in-flight.webm");
+    writeFileSync(liveVideo, "in-flight-webm");
+    // Leaked run: a tmp dir backdated past the sweep threshold must be swept.
+    const oldDir = join(dir, ".video-tmp-old");
+    mkdirSync(oldDir, { recursive: true });
+    const ninety = new Date(Date.now() - 90 * 60_000);
+    utimesSync(oldDir, ninety, ninety);
+
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, mouse, contextOpts, (recDir) => {
+          writeFileSync(join(recDir, "fresh.webm"), "fresh-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+    });
+
+    expect("error" in res).toBe(false);
+    if ("error" in res) return;
+    // The concurrent run's dir and video survive the sweep...
+    expect(existsSync(liveDir)).toBe(true);
+    expect(readFileSync(liveVideo, "utf8")).toBe("in-flight-webm");
+    // ...while the leaked 90-minute-old dir is gone.
+    expect(existsSync(oldDir)).toBe(false);
   });
 });

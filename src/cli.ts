@@ -5,6 +5,9 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { AwwwardsClient } from "./awwwards.js";
 import { Cache } from "./cache.js";
 import { createHandlers, type ToolResponse } from "./server.js";
@@ -17,6 +20,12 @@ import { runIndexer, shouldAutoIndex } from "./indexer.js";
 // TypeScript interface cannot satisfy implicitly, so a cast bridges the two.
 const asMcpResult = (p: Promise<ToolResponse>): Promise<CallToolResult> =>
   p as unknown as Promise<CallToolResult>;
+
+// Shared by capture_live_site, analyze_page_structure and record_site_motion.
+const waitStrategySchema = z
+  .enum(["load", "networkidle"])
+  .default("load")
+  .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet");
 
 const cacheRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
 let cache: Cache;
@@ -40,7 +49,11 @@ const handlers = createHandlers({
   captureFn: (url, imagesDir, opts) => captureLiveSite(url, imagesDir, undefined, opts),
 });
 
-const server = new McpServer({ name: "awwwards-mcp", version: "1.5.0" });
+// Version must match package.json; reading it at runtime makes drift impossible.
+const pkgJson = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8"),
+) as { version: string };
+const server = new McpServer({ name: "awwwards-mcp", version: pkgJson.version });
 
 server.tool(
   "search_sites",
@@ -103,10 +116,7 @@ server.tool(
   "Take a fresh full-page screenshot of a live website URL using a headless browser. Requires the optional playwright dependency.",
   {
     url: z.string().url().describe("Absolute URL of the site to capture"),
-    waitStrategy: z
-      .enum(["load", "networkidle"])
-      .default("load")
-      .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet"),
+    waitStrategy: waitStrategySchema,
   },
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
@@ -117,10 +127,7 @@ server.tool(
   {
     url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
     maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
-    waitStrategy: z
-      .enum(["load", "networkidle"])
-      .default("load")
-      .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet"),
+    waitStrategy: waitStrategySchema,
   },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
 );
@@ -137,10 +144,7 @@ server.tool(
       .max(36)
       .default(16)
       .describe("Filmstrip tile count (default 16 → a 4x4 grid)"),
-    waitStrategy: z
-      .enum(["load", "networkidle"])
-      .default("load")
-      .describe("'load' + settle works on heavy sites; 'networkidle' waits for total quiet"),
+    waitStrategy: waitStrategySchema,
   },
   (args) => asMcpResult(handlers.record_site_motion(args)),
 );

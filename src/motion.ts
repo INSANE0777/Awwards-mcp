@@ -7,6 +7,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -186,11 +187,22 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   mkdirSync(opts.cacheImagesDir, { recursive: true });
   // Stale-tmp sweep: a SIGKILLed run never reaches the finally below, so its
   // per-call tmp dir (and any partial .webm in it) leaks. Best-effort hygiene:
-  // unlink leftover .video-tmp-* dirs before creating this run's own.
+  // unlink leftover .video-tmp-* dirs, but only ones older than 10 minutes —
+  // a dir younger than that belongs to a concurrent recording (per-call
+  // isolation above documents concurrency as supported), and deleting it
+  // would make that run's glob come up empty.
+  const SWEEP_AGE_MS = 10 * 60_000;
   try {
+    const now = Date.now();
     for (const entry of readdirSync(opts.cacheImagesDir)) {
-      if (entry.startsWith(".video-tmp-")) {
-        rmSync(join(opts.cacheImagesDir, entry), { recursive: true, force: true });
+      if (!entry.startsWith(".video-tmp-")) continue;
+      const full = join(opts.cacheImagesDir, entry);
+      try {
+        if (statSync(full).mtimeMs < now - SWEEP_AGE_MS) {
+          rmSync(full, { recursive: true, force: true });
+        }
+      } catch {
+        /* vanished between readdir and stat — nothing left to clean */
       }
     }
   } catch {
