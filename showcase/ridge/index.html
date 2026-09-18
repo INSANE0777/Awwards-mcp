@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ridge — placing the rarest engineers</title>
+<meta name="description" content="Ridge is a boutique engineering search studio placing rare research and infrastructure talent with the firms compounding on top of them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-theme="light">
+
+<div class="grain" aria-hidden="true"></div>
+
+<!-- intro overlay: black + mark, mirrors reference intro -->
+<div class="intro" id="intro" aria-hidden="true">
+  <svg class="intro-mark" viewBox="0 0 64 64" width="72" height="72" aria-hidden="true">
+    <polyline points="8,54 32,10 56,54 44,54 32,30 20,54" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+  </svg>
+</div>
+
+<header class="topbar">
+  <a class="brand" href="#top" aria-label="Ridge home">
+    <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true"><polyline points="8,54 32,10 56,54 44,54 32,30 20,54" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>
+    RIDGE
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="#about">About</a><a href="#disciplines">Disciplines</a><a href="#clients">Clients</a><a href="#team">Team</a>
+  </nav>
+  <div class="topbar-right">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode"><span class="tt-dot"></span></button>
+    <a class="contact-btn" href="#contact">Contact</a>
+  </div>
+</header>
+
+<main id="top">
+  <!-- ============ HERO GRID ============ -->
+  <section class="hero-grid">
+    <div class="cell cell-brand"><h1 class="giant">Ridge</h1></div>
+    <div class="cell cell-grain" aria-hidden="true"><div class="grain-fill"></div><svg class="cell-mark" viewBox="0 0 64 64" aria-hidden="true"><polyline points="8,54 32,10 56,54 44,54 32,30 20,54" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></div>
+    <div class="cell cell-claim">
+      <p>Placing research engineers, quantitative scientists, and the systems people behind them into firms compounding since 2009.</p>
+      <p class="news-label">Recent hires from:</p>
+      <p class="ticker" id="ticker">Two Sigma</p>
+    </div>
+    <div class="cell cell-mint">
+      <p>We don't move volume. We find the rare ones — and the firms smart enough to invest in them.</p>
+    </div>
+  </section>
+
+  <section class="strip">
+    <h2 class="strip-word" data-slide>Placing winners.</h2>
+    <div class="strip-word2-wrap"><span class="strip-word2" data-slide>Search</span></div>
+  </section>
+
+  <!-- ============ ABOUT / STATS ============ -->
+  <section class="about" id="about">
+    <div class="about-copy">
+      <p class="kicker caps">About Ridge</p>
+      <p class="statement">Ridge was founded on a simple observation: the best quantitative researchers and infrastructure engineers don't apply to jobs. They get one shot every few years to make a move, and they want that conversation to be with someone who actually understands the work — the systems, the trade-offs, the trade-offs behind the trade-offs. We spent twelve years inside those rooms. Now we run the search the way we wish someone had run it for us.</p>
+    </div>
+    <div class="stats">
+      <div class="stat stat-mint"><span class="stat-num" data-count="100" data-format="$0M-5M">0M</span><span class="stat-label">Range of hired offers</span></div>
+      <div class="stat stat-white"><span class="stat-num" data-count="500">0+</span><span class="stat-label">Placements since 2009</span></div>
+      <div class="stat stat-gray"><span class="stat-num" data-count="19">0+</span><span class="stat-label">Years inside the rooms</span></div>
+    </div>
+  </section>
+
+  <!-- ============ DISCIPLINES: horizontal pin passage ============ -->
+  <section class="disciplines" id="disciplines">
+    <div class="disc-head"><h2 class="giant-2" data-slide>Connecting top-tier talent</h2></div>
+    <div class="hwrap" id="hwrap">
+      <div class="htrack" id="htrack">
+        <article class="dpanel d1">
+          <svg class="dicon" viewBox="0 0 100 100" aria-hidden="true"><ellipse cx="50" cy="50" rx="44" ry="18" fill="none" stroke="currentColor" stroke-width="1.5"/><ellipse cx="50" cy="50" rx="44" ry="34" fill="none" stroke="currentColor" stroke-width="1" opacity=".5"/><circle cx="50" cy="50" r="14" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          <h3>Quantitative Research</h3>
+          <p>People who write signal, not slides. Alpha research, statistical arbitrage, market microstructure — the ones whose notebooks are the moat.</p>
+          <ul class="dlist"><li>Alpha researchers</li><li>Quant PMs</li><li>Statistical arbitrage</li><li>Market microstructure</li></ul>
+        </article>
+        <article class="dpanel d2">
+          <svg class="dicon" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="30" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="50" cy="50" r="18" fill="none" stroke="currentColor" stroke-width="1" opacity=".6"/><line x1="50" y1="8" x2="50" y2="92" stroke="currentColor" stroke-width="1" opacity=".4"/><line x1="8" y1="50" x2="92" y2="50" stroke="currentColor" stroke-width="1" opacity=".4"/></svg>
+          <h3>Engineering &amp; Infrastructure</h3>
+          <p>The people the exchange,latency, and uptime people call first. Low-latency systems, matching engines, the path between event and order.</p>
+          <ul class="dlist"><li>Low-latency C++</li><li>Matching engines</li><li>Kernel / NIC / FPGA</li><li>Reliability engineering</li></ul>
+        </article>
+        <article class="dpanel d3">
+          <svg class="dicon" viewBox="0 0 100 100" aria-hidden="true"><rect x="20" y="20" width="60" height="60" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="20" y1="36" x2="80" y2="36" stroke="currentColor" stroke-width="1" opacity=".5"/><line x1="36" y1="36" x2="36" y2="80" stroke="currentColor" stroke-width="1" opacity=".5"/><circle cx="58" cy="58" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          <h3>AI &amp; Machine Learning</h3>
+          <p>Research engineers who ship models into production and can explain the loss curve over dinner. LLM systems, RL, applied research.</p>
+          <ul class="dlist"><li>LLM systems</li><li>Reinforcement learning</li><li>Inference infra</li><li>Applied research</li></ul>
+        </article>
+        <article class="dpanel d4">
+          <svg class="dicon" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="34" r="16" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M18 86c4-20 16-30 32-30s28 10 32 30" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          <h3>Leadership &amp; Team Builds</h3>
+          <p>Entire desks, built quietly. Heads of research, platform leads, and the founding engineers around whom offices happen.</p>
+          <ul class="dlist"><li>Heads of research</li><li>Platform leads</li><li>Founding engineers</li><li>Office builds</li></ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CLIENTS ============ -->
+  <section class="clients" id="clients">
+    <h2 class="giant-2" data-slide>Clients</h2>
+    <div class="client-grid">
+      <div class="client-logo"><span class="logo-card lc-blue">Headlands</span></div>
+      <ul class="client-rows">
+        <li><span>Headlands</span><em>Quant &middot; SF</em></li>
+        <li><span>Two Sigma</span><em>Research &middot; NYC</em></li>
+        <li><span>EQR &middot; Citadel</span><em>Infrastructure &middot; CHI</em></li>
+        <li><span>Vatic Labs</span><em>AI &middot; Remote</em></li>
+        <li><span>GQS &middot; Chadel</span><em>Quant &middot; LDN</em></li>
+        <li><span>Synthia</span><em>AI &middot; TLV</em></li>
+      </ul>
+    </div>
+    <figure class="quote">
+      <div class="quote-avatar" aria-hidden="true"></div>
+      <blockquote>"Ben is in a league of his own as a recruiter. An industry veteran with deep connections, we knew exactly which firms to approach."</blockquote>
+      <figcaption>Calanon Meavy &middot; Co-founder, Headlands</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ TEAM ============ -->
+  <section class="team" id="team">
+    <h2 class="giant-2" data-slide>Team</h2>
+    <p class="team-note caps">Small team. 19 years inside.</p>
+    <div class="team-grid">
+      <figure class="member"><div class="m-photo mp-1" aria-hidden="true"></div><figcaption><span class="m-chip">Tyler Newman</span><em>Principal, Quant</em></figcaption></figure>
+      <figure class="member"><div class="m-photo mp-2" aria-hidden="true"></div><figcaption><span class="m-chip">Zen Leatherman</span><em>Principal, Infra</em></figcaption></figure>
+      <figure class="member"><div class="m-photo mp-3" aria-hidden="true"></div><figcaption><span class="m-chip">Mara Voss</span><em>Research, AI</em></figcaption></figure>
+      <figure class="member"><div class="m-photo mp-4" aria-hidden="true"></div><figcaption><span class="m-chip">Ilya Dent</span><em>Search, Platforms</em></figcaption></figure>
+    </div>
+  </section>
+
+  <!-- ============ CTA / FOOTER ============ -->
+  <section class="cta" id="contact">
+    <div class="cta-band">
+      <h2 class="cta-line" data-slide>Let's start a <span class="cta-arrow">&#8594;</span></h2>
+      <h2 class="cta-line2" data-slide>conversation</h2>
+    </div>
+    <footer class="footer">
+      <p class="foot-claim">Raise your trajectory.</p>
+      <div class="foot-cols">
+        <div><p class="caps f-label">Menu</p><a href="#about">About</a><a href="#disciplines">Disciplines</a><a href="#clients">Clients</a><a href="#team">Team</a></div>
+        <div><p class="caps f-label">Contact</p><a href="#">desk@ridge.search</a><a href="#">+1 312 555 0119</a><a href="#">Chicago &middot; London</a></div>
+        <div><p class="caps f-label">Elsewhere</p><a href="#">LinkedIn</a><a href="#">Are.na</a></div>
+      </div>
+      <p class="foot-brand">ridge<span class="reg">&reg;</span></p>
+    </footer>
+  </section>
+</main>
+
+<div class="cursor" id="cursor" aria-hidden="true"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

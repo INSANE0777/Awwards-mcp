@@ -185,9 +185,9 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
-## Built with awwwards-mcp: three real sites
+## Built with awwwards-mcp: four real sites
 
-Three complete sites were built through the full inspiration loop this MCP
+Four complete sites were built through the full inspiration loop this MCP
 enables, using nothing but the server's tools plus the shipped
 `awwwards-inspiration` skill. Each one exercised a different corner of the
 loop — and every correction the loop caught on the way became doctrine in the
@@ -203,7 +203,10 @@ skill.
 > results would be better still. The skill's frame-tile doctrine is what
 > closes that gap today.
 
-**1. [Fallow Press](fallow-press/index.html)**
+**1. [Ridge](showcase/ridge/index.html)**
+([source](showcase/ridge/)) — a Swiss-minimal single-page showcase for a fictional engineering-talent studio, direction **Aspen Search** (SOTD + Developer Award, jury 7.48): monochrome `#FAFAF8`/`#1A1A1A` + mint, giant grotesque section markers, halftone grain, asymmetric panel grid, dark discipline panels in an interior **horizontal pin passage**, count-up stats, client rows, theme toggle, cursor-follower. Built with the v1.4.0 toolkit: FTS5-ranked direction search, **both-viewports** reference captures and QA (desktop 7,849px + mobile 390×844), overflow audit (0px both), pin-center shots, film verification — and the skill-memory flywheel recorded the findings. QA evidence: `showcase/ridge/_qa/`.
+
+**2. [Fallow Press](fallow-press/index.html)**
 ([source](fallow-press/)) — a flat-2D editorial journal, direction
 **Emergence Magazine** (SOTD): pink `#FF9398` on cream and black, torn-paper
 masthead (pure CSS `clip-path`, zero WebGL), giant grotesque display over
@@ -232,7 +235,7 @@ The loop as it ran:
    one-shot entrances**; QA pin shots land at panel **centers**, not uniform
    fractions, or you photograph empty transition zones.
 
-**2. Cerebrium recreation** (`C:/Users/Afjal/cerebrium-recreation/`) — a
+**3. Cerebrium recreation** (`C:/Users/Afjal/cerebrium-recreation/`) — a
 fidelity-first recreation of cerebrium.ai, pixel-checked against the live
 reference: full-page captures of both sides, `analyze_page_structure` band
 compare, and SVG icon/legend fixes until the build matched the reference to
@@ -242,7 +245,7 @@ never just totals.
 
 ![Cerebrium recreation — full-page build capture](assets/cerebrium-build.jpg)
 
-**3. The Meridian** (`C:/Users/Afjal/editorial-site/`) — an editorial journal
+**4. The Meridian** (`C:/Users/Afjal/editorial-site/`) — an editorial journal
 built from ORDR/Hearst references: the first build to run the whole loop
 end-to-end. `analyze_page_structure` caught a masthead band bug by comparing
 the build's band map against the reference's; the reference captures,
