@@ -22,13 +22,58 @@ of any site: color palette, tech stack, design elements, award history.
 
 ## Setup
 
+Any MCP-compatible coding agent can use awwwards-mcp — no API key, no account.
+Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
+
 **Claude Code**
 
 ```bash
 claude mcp add awwwards -- npx -y awwwards-mcp
 ```
 
-**Claude Desktop / Cursor / Windsurf** (`mcpServers` in the config):
+**Codex CLI** (ChatGPT desktop app and the IDE extension share this config)
+
+```bash
+codex mcp add awwwards -- npx -y awwwards-mcp
+```
+
+or in `~/.codex/config.toml` (project-scoped: `.codex/config.toml`):
+
+```toml
+[mcp_servers.awwwards]
+command = "npx"
+args = ["-y", "awwwards-mcp"]
+```
+
+**OpenCode** (`opencode.json` — note the command is an array)
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "awwwards": {
+      "type": "local",
+      "command": ["npx", "-y", "awwwards-mcp"]
+    }
+  }
+}
+```
+
+**ZCode** (`~/.zcode/cli/config.json` — note servers nest under `"mcp": { "servers": ... }`)
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "awwwards": { "command": "npx", "args": ["-y", "awwwards-mcp"], "env": {} }
+    }
+  }
+}
+```
+
+**Claude Desktop / Cursor / Windsurf / Gemini CLI / Cline / Continue** — anything
+reading the common `mcpServers` JSON shape (e.g. `~/.claude/claude_desktop_config.json`
+or `~/.gemini/settings.json`):
 
 ```json
 {
@@ -38,25 +83,54 @@ claude mcp add awwwards -- npx -y awwwards-mcp
 }
 ```
 
-Optional full-page captures:
+**Anything else** — awwwards-mcp is a plain stdio MCP server: point your client
+at `npx -y awwwards-mcp` and it works. To pin a version, use
+`npx -y awwwards-mcp@1.0.0`.
+
+**pi coding agent** has no built-in MCP by design — it uses skills and
+extensions instead. Two options:
+
+1. Install the awwwards-inspiration skill (below). pi reads skills from
+   `~/.pi/agent/skills/` or `~/.agents/skills/` (the latter is shared across
+   agents following the Agent Skills standard). The skill teaches the workflow;
+   for it to reach the live data, add an MCP-supporting pi extension, or run
+   the queries in another agent and paste results.
+2. Skip MCP entirely: ask pi to build you a small CLI wrapper around
+   awwwards.com, or use a shared skills directory (`~/.agents/skills/`) so the
+   same skill file serves pi and every other agent.
+
+Optional full-page captures (needed by `capture_live_site`,
+`analyze_page_structure`, `record_site_motion`):
 
 ```bash
 npm install -g playwright && npx playwright install chromium
 ```
 
+`record_site_motion` additionally uses ffmpeg; it resolves the `ffmpeg-static`
+package automatically if present.
+
 ## Skills
 
 This package ships an agent skill that teaches the inspiration workflow —
 search, judge from screenshots, pull design DNA, state a design direction —
-using the awwwards MCP tools. Copy it into your agent's skills directory:
+using the awwwards MCP tools. Any agent that follows the
+[Agent Skills standard](https://agentskills.io) can load it; copy it into your
+agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.claude/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration ~/.claude/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration ~/.agents/skills/
 ```
 
-For ZCode, copy to `~/.zcode/skills/` instead of `~/.claude/skills/`.
-Windows: run this from Git Bash, or copy `node_modules\awwwards-mcp\skills\awwwards-inspiration` manually.
+| Agent | Skills directory |
+|-------|------------------|
+| Claude Code | `~/.claude/skills/` |
+| pi | `~/.pi/agent/skills/` (also reads `~/.agents/skills/`) |
+| ZCode | `~/.zcode/skills/` |
+| Agent Skills-standard agents | `~/.agents/skills/` |
+
+Windows: run this from Git Bash, or copy
+`node_modules\awwwards-mcp\skills\awwwards-inspiration` manually.
 
 ## Indexing (recommended)
 
