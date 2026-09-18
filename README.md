@@ -9,9 +9,10 @@ sourced from the web's best award-winning websites.
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
 e-commerce"), sees **real screenshots inline**, and can pull the **design DNA**
 of any site: color palette, tech stack, design elements, award history.
-Free-text queries are full-text (FTS5) and BM25-ranked — multi-word input like
-"editorial magazine" matches words scattered across titles and tags, with title
-hits leading the results.
+Free-text queries run on a porter-stemmed, prefix-matching FTS5 index with BM25
+ranking — "magazines" now finds Magazine-tagged sites (68 on the live index),
+best matches first, where the old substring path returned zero. Multi-word
+queries keep AND semantics: every token must hit the same site.
 
 ## Tools
 

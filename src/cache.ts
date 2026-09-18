@@ -112,11 +112,16 @@ export class Cache {
       if (this.ftsAvailable) {
         // The fts table is derived and must never gate correctness: if sites
         // has rows but sites_fts is empty (pre-FTS database opened for the
-        // first time), rebuild the index. Afterwards triggers keep it synced.
+        // first time), rebuild the index. The guard lives inside the INSERT
+        // itself (slug NOT IN sites_fts), not only in the counts above: the
+        // counts are read non-atomically, so `npm run index` and a first open
+        // can both pass them and both run this statement — sites_fts.slug has
+        // no unique constraint, so an unguarded re-run would double-index.
+        // Afterwards triggers keep it synced.
         const { s: sitesN } = db.prepare("SELECT COUNT(*) AS s FROM sites").get() as { s: number };
         const { s: ftsN } = db.prepare("SELECT COUNT(*) AS s FROM sites_fts").get() as { s: number };
         if (sitesN > 0 && ftsN === 0) {
-          db.exec("INSERT INTO sites_fts (slug, title, tags, awards) SELECT slug, title, tags, awards FROM sites");
+          db.exec("INSERT INTO sites_fts (slug, title, tags, awards) SELECT slug, title, tags, awards FROM sites WHERE slug NOT IN (SELECT slug FROM sites_fts)");
         }
       }
       return fn(db);

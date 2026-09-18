@@ -532,6 +532,31 @@ describe("search query tokenization", () => {
     expect(text).toContain("No sites matched");
     expect(text).toContain("Loose matches (any token): half");
   });
+
+  it("drops stem-matched rows that fail a non-query filter (filter composition)", async () => {
+    const cache = new Cache(tmpDir());
+    // Both rows match the FTS stem ("magazines" → magazin): one via its
+    // Magazine tag, one via its title only. skipQueryCheck must skip ONLY the
+    // query re-check — with no URL filter (pure query + tags search) the tag
+    // is client-checked with honorUrlSource=false, so the untagged stem match
+    // must drop instead of riding the FTS path into the results.
+    cache.upsertSites([
+      site({ slug: "mag-tagged", title: "Paper Journal", tags: ["Magazine / Newspaper / Blog"] }),
+      site({ slug: "mag-untagged", title: "Magazine Warehouse", tags: [] }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "magazines", tags: ["magazine"], count: 6 });
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("1 site(s) matched");
+    expect(text).toContain("mag-tagged");
+    expect(text).not.toContain("mag-untagged");
+    // The partial-window top-up may scrape (1 row < count 6), but no fixture
+    // card carries the literal token "magazines", so nothing scraped joins
+    // the result either.
+    expect(fetchFn.mock.calls.every((c: any[]) => !String(c[0]).includes("/sites/"))).toBe(true);
+    expect(text).not.toContain("l-i-s-a");
+  });
 });
 
 describe("suggestTags", () => {

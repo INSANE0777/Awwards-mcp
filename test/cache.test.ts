@@ -145,4 +145,29 @@ describe("searchSites (FTS5)", () => {
       expect(n).toBe(3);
     });
   });
+
+  it("backfill INSERT is idempotent — a raced double-run cannot duplicate slugs", () => {
+    // The sitesN>0 && ftsN===0 read is not atomic across processes: `npm run
+    // index` and a first open can both pass it and both run the backfill
+    // INSERT, and sites_fts.slug has no unique constraint. Run the statement
+    // twice the way the raced processes would — its NOT IN guard must keep
+    // the index single-rowed and searchSites duplicate-free.
+    const cache = new Cache(tmpDir());
+    cache.withDbForTest((db) => db.exec("DROP TRIGGER sites_fts_ai"));
+    seed(cache);
+    const backfill =
+      "INSERT INTO sites_fts (slug, title, tags, awards) " +
+      "SELECT slug, title, tags, awards FROM sites " +
+      "WHERE slug NOT IN (SELECT slug FROM sites_fts)";
+    cache.withDbForTest((db) => db.exec(backfill));
+    cache.withDbForTest((db) => db.exec(backfill)); // the raced second run
+    const rows = cache.searchSites("magazine", 1000)!;
+    const slugs = rows.map((r) => r.slug);
+    expect(slugs.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(slugs).size).toBe(slugs.length); // no duplicate slugs
+    cache.withDbForTest((db) => {
+      const { n } = db.prepare("SELECT COUNT(*) AS n FROM sites_fts").get() as unknown as { n: number };
+      expect(n).toBe(3);
+    });
+  });
 });

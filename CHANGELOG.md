@@ -4,9 +4,10 @@
 
 Search intelligence (FTS5 — no new dependencies):
 
-- `search_sites` queries now match multi-word input ("editorial magazine"
-  historically returned nothing), rank by BM25 (title hits lead), and match
-  prefixes + porter stems ("edito" finds "editorial").
+- Porter-stem + prefix matching with BM25 ranking: "magazines" now finds
+  Magazine-tagged sites (68 on the live index), best matches first — the old
+  substring path returned zero. "edito" finds "editorial"; multi-word queries
+  keep AND semantics (every token must hit the same site).
 - Zero-result queries gain loose OR-matched hints alongside the taxonomy
   suggestions. Live top-up merge and client-side filters unchanged.
 
