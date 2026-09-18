@@ -124,4 +124,60 @@ describe("captureLiveSite", () => {
     expect(calls.filter((c) => c === "eval").length).toBeGreaterThanOrEqual(1); // still pre-scrolls
     expect(calls[calls.length - 1]).toBe("shot");
   });
+
+  // Fake chromium whose newPage captures its creation options (mirrors
+  // structure.test.ts's optionCapturingFake) so tests can pin the viewport
+  // threading through captureLiveSite.
+  const optionCapturingFake = (captured: any[]) => ({
+    launch: async () => ({
+      newPage: async (opts: any) => {
+        captured.push(opts);
+        return {
+          goto: async () => {},
+          // settle wait + pre-scroll evaluate from the capture flow
+          waitForTimeout: async () => {},
+          evaluate: async () => 500,
+          screenshot: async ({ path }: { path: string }) => {
+            const fs = await import("node:fs/promises");
+            await fs.writeFile(path, Buffer.from("png-bytes"));
+          },
+        };
+      },
+      close: async () => {},
+    }),
+  });
+
+  it("uses the mobile viewport profile when opts.viewport is mobile", async () => {
+    const captured: any[] = [];
+    const res = await captureLiveSite(
+      "https://x.test",
+      tmpDir(),
+      async () => ({ chromium: optionCapturingFake(captured) }),
+      { viewport: "mobile" },
+    );
+    expect("file" in res).toBe(true);
+    expect(captured).toHaveLength(1);
+    // The profile is SPLIT: width/height land in playwright's `viewport` key,
+    // the mobile flags are sibling context options.
+    expect(captured[0]).toEqual({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 3,
+      isMobile: true,
+      hasTouch: true,
+    });
+  });
+
+  it("defaults to the desktop viewport (no mobile flags)", async () => {
+    const captured: any[] = [];
+    const res = await captureLiveSite(
+      "https://x.test",
+      tmpDir(),
+      async () => ({ chromium: optionCapturingFake(captured) }),
+    );
+    expect("file" in res).toBe(true);
+    expect(captured).toHaveLength(1);
+    // Exact equality: the desktop default must inject no mobile flags and no
+    // extra fields into newPage.
+    expect(captured[0]).toEqual({ viewport: { width: 1440, height: 900 } });
+  });
 });

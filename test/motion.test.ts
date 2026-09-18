@@ -343,4 +343,65 @@ describe("recordSiteMotion", () => {
     // ...while the leaked 90-minute-old dir is gone.
     expect(existsSync(oldDir)).toBe(false);
   });
+
+  it("uses the mobile viewport profile when opts.viewport is mobile", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const contextOpts: any[] = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, contextOpts, (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+      viewport: "mobile",
+    });
+    expect("error" in res).toBe(false);
+    expect(contextOpts).toHaveLength(1);
+    // The profile is SPLIT into newContext: width/height land in the
+    // `viewport` key, the mobile flags are sibling context options.
+    expect(contextOpts[0]).toMatchObject({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 3,
+      isMobile: true,
+      hasTouch: true,
+    });
+    // The existing context fields survive the spread untouched.
+    expect(contextOpts[0].recordVideo).toMatchObject({ size: { width: 1440, height: 900 } });
+    expect(typeof contextOpts[0].recordVideo.dir).toBe("string");
+  });
+
+  it("defaults to the desktop viewport, preserving the existing context fields (no mobile flags)", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const contextOpts: any[] = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, contextOpts, (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+    });
+    expect("error" in res).toBe(false);
+    expect(contextOpts).toHaveLength(1);
+    // Desktop default: exact viewport, existing recordVideo preserved, and no
+    // mobile flags injected into the context.
+    expect(contextOpts[0].viewport).toEqual({ width: 1440, height: 900 });
+    expect(contextOpts[0].recordVideo).toBeDefined();
+    expect(contextOpts[0].deviceScaleFactor).toBeUndefined();
+    expect(contextOpts[0].isMobile).toBeUndefined();
+    expect(contextOpts[0].hasTouch).toBeUndefined();
+  });
 });

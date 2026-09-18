@@ -6,6 +6,7 @@ import { join } from "node:path";
 // CAPTURE_INSTALL_HINT from here) — both sides only use the other's bindings
 // at call time, which ESM resolves fine.
 import { preScroll, type WaitOpts, type WaitStrategy } from "./structure.js";
+import { resolveViewport } from "./viewport.js";
 
 export const CAPTURE_INSTALL_HINT =
   "Full-page capture needs Playwright, which is an optional dependency.\n" +
@@ -36,7 +37,12 @@ export async function captureLiveSite(
   }
   try {
     const waitStrategy: WaitStrategy = opts?.waitStrategy ?? "load";
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    // Same viewport-profile split as analyzePageStructure (structure.ts):
+    // width/height fill the `viewport` key, mobile-profile flags spread in as
+    // sibling context options. Desktop resolves to no extra fields, so the
+    // default call shape is unchanged.
+    const { width, height, ...contextOpts } = resolveViewport(opts?.viewport);
+    const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
     await page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 });
     // "load" can fire before late XHRs settle, so give the page a fixed
     // settle window; networkidle already means the network went quiet.

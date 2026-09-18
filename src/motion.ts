@@ -17,6 +17,7 @@ import { CAPTURE_INSTALL_HINT } from "./capture.js";
 // verified safe). The pre-scroll itself is motion-local: boundedPreScroll
 // below caps the walk so a huge page cannot blow the recording budget.
 import { type WaitStrategy } from "./structure.js";
+import { resolveViewport, type ViewportName } from "./viewport.js";
 
 export const MOTION_FFMPEG_HINT =
   "Motion recording needs ffmpeg-static, which is an optional dependency.\n" +
@@ -42,6 +43,9 @@ export interface MotionOpts {
   // binary (runFfmpeg below). Spawn/encode failure → MOTION_FFMPEG_HINT.
   ffmpegFn?: (bin: string, video: string, strip: string, frames: number) => Promise<void>;
   waitStrategy?: WaitStrategy;
+  // Recording-context profile: "desktop" (default, 1440x900) or "mobile"
+  // (390x844 @ DPR 3, isMobile + hasTouch).
+  viewport?: ViewportName;
 }
 
 // Recording-pass timings, tuned against the 30s MCP tool ceiling. The
@@ -212,9 +216,16 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
 
   const waitStrategy: WaitStrategy = opts.waitStrategy ?? "load";
   try {
+    // Viewport profile split (same as structure/capture): width/height fill
+    // the `viewport` key; the mobile-profile flags (deviceScaleFactor/
+    // isMobile/hasTouch) spread in as sibling context options AFTER the
+    // existing fields, which are kept untouched. The desktop profile resolves
+    // to no extra fields, so the default call shape is unchanged.
+    const { width, height, ...contextOpts } = resolveViewport(opts.viewport);
     const context = await browser.newContext({
-      viewport: { width: 1440, height: 900 },
+      viewport: { width, height },
       recordVideo: { dir: videoTmp, size: { width: 1440, height: 900 } },
+      ...contextOpts,
     });
     try {
       const page = await context.newPage();

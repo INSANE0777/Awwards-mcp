@@ -1,4 +1,5 @@
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
+import { resolveViewport, type ViewportName } from "./viewport.js";
 
 export interface RawBand {
   tag: string;
@@ -178,6 +179,8 @@ export type WaitStrategy = "load" | "networkidle";
 
 export interface WaitOpts {
   waitStrategy?: WaitStrategy;
+  /** Page creation profile: "desktop" (default, 1440x900) or "mobile" (390x844 @ DPR 3, touch). */
+  viewport?: ViewportName;
 }
 
 // Scroll through the page so lazy-rendered sections have layout before a
@@ -216,7 +219,12 @@ export async function analyzePageStructure(
   }
   try {
     const waitStrategy: WaitStrategy = opts?.waitStrategy ?? "load";
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    // Viewport profile split: width/height fill playwright's `viewport` key;
+    // the mobile-profile flags (deviceScaleFactor/isMobile/hasTouch) are
+    // sibling context options. The desktop profile resolves to no extra
+    // fields, so the default call shape is unchanged.
+    const { width, height, ...contextOpts } = resolveViewport(opts?.viewport);
+    const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
     await page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 });
     // "load" can fire before late XHRs settle, so give the page a fixed
     // settle window; networkidle already means the network went quiet.

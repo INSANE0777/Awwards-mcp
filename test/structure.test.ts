@@ -138,6 +138,63 @@ describe("analyzePageStructure", () => {
     expect(calls.filter((c) => c === "eval").length).toBe(2); // pre-scroll + scan
     expect(calls[calls.length - 1]).toBe("eval"); // scan runs last, after the scroll
   });
+
+  // Fake chromium whose newPage captures its creation options so tests can
+  // pin the viewport threading (desktop default vs the mobile profile flags).
+  const optionCapturingFake = (captured: any[]) => ({
+    launch: async () => ({
+      newPage: async (opts: any) => {
+        captured.push(opts);
+        return {
+          goto: async () => {},
+          // settle wait from the load strategy; the fake's evaluate result is
+          // returned for both the pre-scroll and the scan call
+          waitForTimeout: async () => {},
+          evaluate: async () => ({
+            title: "Test Page",
+            totalHeight: 2000,
+            candidates: [
+              band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 2000 }),
+            ],
+          }),
+        };
+      },
+      close: async () => {},
+    }),
+  });
+
+  it("uses the mobile viewport profile when opts.viewport is mobile", async () => {
+    const captured: any[] = [];
+    const res = await analyzePageStructure(
+      "https://x.test",
+      async () => ({ chromium: optionCapturingFake(captured) }),
+      40,
+      { viewport: "mobile" },
+    );
+    expect("error" in res).toBe(false);
+    expect(captured).toHaveLength(1);
+    // The profile is SPLIT: width/height land in playwright's `viewport` key,
+    // the mobile flags are sibling context options.
+    expect(captured[0]).toEqual({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 3,
+      isMobile: true,
+      hasTouch: true,
+    });
+  });
+
+  it("defaults to the desktop viewport (no mobile flags)", async () => {
+    const captured: any[] = [];
+    const res = await analyzePageStructure(
+      "https://x.test",
+      async () => ({ chromium: optionCapturingFake(captured) }),
+    );
+    expect("error" in res).toBe(false);
+    expect(captured).toHaveLength(1);
+    // Exact equality: the desktop default must inject no mobile flags and no
+    // extra fields into newPage.
+    expect(captured[0]).toEqual({ viewport: { width: 1440, height: 900 } });
+  });
 });
 
 // Mirror of the SCAN_SNIPPET in-page alpha parse (src/structure.ts). The
