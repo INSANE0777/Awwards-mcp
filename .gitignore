@@ -5,3 +5,6 @@ capture-build.mjs
 
 # controller scratch (execution ledger, briefs, review packages)
 .superpowers/
+
+# reference motion study artifacts (videos stay in showcase/ref-motion only)
+/*.mp4
