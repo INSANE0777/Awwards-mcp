@@ -203,6 +203,16 @@ skill.
 > results would be better still. The skill's frame-tile doctrine is what
 > closes that gap today.
 
+**Watch the whole loop run (1:50):**
+
+<video src="assets/demo-loop.mp4" controls muted playsinline></video>
+
+*Screen recording of the agent running the `awwwards-inspiration` loop end to
+end with the awwwards MCP tools — searching SOTD references with inline
+screenshots, pulling design DNA, frame-studying element videos, building, and
+verifying with band maps + motion recording. If your client doesn't render
+the player, [watch the file directly](assets/demo-loop.mp4).*
+
 **1. [Ridge](showcase/ridge/index.html)**
 ([source](showcase/ridge/)) — a Swiss-minimal single-page showcase for a fictional engineering-talent studio, direction **Aspen Search** (SOTD + Developer Award, jury 7.48): monochrome `#FAFAF8`/`#1A1A1A` + mint, giant grotesque section markers, halftone grain, asymmetric panel grid, dark discipline panels in an interior **horizontal pin passage**, count-up stats, client rows, theme toggle, cursor-follower. Built with the v1.4.0 toolkit: FTS5-ranked direction search, **both-viewports** reference captures and QA (desktop 7,849px + mobile 390×844), overflow audit (0px both), pin-center shots, film verification — and the skill-memory flywheel recorded the findings. QA evidence: `showcase/ridge/_qa/`.
 
