@@ -29,13 +29,23 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm publish
+      - name: Publish (beta tag when prerelease)
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            npm publish --tag beta
+          else
+            npm publish
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: GitHub Release from CHANGELOG
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           awk "/^## v${VERSION}/{flag=1;next} /^## v/{flag=0} flag" CHANGELOG.md > body.md
-          gh release create "$GITHUB_REF_NAME" --title "awwwards-mcp ${GITHUB_REF_NAME}" --notes-file body.md
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release create "$GITHUB_REF_NAME" --prerelease --title "awwwards-mcp ${GITHUB_REF_NAME}" --notes-file body.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "awwwards-mcp ${GITHUB_REF_NAME}" --notes-file body.md
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -28,7 +28,7 @@ queries keep AND semantics: every token must hit the same site.
 
 ## Setup
 
-Any MCP-compatible coding agent can use awwwards-mcp — no API key, no account.
+**v1.0.0-beta.1** — the first beta. Any MCP-compatible coding agent can use awwwards-mcp — no API key, no account.
 Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
 
 **Updates**: the server checks the npm registry once a day and prints an

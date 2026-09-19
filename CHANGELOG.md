@@ -1,5 +1,16 @@
 # Changelog
 
+> **Versioning note:** every release through v1.6.0 was an **alpha**.
+> `v1.0.0-beta.1` is the first beta — the feature set is complete for the
+> awwwards.com source; betas now take it through public hardening.
+## v1.0.0-beta.1 — 2026-09-19
+
+First **beta**. Supersedes the alpha 1.x line — the full v1.6.0 feature set
+(6 tools, local index, three skills incl. the self-improving memory flywheel,
+self-heal doctor, drift monitor, dual-viewport capture) now carries a beta
+label while it takes public hardening. Alphas remain on the registry for
+reproducibility.
+
 ## v1.6.0 — 2026-09-19
 
 Skill-memory flywheel (reviewed and approved for ship):
