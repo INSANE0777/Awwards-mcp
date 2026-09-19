@@ -148,6 +148,17 @@ function initDither(cell) {
 }
 document.querySelectorAll(".cell-grain").forEach(initDither);
 
+/* ---------- footer live clocks (NYC / LA) ---------- */
+function tickClocks() {
+  document.querySelectorAll("[data-tz]").forEach((el) => {
+    el.textContent = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric", minute: "2-digit", hour12: true, timeZone: el.dataset.tz,
+    }).format(new Date());
+  });
+}
+tickClocks();
+setInterval(tickClocks, 30000);
+
 /* ---------- refresh after fonts ---------- */
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => ScrollTrigger.refresh());
 window.addEventListener("load", () => ScrollTrigger.refresh());

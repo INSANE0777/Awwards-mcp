@@ -186,14 +186,39 @@ figcaption { margin-top: 2vh; font-size: 11px; letter-spacing: 0.14em; text-tran
 .cta-line, .cta-line2 { font-size: clamp(44px, 7.5vw, 130px); font-weight: 500; letter-spacing: -0.03em; line-height: 0.95; }
 .cta-line2 { margin-left: 12vw; }
 .cta-arrow { display: inline-block; background: var(--mint); color: #14231b; padding: 0 1.5vw; }
-.footer { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 4vw; padding: 8vh 4vw 4vh; border-top: 1px solid var(--line); }
-.foot-claim { font-size: clamp(18px, 1.8vw, 26px); font-weight: 500; }
-.foot-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2vw; }
-.f-label { opacity: 0.5; margin-bottom: 2vh; }
-.foot-cols a { display: block; color: var(--fg); text-decoration: none; font-size: 13px; padding: 0.8vh 0; opacity: 0.8; }
-.foot-cols a:hover { opacity: 1; color: var(--mint); text-shadow: 0 0 0 var(--mint); }
-.foot-brand { text-align: right; font-weight: 700; letter-spacing: 0.1em; font-size: 28px; align-self: end; }
-.reg { font-size: 12px; vertical-align: super; }
+.footer { border-top: 1px solid var(--line); }
+.foot-grid {
+  display: grid; grid-template-columns: 1.55fr 0.72fr 0.62fr;
+  grid-template-rows: auto auto;
+}
+.foot-claim-cell { grid-column: 1; grid-row: 1; padding: 6vh 4vw 14vh; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.foot-claim { font-size: clamp(28px, 3vw, 46px); font-weight: 500; line-height: 1.15; }
+.foot-links-cell { grid-column: 2; grid-row: 1; padding: 5vh 2vw; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.foot-links-cell a { display: block; color: var(--fg); text-decoration: none; font-size: clamp(15px, 1.4vw, 20px); padding: 1.2vh 0; }
+.foot-links-cell a:hover { color: var(--pink, var(--pink-deep, #b8f0d0)); padding-left: 6px; transition: padding 0.3s; }
+.foot-clocks-cell { grid-column: 3; grid-row: 1; padding: 5vh 2vw; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 3vh; }
+.clock { display: flex; gap: 14px; align-items: center; }
+.clock svg { width: 40px; flex: none; }
+.clock-city { font-size: 14px; font-weight: 600; }
+.clock-time { font-size: 12px; opacity: 0.55; letter-spacing: 0.08em; }
+.foot-mail-cell { grid-column: 2; grid-row: 2; padding: 3.5vh 2vw; border-right: 1px solid var(--line); }
+.foot-mail-cell a { color: var(--fg); text-decoration: none; font-size: clamp(15px, 1.4vw, 20px); font-weight: 500; }
+.foot-mail-cell a:hover { color: var(--pink, var(--mint)); }
+.foot-li-cell { grid-column: 3; grid-row: 2; padding: 3.5vh 2vw; display: flex; }
+.foot-li-cell a { color: var(--fg); text-decoration: none; font-size: clamp(15px, 1.4vw, 20px); font-weight: 500; display: flex; width: 100%; justify-content: space-between; align-items: center; }
+.li-arr { transition: transform 0.3s; }
+.foot-li-cell a:hover .li-arr { transform: translate(3px, -3px); }
+.foot-black { display: grid; grid-template-columns: 1.55fr 0.72fr 0.62fr; background: #161616; color: #f2f2ee; }
+.foot-mark { grid-column: 1; padding: 10vh 4vw; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 2vh; }
+.foot-word { font-size: clamp(70px, 9vw, 150px); font-weight: 500; letter-spacing: -0.02em; line-height: 1; }
+.foot-cta { grid-column: 2 / 4; padding: 10vh 3vw 6vh; position: relative; overflow: hidden; }
+.foot-cta h3 { font-size: clamp(30px, 3.4vw, 54px); font-weight: 500; line-height: 1.15; max-width: 12ch; }
+.foot-cta-link { display: inline-block; margin-top: 4vh; color: #f2f2ee; text-decoration: none; font-size: 14px; font-weight: 500; border-bottom: 1px solid rgba(242,242,238,0.4); padding-bottom: 4px; }
+.foot-cta-link:hover { border-color: var(--mint); color: var(--mint); }
+.foot-diagonal { position: absolute; right: 0; bottom: 0; width: 140px; height: 140px; opacity: 0.5; }
+.foot-legal { display: flex; justify-content: space-between; padding: 3vh 4vw; border-top: 1px solid rgba(242,242,238,0.14); background: #161616; color: #f2f2ee; font-size: 11px; letter-spacing: 0.14em; }
+.foot-legal a { color: inherit; }
+.mono { font-family: ui-monospace, monospace; }
 
 
 /* ---------- responsive (mobile 390 profile) ---------- */
@@ -213,6 +238,10 @@ figcaption { margin-top: 2vh; font-size: 11px; letter-spacing: 0.14em; text-tran
   .client-grid { grid-template-columns: 1fr; }
   .quote { max-width: none; }
   .team-grid { grid-template-columns: repeat(2, 1fr); }
-  .footer { grid-template-columns: 1fr; }
+  .foot-grid { grid-template-columns: 1fr; }
+  .foot-claim-cell, .foot-links-cell, .foot-clocks-cell, .foot-mail-cell, .foot-li-cell { grid-column: 1; border-right: none; }
+  .foot-black { grid-template-columns: 1fr; }
+  .foot-mark { grid-column: 1; }
+  .foot-cta { grid-column: 1; }
   .foot-brand { text-align: left; }
 }
