@@ -13,6 +13,10 @@
 //              capped. Journal stays the source of truth; the section is a
 //              rebuildable cache.
 //   stats    — journal counts, top rule clusters, last distill time.
+//   promote  — print a skill's folded rules CLEANED for the shipped copy:
+//              evidence paths are machine-local (A:\..., /Users/...), so they
+//              are stripped — doctrine stands on its own. Use the output in
+//              the human PR that moves a rule into the repo SKILL.md.
 //
 // The SHIPPED (repo) skill copies are never auto-edited — promoting a rule
 // into the npm package is a human PR. No LLM in the loop; no dependencies.
@@ -24,6 +28,8 @@
 //        [--evidence fallow-press/_qa/pin-0.33.png] [--refs "url1,url2"]
 //   node scripts/skill-memory.mjs recall --skill awwwards-inspiration
 //   node scripts/skill-memory.mjs distill [--min-count 2] [--cap 12]
+//   node scripts/skill-memory.mjs promote --skill awwwards-inspiration
+//   node scripts/skill-memory.mjs sync [--skill <name>]   # repo → installed, preserving learned rules
 //   node scripts/skill-memory.mjs stats
 
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync, mkdirSync, statSync } from "node:fs";
@@ -39,6 +45,7 @@ const INSTALLED_SKILLS = join(homedir(), ".zcode", "skills");
 const PHASES = ["search", "capture", "motion-study", "build", "verify", "release", "repair"];
 const MARK_START = "<!-- skill-memory:start -->";
 const MARK_END = "<!-- skill-memory:end -->";
+const SKILLS = ["awwwards-inspiration", "awwwards-motion-study", "awwwards-doctor"];
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -204,6 +211,80 @@ function distill() {
   for (const s of summary) console.log(`  ${s}`);
 }
 
+// ---------- sync ----------
+// Copy repo SKILL.md → installed copy WITHOUT losing the installed managed
+// section (plain cp would wipe learned rules with the repo's empty markers).
+// Extracts the installed managed section (if any) and re-injects it into the
+// incoming copy. Journal stays the source of truth — a lost section is also
+// recoverable by re-running distill.
+function sync() {
+  const skill = flag("skill");
+  const skills = skill ? [skill] : SKILLS;
+  let ok = 0;
+  for (const s of skills) {
+    const repoFile = resolve(root, "skills", s, "SKILL.md");
+    const installed = join(INSTALLED_SKILLS, s, "SKILL.md");
+    if (!existsSync(repoFile)) { console.log(`${s}: no repo copy at ${repoFile} — skipped`); continue; }
+    const incoming = readFileSync(repoFile, "utf8");
+    let section = "";
+    if (existsSync(installed)) {
+      const cur = readFileSync(installed, "utf8");
+      const a = cur.indexOf(MARK_START);
+      const b = cur.indexOf(MARK_END);
+      if (a >= 0 && b > a) section = cur.slice(a, b + MARK_END.length);
+    }
+    let out;
+    if (section) {
+      if (incoming.includes(MARK_START) && incoming.includes(MARK_END)) {
+        const a = incoming.indexOf(MARK_START);
+        const b = incoming.indexOf(MARK_END) + MARK_END.length;
+        out = incoming.slice(0, a) + section + incoming.slice(b);
+      } else {
+        out = incoming.trimEnd() + "\n\n" + section + "\n";
+      }
+    } else {
+      out = incoming; // no installed memory yet — plain copy
+    }
+    mkdirSync(dirname(installed), { recursive: true });
+    atomicWrite(installed, out);
+    ok++;
+    console.log(`${s}: synced (managed section ${section ? "preserved" : "empty"})`);
+  }
+  console.log(`sync: ${ok} skill(s) updated from repo`);
+}
+
+// ---------- promote ----------
+// Output for the human PR that moves a rule into the SHIPPED copy.
+// Evidence paths are machine-local, so they are stripped — a shipped rule
+// stands on its own. Keeps only rules that were actually folded (the managed
+// section), so promote never leaks unconfirmed journal noise.
+function promote() {
+  const skill = flag("skill");
+  if (!skill) die("promote requires --skill");
+  const installed = join(INSTALLED_SKILLS, skill, "SKILL.md");
+  if (!existsSync(installed)) die(`no installed copy at ${installed}`);
+
+  const src = readFileSync(installed, "utf8");
+  const start = src.indexOf(MARK_START);
+  const end = src.indexOf(MARK_END);
+  if (start < 0 || end <= start) die(`no managed section in ${installed} — run distill first`);
+
+  const lines = src
+    .slice(start + MARK_START.length, end)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("- ["))
+    .map((l) =>
+      // strip the " (evidence: <machine-local path>)" tail and the date/count
+      // prefix — the shipped copy keeps only the doctrine sentence
+      l.replace(/^\- \[[^\]]+\]\s*/, "").replace(/\s*\(evidence: [^)]+\)$/, ""),
+    );
+  if (!lines.length) die(`managed section has no folded rules — run distill first`);
+
+  console.log(`<!-- paste into the SHIPPED skills/${skill}/SKILL.md (human PR): -->`);
+  for (const l of lines) console.log(`- ${l}`);
+}
+
 // ---------- recall ----------
 function recall() {
   const skill = flag("skill");
@@ -253,8 +334,10 @@ function stats() {
 switch (cmd) {
   case "record": record(); break;
   case "distill": distill(); break;
+  case "sync": sync(); break;
+  case "promote": promote(); break;
   case "recall": recall(); break;
   case "stats": stats(); break;
   default:
-    die(`unknown command "${cmd ?? ""}" — use record | recall | distill | stats`);
+    die(`unknown command "${cmd ?? ""}" — use record | sync | promote | recall | distill | stats`);
 }

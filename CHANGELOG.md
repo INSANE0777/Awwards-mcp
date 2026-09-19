@@ -8,6 +8,9 @@ Skill-memory flywheel (unreviewed — ships after human review):
   self-improve from what their verification loops catch. Findings journal
   (episodic, per-machine) + deterministic distiller folding rules seen 2+
   times into installed skill copies (machine-managed section, LRU-capped).
+- `promote` + `sync` commands: promote prints folded rules cleaned for the
+  shipped-copy PR (machine-local evidence paths stripped); sync copies repo
+  skill updates into installed copies WITHOUT wiping learned rules.
 - `skills/_memory/techniques.json`: techniques registry seeded from
   researched video-understanding, motion-detection, UI-structure,
   micro-interaction and image-analysis methods; grows via the flywheel.

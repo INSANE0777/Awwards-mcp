@@ -153,7 +153,7 @@ Verification is the same skill pointed at yourself:
 ## Close the flywheel
 
 End every capture/study pass by recording what verification caught:
-`node scripts/skill-memory.mjs record --skill awwwards-motion-study --phase motion-study --symptom "..." --rule "..." [--evidence tile.jpg]`. Distill folds rules seen ≥2× into your installed copy; recall prints them at the next study. The techniques registry (`skills/_memory/techniques.json`) grows from promoted findings — propose better methods by recording them.
+`node scripts/skill-memory.mjs record --skill awwwards-motion-study --phase motion-study --symptom "..." --rule "..." [--evidence tile.jpg]`. Distill folds rules seen ≥2× into your installed copy; recall prints them at the next study. The techniques registry (`skills/_memory/techniques.json`) grows from promoted findings — propose better methods by recording them. For the human PR that promotes a rule into the shipped copy, `promote --skill awwwards-motion-study` strips machine-local evidence paths.
 
 ## Anti-patterns
 

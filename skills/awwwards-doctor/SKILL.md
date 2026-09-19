@@ -91,7 +91,7 @@ The user's build/research doesn't wait for the repair. Degrade gracefully:
 ## Close the flywheel
 
 Repairs are the highest-value lessons — they were expensive to learn. After a successful diagnosis + fix:
-`node scripts/skill-memory.mjs record --skill awwwards-doctor --phase repair --symptom "..." --rule "..." [--evidence <report path>]`. Distill folds recurring failure signatures into this installed copy so the next repair starts knowing them.
+`node scripts/skill-memory.mjs record --skill awwwards-doctor --phase repair --symptom "..." --rule "..." [--evidence <report path>]`. Distill folds recurring failure signatures into this installed copy so the next repair starts knowing them. When a rule proves out, `promote --skill awwwards-doctor` outputs it cleaned (no machine-local evidence paths) for the shipped-copy PR.
 
 ## Anti-patterns
 
