@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.5.0 — 2026-09-19
+## v1.6.0 — 2026-09-19
 
 Skill-memory flywheel (reviewed and approved for ship):
 
