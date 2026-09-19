@@ -34,7 +34,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             npm publish --tag beta
           else
-            npm publish
+            npm publish --tag latest
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,22 @@
+$240 a year. That is what Mobbin charges to look at screenshots of nice websites.
+
+I could not justify it. So I spent two days building the free version.
+
+I built awwwards-mcp instead: an open-source MCP server that gives any coding agent the design-inspiration loop:
+
+- ranked search across 2,855 award-winning sites (stems, prefixes, BM25)
+- full-page screenshots + band maps, desktop and mobile
+- motion recordings: preloaders, scroll animations, hover states
+- design DNA per site: palette, stack, elements
+
+6 releases. 124 tests. 1 request/second, robots.txt respected. 0 API keys.
+
+My favorite part: the skills ship with a memory. What QA catches twice folds back into the skill automatically. It got better at building websites while I was building it.
+
+I tested it the honest way: four complete websites built in ZCode on GLM 5.3-flash, a model that cannot watch video. Two of them in single-shot prompts. QA caught my bugs before launch: a burned npm version, a clipped headline, a broken parser. The next build starts knowing them.
+
+Honest limit: I run Windows. CI covers Linux. macOS is less proven.
+
+If you had a free weekend and an agent that could read design references, what paywalled tool would you rebuild first?
+
+P.S. v1.0.0-beta.1. Six alphas in two days first. Repo and demo in the first comment.
