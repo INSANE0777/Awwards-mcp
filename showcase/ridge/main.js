@@ -87,17 +87,66 @@ document.getElementById("themeToggle").addEventListener("click", () => {
   ScrollTrigger.refresh();
 });
 
-/* ---------- cursor follower (micro-interaction) ---------- */
-if (window.matchMedia("(pointer: fine)").matches) {
-  const cursor = document.getElementById("cursor");
-  const xTo = gsap.quickTo(cursor, "x", { duration: 0.18, ease: "power2.out" });
-  const yTo = gsap.quickTo(cursor, "y", { duration: 0.18, ease: "power2.out" });
-  window.addEventListener("mousemove", (e) => { xTo(e.clientX); yTo(e.clientY); });
-  document.querySelectorAll(".client-rows li, .contact-btn, .member").forEach((el) => {
-    el.addEventListener("mouseenter", () => gsap.to(cursor, { scale: 3, duration: 0.3 }));
-    el.addEventListener("mouseleave", () => gsap.to(cursor, { scale: 1, duration: 0.3 }));
+/* ---------- grain dither-dissolve (studied from aspensearch.com hover) ----------
+   The halftone dots flip to mint inside a soft radius around the mouse; the
+   blob elongates along movement (a shrinking trail) and the boundary is
+   dithered by per-dot noise. Dots dissolve ~0.6s after the mouse leaves. */
+function initDither(cell) {
+  const canvas = document.createElement("canvas");
+  cell.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  let dots = [], trail = [], dirty = true, raf = 0;
+  const GAP = 4, DOT = 1.5, MINT_DOT = 2.1;
+  const css = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
+
+  function build() {
+    const r = cell.getBoundingClientRect();
+    canvas.width = r.width; canvas.height = r.height;
+    dots = [];
+    for (let y = GAP; y < canvas.height; y += GAP)
+      for (let x = GAP; x < canvas.width; x += GAP)
+        dots.push({ x, y, noise: Math.random() });
+    draw();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const base = css("--black") || "#1a1a1a", mint = css("--mint") || "#b8f0d0";
+    const now = performance.now();
+    trail = trail.filter((p) => now - p.t < 600);
+    for (const d of dots) {
+      let intensity = 0;
+      for (const p of trail) {
+        const age = (now - p.t) / 600;               // 0 fresh → 1 old
+        const R = 130 - 85 * age;                     // fresh head wide, tail tight
+        const dist = Math.hypot(d.x - p.x, d.y - p.y);
+        intensity = Math.max(intensity, 1 - dist / R);
+      }
+      // dithered boundary: per-dot noise decides who flips near the edge
+      if (intensity > 0.2 + 0.55 * d.noise) {
+        ctx.fillStyle = mint;
+        ctx.beginPath(); ctx.arc(d.x, d.y, MINT_DOT, 0, 7); ctx.fill();
+      } else {
+        ctx.fillStyle = base; ctx.globalAlpha = 0.5;
+        ctx.fillRect(d.x - DOT / 2, d.y - DOT / 2, DOT, DOT);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  function loop() {
+    if (trail.length || dirty) { draw(); dirty = trail.length === 0; }
+    raf = requestAnimationFrame(loop);
+  }
+
+  cell.addEventListener("mousemove", (e) => {
+    const r = cell.getBoundingClientRect();
+    trail.push({ x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() });
   });
+  window.addEventListener("resize", build);
+  build(); loop();
 }
+document.querySelectorAll(".cell-grain").forEach(initDither);
 
 /* ---------- refresh after fonts ---------- */
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => ScrollTrigger.refresh());

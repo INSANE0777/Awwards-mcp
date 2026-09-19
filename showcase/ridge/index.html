@@ -35,17 +35,21 @@
 </header>
 
 <main id="top">
-  <!-- ============ HERO GRID ============ -->
+  <!-- ============ HERO GRID (Aspen proportions: grain wraps diagonally) ============ -->
   <section class="hero-grid">
     <div class="cell cell-brand"><h1 class="giant">Ridge</h1></div>
-    <div class="cell cell-grain" aria-hidden="true"><div class="grain-fill"></div><svg class="cell-mark" viewBox="0 0 64 64" aria-hidden="true"><polyline points="8,54 32,10 56,54 44,54 32,30 20,54" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></div>
+    <div class="cell cell-grain grain-tr" aria-hidden="true">
+      <svg class="cell-mark" viewBox="0 0 64 64" aria-hidden="true"><polyline points="8,54 32,10 56,54 44,54 32,30 20,54" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="cell cell-grain grain-bl" aria-hidden="true"></div>
     <div class="cell cell-claim">
       <p>Placing research engineers, quantitative scientists, and the systems people behind them into firms compounding since 2009.</p>
-      <p class="news-label">Recent hires from:</p>
-      <p class="ticker" id="ticker">Two Sigma</p>
+      <a class="claim-cta caps" href="#contact">Start a conversation <span class="arr">&#8594;</span></a>
     </div>
     <div class="cell cell-mint">
       <p>We don't move volume. We find the rare ones — and the firms smart enough to invest in them.</p>
+      <p class="news-label">Recent hires from:</p>
+      <p class="ticker" id="ticker">Two Sigma</p>
     </div>
   </section>
 
@@ -151,7 +155,6 @@
   </section>
 </main>
 
-<div class="cursor" id="cursor" aria-hidden="true"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
