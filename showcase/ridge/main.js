@@ -7,10 +7,22 @@ gsap.registerPlugin(ScrollTrigger);
 let lenis = null;
 if (window.Lenis && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
   lenis = new Lenis({ duration: 1.1, smoothWheel: true });
+  window.lenis = lenis; // debug/expose
   lenis.on("scroll", ScrollTrigger.update);
   gsap.ticker.add((t) => lenis.raf(t * 1000));
   gsap.ticker.lagSmoothing(0);
 }
+
+/* ---------- smooth anchor navigation through lenis ---------- */
+document.querySelectorAll('a[href^="#"]').forEach((a) => {
+  a.addEventListener("click", (e) => {
+    const target = document.querySelector(a.getAttribute("href"));
+    if (!target) return;
+    e.preventDefault();
+    if (lenis) lenis.scrollTo(target, { offset: -64 });
+    else target.scrollIntoView({ behavior: "smooth" });
+  });
+});
 
 /* ---------- intro: logo reveal → grid (reference intro) ---------- */
 const introTl = gsap.timeline({ delay: 0.25 });
