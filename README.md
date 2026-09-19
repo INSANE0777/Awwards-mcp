@@ -206,6 +206,10 @@ skill.
 **1. [Ridge](showcase/ridge/index.html)**
 ([source](showcase/ridge/)) — a Swiss-minimal single-page showcase for a fictional engineering-talent studio, direction **Aspen Search** (SOTD + Developer Award, jury 7.48): monochrome `#FAFAF8`/`#1A1A1A` + mint, giant grotesque section markers, halftone grain, asymmetric panel grid, dark discipline panels in an interior **horizontal pin passage**, count-up stats, client rows, theme toggle, cursor-follower. Built with the v1.4.0 toolkit: FTS5-ranked direction search, **both-viewports** reference captures and QA (desktop 7,849px + mobile 390×844), overflow audit (0px both), pin-center shots, film verification — and the skill-memory flywheel recorded the findings. QA evidence: `showcase/ridge/_qa/`.
 
+| Panel grid (desktop) | Horizontal discipline passage | Mobile 390×844 |
+|---|---|---|
+| ![Ridge desktop — Swiss panel grid with mint and grain](assets/ridge-home.jpg) | ![Ridge disciplines — pinned horizontal passage mid-slide](assets/ridge-disciplines.jpg) | ![Ridge mobile — stacked grid, zero overflow](assets/ridge-mobile.jpg) |
+
 **2. [Fallow Press](fallow-press/index.html)**
 ([source](fallow-press/)) — a flat-2D editorial journal, direction
 **Emergence Magazine** (SOTD): pink `#FF9398` on cream and black, torn-paper

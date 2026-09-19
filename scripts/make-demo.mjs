@@ -1,7 +1,7 @@
 // Generates assets/demo.gif from four frames of REAL awwwards-mcp output.
 // Re-run any time: node scripts/make-demo.mjs   (needs `npm run build` first)
 // Frames: (1) search_sites results  (2) get_site_details DNA
-//         (3) record_site_motion filmstrip (our own fallow-press build)
+//         (3) record_site_motion filmstrip (our own RIDGE build)
 //         (4) analyze_page_structure band map (our own build)
 //
 // Politeness contract (see README "How it works"):
@@ -14,7 +14,7 @@
 //   detail.html) and the frame header says so.
 // - The 4 CDN thumbnail fetches mirror what a single search_sites call already
 //   does inline (client.getThumbnail, the siteImage path in src/server.ts).
-// - Frames 3 and 4 record OUR OWN fallow-press build via file:// — never an
+// - Frames 3 and 4 record OUR OWN RIDGE build via file:// — never an
 //   Awwwards recording, no Awwwards content beyond the two polite page fetches.
 
 import {
@@ -179,16 +179,16 @@ const detailBody = `
 await shot(shell(`get_site_details · ${d.slug} · ${detailSource}`, detailBody), "frame-details");
 
 // ---------------------------------------------------------------------------
-// Frame 3 — record_site_motion on OUR OWN fallow-press build (file://).
+// Frame 3 — record_site_motion on OUR OWN RIDGE build (file://).
 // Real signature: recordSiteMotion(url, { cacheImagesDir, frames }) →
 // { file, base64, frames } | { error } — the filmstrip JPEG arrives as base64.
 // On any failure: dark banner frame, script continues. Never Awwwards content.
 // ---------------------------------------------------------------------------
 const { recordSiteMotion } = await dist("motion");
-const fallowUrl = pathToFileURL(resolve(root, "fallow-press/index.html")).href;
+const demoSiteUrl = pathToFileURL(resolve(root, "showcase/ridge/index.html")).href;
 let stripDataUri = null;
 try {
-  const motion = await recordSiteMotion(fallowUrl, {
+  const motion = await recordSiteMotion(demoSiteUrl, {
     cacheImagesDir: outDir, // gitignored — the strip stays local like the frames
     frames: 4, // 2x2 grid — the recording yields ~8 tiles at 1 frame/4s, so the grid always fills (12 → 4x3 left empty black cells and unreadably small tiles)
   });
@@ -203,7 +203,7 @@ try {
 const motionBody = stripDataUri
   ? `<img src="${stripDataUri}" alt="" style="display:block;width:456px;height:264px;object-fit:contain;margin:0 auto;background:#0a0a0e;border-radius:4px">`
   : `<div style="display:flex;align-items:center;justify-content:center;height:264px;background:#0a0a0e;border-radius:4px;color:#8f8fa3;font-size:12px;letter-spacing:.08em">record_site_motion — filmstrip</div>`;
-await shot(shell("record_site_motion · fallow-press (our build) · 2x2 filmstrip", motionBody), "frame-motion");
+await shot(shell("record_site_motion · ridge (our build) · 2x2 filmstrip", motionBody), "frame-motion");
 
 // ---------------------------------------------------------------------------
 // Frame 4 — analyze_page_structure on the same file:// build.
@@ -211,7 +211,7 @@ await shot(shell("record_site_motion · fallow-press (our build) · 2x2 filmstri
 // PageStructure { url, title, totalHeight, bands[] } | { error }.
 // ---------------------------------------------------------------------------
 const { analyzePageStructure } = await dist("structure");
-const structure = await analyzePageStructure(fallowUrl, undefined, 12);
+const structure = await analyzePageStructure(demoSiteUrl, undefined, 12);
 if ("error" in structure) throw new Error("analyze_page_structure failed: " + structure.error);
 const bandRows = structure.bands
   .map(
@@ -224,7 +224,7 @@ const bandRows = structure.bands
   .join("");
 await shot(
   shell(
-    `analyze_page_structure · fallow-press · ${structure.bands.length} bands · ${structure.totalHeight}px`,
+    `analyze_page_structure · ridge · ${structure.bands.length} bands · ${structure.totalHeight}px`,
     bandRows,
   ),
   "frame-bands",

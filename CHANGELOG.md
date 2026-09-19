@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## v1.5.0 — 2026-09-19
 
-Skill-memory flywheel (unreviewed — ships after human review):
+Skill-memory flywheel (reviewed and approved for ship):
 
 - `scripts/skill-memory.mjs` (record/recall/distill/stats): the skills
   self-improve from what their verification loops catch. Findings journal
