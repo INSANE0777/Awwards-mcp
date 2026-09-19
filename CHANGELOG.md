@@ -1,8 +1,15 @@
 # Changelog
 
-> **Versioning note:** every release through v1.6.0 was an **alpha**.
-> `v1.0.0-beta.1` is the first beta — the feature set is complete for the
-> awwwards.com source; betas now take it through public hardening.
+> **Versioning note:** every release through v1.6.0 was an **alpha**;
+> `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
+## v1.0.0 — 2026-09-19
+
+First **stable** release. Supersedes the alpha 1.x line and the beta — the
+complete feature set: 6 tools, local index, three skills (including the
+self-improving skill-memory flywheel), self-heal doctor, parser-drift
+monitor, dual-viewport capture, FTS5 search. Ships with the layered-analysis
++ superprompt hand-off upgrade to the motion-study skill.
+
 ## v1.0.0-beta.1 — 2026-09-19
 
 First **beta**. Supersedes the alpha 1.x line — the full v1.6.0 feature set
