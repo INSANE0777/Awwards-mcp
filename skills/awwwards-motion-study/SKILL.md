@@ -122,6 +122,31 @@ from the table, not from impressions:
 | Story cards | scroll 86% | opacity + y 56 | ~0.85 s | power3.out | stagger 0.09 |
 ```
 
+**Beyond motion — the layered lenses.** The inventory above is the motion
+layer. Before building, sweep the same tiles through five more lenses (adapted
+from the video-to-superprompt skill) and note each per page:
+
+| Lens | What to capture |
+|---|---|
+| Story | page purpose, emotional arc, section order, how beats transition |
+| Layout | viewport framing, grids, sticky zones, card/media placement, nav + footer anatomy |
+| Visual design | type scale, palette, surfaces, borders/shadows, texture, iconography, image treatment |
+| Technical rebuild | which mechanism serves each effect: IntersectionObserver, GSAP ScrollTrigger/Lenis, WAAPI, canvas, `video.currentTime`, carousel physics |
+| A11y + performance | reduced-motion fallback, touch/keyboard states, lazy loading, preload hints, pixel-ratio caps |
+
+A lens finding that changes the build gets its own inventory row or a build
+note — not a mental note.
+
+**Output mode — the builder-ready superprompt.** When the video is for a
+hand-off (another agent, an article, a future session) rather than an
+in-session build, compile the inventory + lenses into one paste-ready prompt:
+final thing to build + reference boundary (exact recreation vs inspired),
+asset map, global design language, section-by-section anatomy (purpose,
+layout, animation, interactions, scroll behavior, library choice,
+reduced-motion fallback), and anti-patterns. The prompt must be long enough
+to rebuild the interaction without seeing the original video — no "make it
+beautiful", only concrete mechanisms and numbers.
+
 ## 4. Build from the inventory
 
 - Every shipped animation cites an inventory row. If you can't name the

@@ -4,7 +4,7 @@
   "description": "Techniques the awwwards skill loop can use to understand websites — per domain. Grown by the skill-memory flywheel: a finding that proposes a better technique gets promoted here by a human PR. Each entry: id, domain, when (when to use it), how (concrete steps/commands), source (where it came from).",
   "domains": {
     "video-understanding": {
-      "summary": "From recording to model-ready motion context. Field consensus 2025-2026: scene detection FIRST, keyframes per scene, adaptive any-k budget, then structured context to the model. Our tile-per-element doctrine is the special case for short UI loops.",
+      "summary": "From recording to model-ready motion context. Field consensus 2025-2026: scene detection FIRST, keyframes per scene, adaptive any-k budget, then structured context to the model. Our tile-per-element doctrine is the special case for short UI loops; layered analysis + superprompt hand-off extends it beyond in-session builds.",
       "techniques": [
         {
           "id": "scene-detect-first",
@@ -34,6 +34,17 @@
             "Re-tile finer only for the frames where motion actually changes"
           ],
           "source": "awwwards-inspiration step 6 doctrine (ours), now scene-scoped"
+        },
+        {
+          "id": "layered-analysis-superprompt",
+          "when": "After the motion inventory, before building — and always when the study output is a hand-off (another agent, an article, a future session) instead of an in-session build.",
+          "how": [
+            "Sweep the tiles through five lenses beyond motion: story (purpose, arc, section order), layout (grids, sticky zones, nav/footer anatomy), visual design (type scale, palette, surfaces, texture), technical rebuild (which mechanism serves each effect), a11y + performance (reduced motion, touch states, lazy loading, pixel-ratio caps)",
+            "A lens finding that changes the build gets its own inventory row or build note",
+            "For hand-offs, compile inventory + lenses into one paste-ready superprompt: final build + reference boundary, asset map, global design language, section-by-section anatomy (purpose/layout/animation/interactions/scroll/library/reduced-motion), anti-patterns",
+            "Bar: the prompt must be long enough to rebuild the interaction without seeing the original video — no vague taste words, only mechanisms and numbers"
+          ],
+          "source": "video-to-superprompt skill (layered analysis + superprompt quality bar), merged into the motion-study loop 2026-09-19"
         }
       ]
     },
@@ -80,7 +91,9 @@
         {
           "id": "band-map-compare",
           "when": "Every build, before pixel polish.",
-          "how": ["analyze_page_structure on reference AND build; compare count/order/backgrounds/heights; never pad spacer bands"],
+          "how": [
+            "analyze_page_structure on reference AND build; compare count/order/backgrounds/heights; never pad spacer bands"
+          ],
           "source": "awwwards-inspiration step 8 doctrine (ours)"
         },
         {
@@ -133,7 +146,9 @@
         {
           "id": "palette-extraction",
           "when": "Design DNA from a hero image when the site's own palette metadata is absent.",
-          "how": ["ffmpeg -i hero.png -vf palettegen=max_colors=8 - > palette.png; sample the PNG"],
+          "how": [
+            "ffmpeg -i hero.png -vf palettegen=max_colors=8 - > palette.png; sample the PNG"
+          ],
           "source": "ffmpeg standard; awwwards palette field gaps"
         },
         {
