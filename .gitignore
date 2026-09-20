@@ -18,3 +18,4 @@ docs/
 
 # demo GIF raw frames + recording artifacts (only the encoded assets/demo.gif is tracked)
 assets/demo-src/
+.firecrawl/
