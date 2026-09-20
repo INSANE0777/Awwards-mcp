@@ -207,7 +207,11 @@ describe("parseDetail jury dimensions (detail-jury fixture, live 2026-09-20)", (
 
   it("keeps the total score and the curated description on the same page", () => {
     expect(d().score).toBeCloseTo(7.48, 2);
+    // The suffix past the og:description truncation point pins that the
+    // curated h3 wins: og stops at "...venture-backed..." while the curated
+    // section carries "...venture-backed technology companies.".
     expect(d().description).toContain("Boutique executive search");
+    expect(d().description).toContain("venture-backed technology companies.");
   });
 
   it("returns undefined when the page has no jury chartbar block", () => {
@@ -222,6 +226,24 @@ describe("parseDetail jury dimensions (detail-jury fixture, live 2026-09-20)", (
       '<div class="layout-overall__chart">' +
       '<div class="layout-overall__progressbar js-chart-bar" data-note="8.00"></div>' +
       "</div></div>";
+    expect(parseDetail(html, "x").juryDimensions).toBeUndefined();
+  });
+
+  it("returns undefined when a fourth label is renamed but counts still match", () => {
+    // Four labels, four notes — the count guard passes — but the 4th label
+    // is not one of the known four, so the exact-label-set guard must refuse
+    // rather than misalign notes onto dimensions.
+    const html =
+      '<div class="layout-overall" data-controller="chartbar">' +
+      '<div class="layout-overall__type">Design<strong>40%</strong></div>' +
+      '<div class="layout-overall__type">Usability<strong>30%</strong></div>' +
+      '<div class="layout-overall__type">Creativity<strong>20%</strong></div>' +
+      '<div class="layout-overall__type">Development<strong>10%</strong></div>' +
+      '<div class="layout-overall__chart "><div class="layout-overall__progressbar js-chart-bar" data-note="8.1"></div></div>' +
+      '<div class="layout-overall__chart "><div class="layout-overall__progressbar js-chart-bar" data-note="7.2"></div></div>' +
+      '<div class="layout-overall__chart "><div class="layout-overall__progressbar js-chart-bar" data-note="6.3"></div></div>' +
+      '<div class="layout-overall__chart layout-overall__chart--last"><div class="layout-overall__progressbar js-chart-bar" data-note="5.4"></div></div>' +
+      "</div>";
     expect(parseDetail(html, "x").juryDimensions).toBeUndefined();
   });
 
@@ -244,6 +266,21 @@ describe("parseDetail jury dimensions (detail-jury fixture, live 2026-09-20)", (
       usability: 6.9,
       creativity: 7.4,
       content: 7.5,
+    });
+  });
+
+  it("pins jury-vs-votes disambiguation on a full-page fixture", () => {
+    // Full emergence-magazine capture: the page carries 10 data-note
+    // attributes — the 4 jury dimensions plus 6 per-juror vote notes after
+    // the tabs controller. The tabs bound in parseJuryDimensions must exclude
+    // the votes; synthetic inlined blocks above cannot catch that leak.
+    expect(
+      parseDetail(readFixture("detail-emergence.html"), "emergence-magazine").juryDimensions,
+    ).toEqual({
+      design: 7.23,
+      usability: 6.94,
+      creativity: 6.86,
+      content: 7.37,
     });
   });
 });
