@@ -185,6 +185,106 @@ describe("parseDetail against fresh live markup (detail-lxl fixture)", () => {
   });
 });
 
+// Jury dimensions: the layout-overall chartbar block on award pages. Live
+// probe 2026-09-20 (SOTD winners aspen-search, hearst-exhibit-2026,
+// emergence-magazine): scores are server-rendered — four weighted type labels
+// (Design 40% / Usability 30% / Creativity 20% / Content 10%) followed by four
+// js-chart-bar progressbars whose data-note attributes carry the per-dimension
+// scores in the same order; the 40/30/20/10-weighted average reproduces the
+// displayed total exactly on every probed page. No Development dimension
+// exists anywhere in the HTML (0 occurrences across all probes).
+describe("parseDetail jury dimensions (detail-jury fixture, live 2026-09-20)", () => {
+  const d = () => parseDetail(readFixture("detail-jury.html"), "aspen-search");
+
+  it("extracts the four per-dimension jury scores", () => {
+    expect(d().juryDimensions).toEqual({
+      design: 7.54,
+      usability: 7.27,
+      creativity: 7.7,
+      content: 7.39,
+    });
+  });
+
+  it("keeps the total score and the curated description on the same page", () => {
+    expect(d().score).toBeCloseTo(7.48, 2);
+    expect(d().description).toContain("Boutique executive search");
+  });
+
+  it("returns undefined when the page has no jury chartbar block", () => {
+    expect(parseDetail("<html><body>no votes</body></html>", "x").juryDimensions).toBeUndefined();
+  });
+
+  it("returns undefined when the dimension labels drift from the known four", () => {
+    // A renamed/fifth dimension must yield undefined, not misaligned scores.
+    const html =
+      '<div class="layout-overall" data-controller="chartbar">' +
+      '<div class="layout-overall__type">Design<strong>40%</strong></div>' +
+      '<div class="layout-overall__chart">' +
+      '<div class="layout-overall__progressbar js-chart-bar" data-note="8.00"></div>' +
+      "</div></div>";
+    expect(parseDetail(html, "x").juryDimensions).toBeUndefined();
+  });
+
+  it("extracts jury dimensions from all three probed live shapes", () => {
+    // The same selectors must hold on the other two probed SOTD pages; their
+    // layout-overall blocks are inlined from the live captures.
+    const hearst =
+      '<div class="layout-overall" data-controller="chartbar">' +
+      '<div class="layout-overall__type">Design<strong>40%</strong></div>' +
+      '<div class="layout-overall__type">Usability<strong>30%</strong></div>' +
+      '<div class="layout-overall__type">Creativity<strong>20%</strong></div>' +
+      '<div class="layout-overall__type">Content<strong>10%</strong></div>' +
+      '<div class="layout-overall__chart "><div class="layout-overall__progressbar js-chart-bar" data-note="7.27"></div></div>' +
+      '<div class="layout-overall__chart "><div class="layout-overall__progressbar js-chart-bar" data-note="6.9"></div></div>' +
+      '<div class="layout-overall__chart "><div class="layout-overall__progressbar js-chart-bar" data-note="7.4"></div></div>' +
+      '<div class="layout-overall__chart layout-overall__chart--last"><div class="layout-overall__progressbar js-chart-bar" data-note="7.5"></div></div>' +
+      "</div>";
+    expect(parseDetail(hearst, "x").juryDimensions).toEqual({
+      design: 7.27,
+      usability: 6.9,
+      creativity: 7.4,
+      content: 7.5,
+    });
+  });
+});
+
+// og:description fallback: the curated ">Description</h2>" section exists on
+// only ~16% of pages (8/50 in the 2026-09-19 probe); og:description was on
+// 50/50 with the same text as meta description. The curated block stays
+// primary; og:description is the fallback when the section is missing or
+// yields empty. Ported from the inline fallback in scripts/enrich-styles.mjs.
+describe("parseDetail og:description fallback (detail-og-fallback fixture)", () => {
+  it("falls back to og:description when the curated Description section is absent", () => {
+    const d = parseDetail(readFixture("detail-og-fallback.html"), "aspen-search");
+    expect(d.description).toContain("Boutique executive search specialists");
+    expect(d.description).toContain("quantitative trading firms");
+  });
+
+  it("prefers the curated Description block over og:description", () => {
+    const html =
+      '<meta property="og:description" content="og fallback text">' +
+      '<h2 class="text-default">Description</h2>' +
+      '<h3 class="heading-6">curated section text</h3>';
+    expect(parseDetail(html, "x").description).toBe("curated section text");
+  });
+
+  it("falls back to og:description when the Description section yields empty", () => {
+    const html =
+      '<meta property="og:description" content="og fallback text">' +
+      '<h2 class="text-default">Description</h2><p>no h3 follows</p>';
+    expect(parseDetail(html, "x").description).toBe("og fallback text");
+  });
+
+  it("returns null when neither the section nor og:description exists", () => {
+    expect(parseDetail("<html><body>nothing</body></html>", "x").description).toBeNull();
+  });
+
+  it("HTML-entity-decodes the og:description text", () => {
+    const html = '<meta property="og:description" content="L&#039;agent &amp; co">';
+    expect(parseDetail(html, "x").description).toBe("L'agent & co");
+  });
+});
+
 describe("parseScore", () => {
   it("extracts the displayed overall score from the score heading", () => {
     const d = readFixture("detail-lxl.html");

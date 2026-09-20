@@ -455,6 +455,9 @@ export function createHandlers(deps: {
               ? `Awards: ${d.awards.map((a) => `${a.title} (${a.date})`).join(", ")}`
               : null,
             d.score != null ? `Jury score: ${d.score.toFixed(2)}/10` : null,
+            d.juryDimensions
+              ? `Jury dimensions: Design ${d.juryDimensions.design.toFixed(2)}, Usability ${d.juryDimensions.usability.toFixed(2)}, Creativity ${d.juryDimensions.creativity.toFixed(2)}, Content ${d.juryDimensions.content.toFixed(2)}`
+              : null,
             d.palette.length ? `Color palette: ${d.palette.join(", ")}` : null,
             d.technologies.length ? `Technologies & tools: ${d.technologies.join(", ")}` : null,
             d.elements.length ? `Design elements: ${d.elements.join(", ")}` : null,

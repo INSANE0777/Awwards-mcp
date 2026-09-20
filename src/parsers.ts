@@ -101,6 +101,12 @@ export function parseDetail(html: string, slug: string): SiteDetails {
     descIdx >= 0
       ? html.slice(descIdx, descIdx + 3000).match(/<h3 class="heading-6">([\s\S]{0,2000}?)<\/h3>/)
       : null;
+  // Curated section is primary (longer/richer when present, ~16% of pages);
+  // og:description meta is the fallback (50/50 in the 2026-09-19 probe, same
+  // text as meta description). Ported from scripts/enrich-styles.mjs.
+  const curatedDescription = descMatch ? stripTags(descMatch[1]) || null : null;
+  const ogDescMatch = html.match(/property="og:description" content="([^"]*)"/);
+  const ogDescription = ogDescMatch ? decodeEntities(ogDescMatch[1]).trim() || null : null;
 
   const ogMatch = html.match(/property="og:image" content="([^"]+)"/);
 
@@ -121,7 +127,7 @@ export function parseDetail(html: string, slug: string): SiteDetails {
   return {
     slug,
     title: titleMatch ? decodeEntities(titleMatch[1]) : (h1Match ? stripTags(h1Match[2]) : null),
-    description: descMatch ? stripTags(descMatch[1]) || null : null,
+    description: curatedDescription ?? ogDescription,
     palette,
     technologies,
     elements,
@@ -129,6 +135,7 @@ export function parseDetail(html: string, slug: string): SiteDetails {
     ogImage: ogMatch ? decodeEntities(ogMatch[1]) : null,
     liveUrl: liveUrl ? decodeEntities(liveUrl) : null,
     score: parseScore(html),
+    juryDimensions: parseJuryDimensions(html),
   };
 }
 
@@ -137,6 +144,48 @@ export function parseDetail(html: string, slug: string): SiteDetails {
 export function parseScore(html: string): number | null {
   const m = /c-heading-score__note[^>]*>[^<]*?([\d]+(?:\.\d{1,2})?)/.exec(html);
   return m ? parseFloat(m[1]) : null;
+}
+
+const DIMENSION_KEYS = ["design", "usability", "creativity", "content"] as const;
+type DimensionKey = (typeof DIMENSION_KEYS)[number];
+type JuryDimensions = Record<DimensionKey, number>;
+
+// Per-dimension jury scores from the layout-overall chartbar block on award
+// pages (verified live 2026-09-20 on SOTD winners aspen-search,
+// hearst-exhibit-2026 and emergence-magazine): four weighted type labels —
+// <div class="layout-overall__type">Design<strong>40%</strong></div> ... —
+// followed by four progressbars whose data-note attributes carry the scores
+// in the same order:
+// <div class="layout-overall__progressbar js-chart-bar" data-note="7.54">.
+// The 40/30/20/10-weighted average of the notes reproduces the displayed
+// total score exactly on every probed page. No Development dimension exists
+// in the HTML. Undefined when the block is absent, the counts differ, or the
+// labels are not exactly the known four — refuse to guess a drifted mapping.
+export function parseJuryDimensions(html: string): JuryDimensions | undefined {
+  const start = html.indexOf('<div class="layout-overall"');
+  if (start < 0) return undefined;
+  // The block ends at the votes tabs controller that follows it; bound the
+  // slice so data-note attributes elsewhere on the page cannot leak in.
+  const tabsIdx = html.indexOf('<div data-controller="tabs">', start);
+  const block = html.slice(start, tabsIdx > start ? tabsIdx : start + 4000);
+  const labels = [...block.matchAll(/layout-overall__type">\s*(\w+)\s*<strong>/g)].map((m) =>
+    m[1].toLowerCase(),
+  );
+  const notes = [...block.matchAll(/data-note="([0-9]+(?:\.[0-9]+)?)"/g)].map((m) =>
+    parseFloat(m[1]),
+  );
+  if (labels.length !== 4 || notes.length !== 4) return undefined;
+  const dims: Partial<JuryDimensions> = {};
+  for (const [i, label] of labels.entries()) {
+    if ((DIMENSION_KEYS as readonly string[]).includes(label)) dims[label as DimensionKey] = notes[i];
+  }
+  if (DIMENSION_KEYS.some((k) => typeof dims[k] !== "number")) return undefined;
+  return {
+    design: dims.design!,
+    usability: dims.usability!,
+    creativity: dims.creativity!,
+    content: dims.content!,
+  };
 }
 
 const NON_FILTERS = new Set(["sites_of_the_day"]);
