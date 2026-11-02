@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalFacet, compactAuditResult, compactSiteDetails, createHandlers, SITE_TTL_MS, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import { canonicalFacet, compactAuditResult, compactSiteDetails, createHandlers, SITE_TTL_MS, slugifyTag, suggestTags, TAXONOMY_RETRY_MS, tokenizeQuery } from "../src/server.js";
 import { detailArgsSchema } from "../src/detail-schema.js";
 import type { AuditUrlResult } from "../src/audit-url.js";
 import type { ScrollCensus } from "../src/census.js";
@@ -939,7 +939,8 @@ describe("list_categories", () => {
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.colors.length).toBeGreaterThanOrEqual(20);
     expect(parsed.filters).toContain("3d");
-    await h.list_categories(); // second call is served from the meta cache
+    const warm = await h.list_categories(); // second call is served from the meta cache
+    expect(JSON.parse((warm.content[0] as any).text)).toEqual(parsed);
     expect(fetchFn.mock.calls.length).toBe(1);
   });
 });
@@ -1394,6 +1395,38 @@ describe("search cold/warm consistency", () => {
       expect((res.content[0] as any).text, query).toContain("next-site");
     }
     expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"))).toHaveLength(0);
+  });
+
+  it("keeps the requested page window and filters bound across cold and warm reads", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = clientFor(listingPage([
+      ...Array.from({ length: 5 }, (_, i) => ({
+        slug: `cw-${i}`, title: `Editorial ${i}`, tags: ["WebGL"],
+      })),
+      // Same query match, wrong technology: the filter must keep it out on
+      // both the cold re-rank and the warm read.
+      { slug: "cw-off", title: "Editorial Off", tags: ["3D"] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const args = { query: "editorial", technology: "webgl", page: 2, count: 2 };
+    const pageCalls = () => fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"));
+    const slugsOf = (text: string) => [...text.matchAll(/\(slug: ([^)]+)\)/g)].map((m) => m[1]);
+
+    const cold = await h.search_sites(args);
+    const coldText = (cold.content[0] as any).text;
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain("/websites/webgl/");
+    expect(coldText).toContain("5 site(s) matched; showing 3-4");
+    expect(coldText).not.toContain("cw-off");
+    expect(pageCalls()).toHaveLength(1);
+
+    // The warm read must serve the same page-window slice through FTS, with
+    // the technology filter still binding, and without a second fetch.
+    const warm = await h.search_sites(args);
+    const warmText = (warm.content[0] as any).text;
+    expect(warmText).toBe(coldText);
+    expect(slugsOf(warmText)).toEqual(slugsOf(coldText));
+    expect(slugsOf(warmText)).toHaveLength(2);
+    expect(pageCalls()).toHaveLength(1);
   });
 });
 
@@ -3119,19 +3152,6 @@ describe("list_categories v2 (awards + technologies)", () => {
     expect(body.technologiesNote).toBeUndefined();
     expect((res.content[0] as { type: "text"; text: string }).text).toContain('"technologies"');
   });
-
-  it("reports an empty technology list + hint on a pre-Theme-A cache entry", async () => {
-    const cache = new Cache(tmpDir());
-    cache.setMeta("categories", { colors: ["#404040"], filters: ["3d", "webgl"] });
-    const { client, fetchFn } = fakeClient();
-    const h = createHandlers({ client, cache });
-    const res = await h.list_categories();
-    const body = JSON.parse((res.content[0] as { type: "text"; text: string }).text);
-    expect(body.technologies).toEqual([]);
-    expect(body.technologiesNote).toContain("Technology facets were not crawled");
-    expect(body.filters).toEqual(["3d", "webgl"]);
-    expect(fetchFn).not.toHaveBeenCalled(); // served from the meta cache
-  });
 });
 
 describe("list_categories technology drift note (review M2)", () => {
@@ -3146,6 +3166,170 @@ describe("list_categories technology drift note (review M2)", () => {
     expect(body.technologiesNote).toContain("Technology section not found");
     expect(body.technologiesNote).toContain("crawl-time drift");
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("list_categories legacy taxonomy freshness", () => {
+  const LEGACY = { colors: ["#404040"], filters: ["3d", "webgl"] };
+  const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+  it("refreshes a cache without technologies instead of waiting out the 30-day TTL", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.technologies).toHaveLength(115);
+    expect(body.technologiesNote).toBeUndefined();
+    expect(body.taxonomyStale).toBeUndefined();
+    expect(body.filterCount).toBeGreaterThan(LEGACY.filters.length);
+    expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"))).toHaveLength(1);
+    expect(cache.getMeta<any>("categories", MONTH_MS)?.technologies).toHaveLength(115);
+  });
+
+  it("serves the refreshed taxonomy on later calls without another fetch", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const cold = await h.list_categories();
+    const warm = await h.list_categories();
+    expect(JSON.parse((warm.content[0] as any).text)).toEqual(JSON.parse((cold.content[0] as any).text));
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps cached filters/colors and flags staleness when the refresh fails", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    const fetchFn = vi.fn(async () => {
+      throw new Error("ECONNRESET");
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(res.isError).toBeUndefined();
+    expect(body.filters).toEqual(LEGACY.filters);
+    expect(body.colors).toEqual(LEGACY.colors);
+    expect(body.awards).toHaveLength(12);
+    expect(body.technologies).toEqual([]);
+    expect(body.taxonomyStale).toBe(true);
+    expect(body.taxonomyWarning).toContain("refresh failed");
+    expect(body.taxonomyWarning).toContain("technology facets remain unavailable");
+    expect(body.technologiesNote).toContain("Technology facets were not crawled");
+  });
+
+  it("coalesces concurrent legacy-taxonomy refreshes into one fetch", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchFn = vi.fn(async () => {
+      await gate;
+      return new Response(listingHtml, { status: 200 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const h = createHandlers({ client, cache });
+    const pending = Promise.all([h.list_categories(), h.list_categories(), h.list_categories()]);
+    release();
+    const results = await pending;
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    for (const res of results) {
+      expect(JSON.parse((res.content[0] as any).text).technologies.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("coalesces concurrent failed refreshes and marks one backoff", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchFn = vi.fn(async () => {
+      await gate;
+      throw new Error("ECONNRESET");
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    });
+    const h = createHandlers({ client, cache });
+    const pending = Promise.all([h.list_categories(), h.list_categories(), h.list_categories()]);
+    release();
+    const results = await pending;
+    // One coalesced refresh; the client's single transient retry accounts for the second fetch.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(cache.getMeta<boolean>("categories:refresh-failed", 60_000)).toBe(true);
+    for (const res of results) {
+      expect(JSON.parse((res.content[0] as any).text)).toMatchObject({
+        taxonomyStale: true,
+        filters: LEGACY.filters,
+      });
+    }
+  });
+
+  it("does not retry a failed refresh before the backoff expires, then retries once", async () => {
+    let now = 1_000_000;
+    const cache = new Cache(tmpDir(), () => now);
+    cache.setMeta("categories", LEGACY);
+    const fetchFn = vi.fn(async () => {
+      throw new Error("ECONNRESET");
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    });
+    const h = createHandlers({ client, cache });
+    const first = await h.list_categories();
+    const attempts = fetchFn.mock.calls.length;
+    expect(attempts).toBeGreaterThan(0);
+
+    now += TAXONOMY_RETRY_MS - 1;
+    const second = await h.list_categories();
+    expect(fetchFn.mock.calls.length).toBe(attempts);
+    expect(JSON.parse((second.content[0] as any).text)).toMatchObject({
+      taxonomyStale: true,
+      filters: LEGACY.filters,
+      colors: LEGACY.colors,
+    });
+    expect((first.content[0] as any).text).toContain("refresh failed");
+    expect((second.content[0] as any).text).toContain("next attempt is deferred");
+
+    now += 2;
+    await h.list_categories();
+    expect(fetchFn.mock.calls.length).toBe(attempts + 2);
+  });
+
+  it("rejects a refresh that loses its color facet and keeps cached colors", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    const noColors = listingHtml.replaceAll("/websites/%23", "/websites/%24");
+    const { client } = clientFor(noColors);
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.filters).toEqual(LEGACY.filters);
+    expect(body.colors).toEqual(LEGACY.colors);
+    expect(body.taxonomyStale).toBe(true);
+    expect(body.taxonomyWarning).toContain("parsed 0 categories");
+    expect(cache.getMeta<any>("categories", MONTH_MS)?.colors).toEqual(LEGACY.colors);
+  });
+
+  it("treats an empty refresh parse as a failed refresh, not a fresh taxonomy", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", LEGACY);
+    const { client } = clientFor("<html><body>nothing</body></html>");
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.taxonomyStale).toBe(true);
+    expect(body.taxonomyWarning).toContain("parsed 0 categories");
+    expect(body.filters).toEqual(LEGACY.filters);
+    expect(body.colors).toEqual(LEGACY.colors);
+    expect(cache.getMeta<any>("categories", MONTH_MS)?.technologies).toBeUndefined();
   });
 });
 
