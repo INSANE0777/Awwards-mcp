@@ -79,6 +79,114 @@ wrap them in `request`:
 | `verify_flow` | `verify_flow { buildUrl: "http://localhost:5173", referenceUrl: "https://example.com", steps: [{ action: "scroll", y: 1200 }] }` |
 | `analyze_network_capture` | `analyze_network_capture { path: "capture.har", top: 50 }` |
 
+## Exact v2 request examples
+
+Each line below is one `tools/call` payload: `tool` is the registered name
+passed as `params.name`, and `arguments` is passed verbatim as
+`params.arguments`. The ten consolidated tools take exactly one `request`
+branch; the five retained tools stay flat. Every name is asserted against the
+real v2 surface and every `arguments` object is parsed by the schema the server
+registers (`test/v2-examples.test.ts`). The `build_motion` evidence objects are
+abridged: take the pose grid, census and bands verbatim from `capture_page`,
+`analyze_motion` and `inspect_page`.
+
+### `search_references` (5 branches)
+
+```json
+{ "tool": "search_references", "arguments": { "request": { "kind": "sites" } } }
+{ "tool": "search_references", "arguments": { "request": { "kind": "elements", "query": "footer" } } }
+{ "tool": "search_references", "arguments": { "request": { "kind": "directory", "country": "United States" } } }
+{ "tool": "search_references", "arguments": { "request": { "kind": "motion", "lib": "gsap" } } }
+{ "tool": "search_references", "arguments": { "request": { "kind": "collections" } } }
+```
+
+### `get_reference` (5 branches)
+
+```json
+{ "tool": "get_reference", "arguments": { "request": { "kind": "site_details", "slug": "l-i-s-a" } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "site_elements", "slug": "l-i-s-a" } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "element", "id": "site-l-i-s-a-footer" } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "comparison", "slugs": ["l-i-s-a", "bruno-simon"] } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "collection", "slug": "brutalism" } } }
+```
+
+### `browse_awards` (4 branches)
+
+```json
+{ "tool": "browse_awards", "arguments": { "request": { "kind": "filters" } } }
+{ "tool": "browse_awards", "arguments": { "request": { "kind": "annual_categories" } } }
+{ "tool": "browse_awards", "arguments": { "request": { "kind": "annual_nominees", "category": "site-of-the-year" } } }
+{ "tool": "browse_awards", "arguments": { "request": { "kind": "annual_nominee", "id": "00000000-0000-4000-8000-000000000000" } } }
+```
+
+### `get_index` (2 branches)
+
+```json
+{ "tool": "get_index", "arguments": { "request": { "kind": "status" } } }
+{ "tool": "get_index", "arguments": { "request": { "kind": "stats", "windowDays": 30, "top": 5 } } }
+```
+
+### `inspect_page` (3 branches)
+
+```json
+{ "tool": "inspect_page", "arguments": { "request": { "kind": "structure", "url": "https://example.com" } } }
+{ "tool": "inspect_page", "arguments": { "request": { "kind": "tokens", "url": "https://example.com", "selector": "body" } } }
+{ "tool": "inspect_page", "arguments": { "request": { "kind": "stack", "url": "https://example.com" } } }
+```
+
+### `analyze_motion` (3 branches)
+
+```json
+{ "tool": "analyze_motion", "arguments": { "request": { "kind": "dna", "url": "https://example.com" } } }
+{ "tool": "analyze_motion", "arguments": { "request": { "kind": "scroll", "url": "https://example.com", "compact": false } } }
+{ "tool": "analyze_motion", "arguments": { "request": { "kind": "hover", "url": "https://example.com" } } }
+```
+
+### `capture_page` (4 branches)
+
+```json
+{ "tool": "capture_page", "arguments": { "request": { "kind": "screenshot", "url": "https://example.com" } } }
+{ "tool": "capture_page", "arguments": { "request": { "kind": "component", "url": "https://example.com", "selector": "header" } } }
+{ "tool": "capture_page", "arguments": { "request": { "kind": "pose", "url": "https://example.com" } } }
+{ "tool": "capture_page", "arguments": { "request": { "kind": "recording", "url": "https://example.com" } } }
+```
+
+### `audit_page` (4 branches)
+
+```json
+{ "tool": "audit_page", "arguments": { "request": { "kind": "performance", "url": "https://example.com" } } }
+{ "tool": "audit_page", "arguments": { "request": { "kind": "accessibility", "url": "https://example.com" } } }
+{ "tool": "audit_page", "arguments": { "request": { "kind": "images", "url": "https://example.com" } } }
+{ "tool": "audit_page", "arguments": { "request": { "kind": "bundle", "url": "https://example.com", "keywords": ["gsap"] } } }
+```
+
+### `build_motion` (3 branches)
+
+```json
+{ "tool": "build_motion", "arguments": { "request": { "kind": "pose_stub", "poseGrid": { "id": "pose-grid-v1", "url": "https://example.com", "capturedAt": 0, "steps": 1, "canvasSelector": "canvas", "canvasW": 1, "canvasH": 1, "snapshots": [{ "step": 0, "scrollY": 0, "scrollRatio": 0, "frames": [{ "label": "canvas", "dataUrlPng": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" }] }], "viewport": { "width": 1440, "height": 900 } } } } }
+{ "tool": "build_motion", "arguments": { "request": { "kind": "gsap_stub", "scrollCensus": { "anims": [], "gsapTriggers": [] } } } }
+{ "tool": "build_motion", "arguments": { "request": { "kind": "manifest", "bands": { "bands": [{ "label": "#hero", "tag": "section" }] }, "scrollCensus": { "anims": [], "gsapTriggers": [] } } } }
+```
+
+### `monitor_awards` (4 actions)
+
+```json
+{ "tool": "monitor_awards", "arguments": { "request": { "action": "poll_winners" } } }
+{ "tool": "monitor_awards", "arguments": { "request": { "action": "add_watch", "kind": "studio", "pattern": "lusion", "note": "track new work" } } }
+{ "tool": "monitor_awards", "arguments": { "request": { "action": "list_watches" } } }
+{ "tool": "monitor_awards", "arguments": { "request": { "action": "remove_watch", "kind": "tag", "pattern": "3d" } } }
+```
+
+### Retained flat tools (no `request` wrapper)
+
+```json
+{ "tool": "create_design_brief", "arguments": { "slugs": ["l-i-s-a", "bruno-simon"], "goal": "portfolio for a type foundry" } }
+{ "tool": "build_project", "arguments": { "htmlPath": "rebuild/index.html", "target": "vite", "out": "site" } }
+{ "tool": "verify_build", "arguments": { "buildUrl": "http://localhost:5173", "referenceUrl": "https://example.com" } }
+{ "tool": "verify_flow", "arguments": { "buildUrl": "http://localhost:5173", "referenceUrl": "https://example.com", "steps": [{ "action": "scroll", "y": 1200 }] } }
+{ "tool": "analyze_network_capture", "arguments": { "path": "capture.har", "top": 50 } }
+```
+
 ## v2 rules the 1.x workflow didn't need
 
 - **`monitor_awards` is keyed on `action`, not `kind`.** Valid actions are

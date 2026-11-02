@@ -62,6 +62,8 @@ export type Block =
 export interface ToolResponse {
   content: Block[];
   isError?: boolean;
+  // Present only on successful calls of tools that advertise an outputSchema.
+  structuredContent?: Record<string, unknown>;
 }
 
 export interface SearchArgs extends SearchFilters {

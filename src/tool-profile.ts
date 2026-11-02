@@ -38,19 +38,16 @@ function maxResponseBytes(env: NodeJS.ProcessEnv): number {
   return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : DEFAULT_MAX_RESPONSE_BYTES;
 }
 
-// text + inline image data only; isError and other result keys are not payload.
-function payloadBytes(result: unknown): number {
+// The full serialized result: text, inline image data and structuredContent.
+// isError and other result keys are part of it too, so no field can bypass the
+// ceiling by living outside `content`.
+function resultBytes(result: unknown): number {
   if (!result || typeof result !== "object") return 0;
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) return 0;
-  let bytes = 0;
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue;
-    const { type, text, data } = block as { type?: unknown; text?: unknown; data?: unknown };
-    if (type === "text" && typeof text === "string") bytes += Buffer.byteLength(text, "utf8");
-    else if (type === "image" && typeof data === "string") bytes += Buffer.byteLength(data, "utf8");
+  try {
+    return Buffer.byteLength(JSON.stringify(result) ?? "", "utf8");
+  } catch {
+    return 0;
   }
-  return bytes;
 }
 
 const note = (): string =>
@@ -84,12 +81,17 @@ export function registerGuarded(
       const started = performance.now();
       try {
         const result = await handler(...callArgs);
-        const bytes = payloadBytes(result);
+        const bytes = resultBytes(result);
         if (bytes > limit && result && typeof result === "object") {
-          // Keep isError, structuredContent and every other non-content field;
-          // only the payload is replaced by the truncation notice.
+          const record = result as Record<string, unknown>;
+          // A structured success cannot survive truncation: keep the notice
+          // text but drop the payload and mark the result as an error so the
+          // SDK's output-schema validation is skipped instead of failing on a
+          // missing structuredContent.
+          const { structuredContent } = record;
+          const wasError = record.isError === true || structuredContent !== undefined;
           return {
-            ...(result as Record<string, unknown>),
+            ...(wasError ? { isError: true } : {}),
             content: [
               {
                 type: "text",
@@ -97,6 +99,14 @@ export function registerGuarded(
               },
             ],
           };
+        }
+        // An isError result must not carry a structured success payload.
+        if (result && typeof result === "object") {
+          const record = result as Record<string, unknown>;
+          if (record.isError === true && record.structuredContent !== undefined) {
+            const { structuredContent: _drop, ...rest } = record;
+            return rest;
+          }
         }
         return result;
       } finally {

@@ -80,36 +80,95 @@ describe("tool profile", () => {
     expect(names).toContain("get_annual_categories");
   });
 
-  it("truncates over-budget payloads but preserves isError and other fields", async () => {
+  it("truncates over-budget payloads, keeps isError and drops structuredContent", async () => {
     const { server, regs } = fakeServer();
+    const payload = {
+      isError: true,
+      structuredContent: { keep: true },
+      content: [
+        { type: "text", text: "abcd" },
+        { type: "image", data: "0123456789", mimeType: "image/png" },
+      ],
+    };
     registerGuarded(
       server as any,
       "registerTool",
-      v2Args("big_tool", async () => ({
-        isError: true,
-        structuredContent: { keep: true },
-        content: [
-          { type: "text", text: "abcd" },
-          { type: "image", data: "0123456789", mimeType: "image/png" },
-        ],
-      })),
+      v2Args("big_tool", async () => payload),
       { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "10" },
     );
     const result = await regs[0].handler!();
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toEqual({ keep: true });
+    expect(result.structuredContent).toBeUndefined();
     expect(result.content).toEqual([
       {
         type: "text",
         text: JSON.stringify({
           truncated: true,
           tool: "big_tool",
-          bytes: 14,
+          bytes: Buffer.byteLength(JSON.stringify(payload), "utf8"),
           limit: 10,
           note: "Response exceeded AWWWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.",
         }),
       },
     ]);
+  });
+
+  it("counts structuredContent in the budget and drops it when truncating", async () => {
+    const { server, regs } = fakeServer();
+    const payload = {
+      content: [{ type: "text", text: "ok" }],
+      structuredContent: { blob: "x".repeat(500) },
+    };
+    registerGuarded(
+      server as any,
+      "registerTool",
+      v2Args("structured_tool", async () => payload),
+      { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "100" },
+    );
+    const result = await regs[0].handler!();
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      truncated: true,
+      tool: "structured_tool",
+      bytes: Buffer.byteLength(JSON.stringify(payload), "utf8"),
+      limit: 100,
+    });
+  });
+
+  it("returns a bounded truncation result without arbitrary payload fields", async () => {
+    const { server, regs } = fakeServer();
+    const payload = {
+      content: [{ type: "text", text: "x".repeat(200) }],
+      _meta: { blob: "y".repeat(5_000) },
+    };
+    registerGuarded(
+      server as any,
+      "registerTool",
+      v2Args("meta_tool", async () => payload),
+      { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "1000" },
+    );
+    const result = await regs[0].handler!();
+    expect(result._meta).toBeUndefined();
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(1000);
+  });
+
+  it("drops structuredContent from isError results even under the limit", async () => {
+    const { server, regs } = fakeServer();
+    registerGuarded(
+      server as any,
+      "registerTool",
+      v2Args("error_tool", async () => ({
+        isError: true,
+        structuredContent: { success: true },
+        content: [{ type: "text", text: "failed" }],
+      })),
+      {},
+    );
+    const result = await regs[0].handler!();
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(result.content).toEqual([{ type: "text", text: "failed" }]);
   });
 
   it("accepts the legacy env name but the canonical name wins", async () => {
@@ -122,7 +181,7 @@ describe("tool profile", () => {
 
     const both = fakeServer();
     registerGuarded(both.server as any, "registerTool", v2Args("t", async () => payload), {
-      AWWWARDS_MCP_MAX_RESPONSE_BYTES: "100",
+      AWWWARDS_MCP_MAX_RESPONSE_BYTES: "1000",
       AWARDS_MCP_MAX_RESPONSE_BYTES: "10",
     });
     expect(await both.regs[0].handler!()).toBe(payload);

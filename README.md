@@ -224,29 +224,47 @@ Browser captures (`capture_live_site`, `analyze_page_structure`,
 `record_site_motion`, the scroll/hover censuses, `verify_build`,
 `capture_component`, `export_design_tokens`, `analyze_images` and
 `capture_pose_3d`) need optional packages that are **not** dependencies of
-awwwards-mcp. Install the server and those packages side by side in one global
-prefix:
+awwwards-mcp. The walkthrough below is the path the two checks at the end of
+this section cover for the install layout:
 
-```bash
-npm install -g awwwards-mcp playwright ffmpeg-static
-npm exec --global -- playwright install chromium
-```
+1. Install the server and those packages side by side in one global prefix:
 
-Point your MCP client at the installed `awwwards-mcp` command (not `npx`):
+   ```bash
+   npm install -g awwwards-mcp playwright ffmpeg-static
+   npm exec --global -- playwright install chromium
+   ```
 
-```bash
-# If an older `awwwards` entry exists in this scope, remove it first:
-claude mcp remove awwwards
-claude mcp add awwwards -- awwwards-mcp
-```
+2. Point your MCP client at the installed `awwwards-mcp` command (not `npx`).
+   Remove an older entry in that scope first:
 
-```json
-{
-  "mcpServers": {
-    "awwwards": { "command": "awwwards-mcp" }
-  }
-}
-```
+   ```bash
+   claude mcp remove awwwards
+   claude mcp add awwwards -- awwwards-mcp
+   ```
+
+   ```json
+   {
+     "mcpServers": {
+       "awwwards": { "command": "awwwards-mcp" }
+     }
+   }
+   ```
+
+3. **Restart the MCP server** (or the agent that hosts it). The client spawns
+   the server process once; the new command and any `env` only take effect
+   after a restart.
+
+4. **Verification call** — ask the agent to run one browser tool, e.g.
+   `analyze_page_structure` on any page:
+
+   ```json
+   { "name": "analyze_page_structure", "arguments": { "url": "https://example.com" } }
+   ```
+
+   Success is JSON with a `bands` array (at least one entry) and a
+   `totalHeight`. A response naming the Playwright install hint means the
+   server cannot import or launch Playwright from its own install location;
+   redo step 1 before using any browser tool.
 
 In this layout all three packages are siblings in the same `node_modules`, so
 the server's bare `import("playwright")` / `import("ffmpeg-static")` resolve
@@ -255,6 +273,33 @@ automatically. `npx -y awwwards-mcp` has no such siblings: core tools work,
 browser tools cannot. Installing only `awwwards-mcp` globally has the same
 limitation — Playwright and ffmpeg-static must be installed globally too.
 
+Two commands cover this walkthrough. `npm run pack:smoke` packs the tarball,
+installs it into a throwaway global prefix and proves the side-by-side
+resolution layout with stand-in Playwright/ffmpeg packages.
+From a clone of this repository (the smoke is a dev check, not shipped in the
+tarball), `npm run smoke:browser` packs and installs this checkout into a
+throwaway global prefix with the **real** Playwright/ffmpeg packages linked as
+siblings, then runs the installed server over MCP stdio against a local static
+fixture with real Chromium:
+
+```bash
+npm run build && npm run smoke:browser
+```
+
+The smoke serves a three-section page on `127.0.0.1`, seeds a throwaway cache
+(so no crawl or daily update check starts), then makes two real calls — one
+`analyze_page_structure`, one `capture_live_site` — and fails on a missing band,
+a non-PNG image or a timeout. Observed result (Windows, Node 24, Playwright
+1.63, 2026-11-01):
+
+```
+browser-smoke: pack + global install
+browser-smoke: connected to awwwards-mcp, 39 tools
+browser-smoke: analyze_page_structure -> 4 bands, totalHeight 2061, labels body,#hero.hero,#work.work,#contact.contact
+browser-smoke: capture_live_site -> image/png 17.5 KB inline, saved capture-38f75233f8a4-desktop.png
+browser-smoke: PASS
+```
+
 ### Resource limits and diagnostics
 
 All optional and read at startup:
@@ -262,7 +307,7 @@ All optional and read at startup:
 | Variable | Default | Effect |
 |---|---|---|
 | `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 39; `v2` (beta) replaces the list with the 15-tool consolidated surface. The old → new v2 mapping is in [skills/v2-routing.md](skills/v2-routing.md). |
-| `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Text + inline image bytes per tool response. Larger responses keep `isError` and other result fields but replace `content` with a `{truncated:true, tool, bytes, limit, note}` JSON block. |
+| `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Full serialized tool-result bytes (text, inline images and `structuredContent`). Larger responses replace `content` with a `{truncated:true, tool, bytes, limit, note}` JSON block; a truncated structured payload is dropped and reported as `isError: true`. |
 | `AWWWARDS_MCP_DEBUG_MEMORY` | unset | `1` logs one JSON line per tool call (duration, rss, heap) to stderr - never stdout. |
 | `AWWWARDS_MCP_IMAGE_RETENTION_DAYS` | `0` (off) | A positive N prunes cached `images/` files older than N days once at startup. |
 | `AWWWARDS_MCP_IMAGE_MAX_BYTES` | `26214400` (25 MB) | Maximum size of one cached CDN image/asset download; larger responses (declared or streamed) are aborted before they are fully buffered. |
@@ -388,6 +433,45 @@ Site details (palettes, tech stacks) are still fetched on demand and cached
 for 7 days. Awwwards page and CDN requests have a 10-second deadline per
 attempt, including response-body reading; transient page failures are retried
 once, while blocks (403/429) and CDN failures are not retried.
+
+## Limitations
+
+Honest limits, so a result is not read as more than it measured.
+
+**The element corpus is partial after the gallery-crawl retirement.** The
+`/elements/*` gallery is not crawled. New records backfilled from winners' own
+site pages are created with `source: "site"`, `category: "uncategorized"` and
+an empty `builtWith` list, because those pages carry no facet taxonomy. The
+free-text `query` (title, author and slug tokens) is the reliable path. The
+`uncategorized` category matches site-derived rows; other facet categories and
+stack filters do not. An empty result does not prove the element does not exist.
+
+**`verify_build` scores structure and motion, not visual fidelity.** Band
+labels come from the structure scan as `#id.firstClass` (empty for anonymous
+wrappers). A unique, non-generic label is matched exactly; anonymous or
+duplicate labels fall back to same-tag plus closest height (within a 25% gap),
+so two different sections of similar height can pair. The structure walk is
+bounded: `maxBands` (default 40, smallest bands merged) caps the collapse step,
+and landmark splitting can then add sub-bands up to its own limit of 60, so a
+long or deeply nested page can still lose bands. `domDiff` reports
+`(incomplete)` when its scans were truncated, and `compact` drops the evidence
+lines. Capture timing can move the score: `waitStrategy: "load"` adds a 3 s
+settle, a full-screen preloader can be waited on for up to 15 s, and content
+that arrives after the capture (late fonts, images, hydration, animation) can
+change the bands or motion fingerprint between two runs of the same URL.
+Re-run before treating a delta as a regression; the score is evidence for a
+diff, not a grade.
+
+**`v2` is opt-in, not the default and not a 2.0 release.**
+`AWWWARDS_MCP_PROFILE=v2` replaces the default 39-tool surface with the
+15-tool consolidated surface described in
+[skills/v2-routing.md](skills/v2-routing.md). The default stays `full`; there
+are no aliases between the surfaces, and switching requires a server restart.
+
+**Third-party MCP directories are refreshed by their operators.** A listing
+such as Glama re-inspects this server on its own schedule; re-inspection there
+is a manual post-release admin step, not an API call or a code change in this
+repository.
 
 ## How it works
 

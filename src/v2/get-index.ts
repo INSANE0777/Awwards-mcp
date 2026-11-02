@@ -3,6 +3,7 @@
 // is strict so cross-branch fields fail validation instead of being silently
 // ignored.
 import { z } from "zod";
+import { indexGetOutputSchema } from "../index-contracts.js";
 import type { Handlers, ToolResponse } from "../server.js";
 import { asMcpResult, type ToolContext } from "../tools/shared.js";
 
@@ -69,5 +70,6 @@ export function registerGetIndex(ctx: ToolContext): void {
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: { request: GetIndexRequest }) =>
       asMcpResult(runGetIndex(ctx.handlers, args.request)),
+    indexGetOutputSchema,
   );
 }
