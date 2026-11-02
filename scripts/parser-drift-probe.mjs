@@ -9,7 +9,9 @@
 // Coverage: the /websites/ listing + /sites/ detail pages — 3 pinned slugs
 // (stable targets, strict verdicts) + up to 3 slugs per-day-sampled from the
 // local index DB (rotating coverage; a sampled page can be removed/renamed
-// any day, so its fetch failure is inconclusive, never drift).
+// any day, so its fetch failure is inconclusive, never drift). The listing
+// page also runs the real parseCategories: tag filters, color filters and the
+// Technology nav section must all parse non-empty.
 //
 // Usage:
 //   node scripts/parser-drift-probe.mjs                # live probe at 1 req/s
@@ -33,6 +35,32 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LIST_URL = "https://www.awwwards.com/websites/";
 const SITE_DETAIL_URL = (slug) => `https://www.awwwards.com/sites/${slug}`;
 
+// Taxonomy verdicts run the real parser over the same /websites/ response the
+// probe already fetches — no extra requests. src/parsers.ts is TypeScript, so
+// load it through the repo's tsx devDependency (npm ci installs it); a compiled
+// dist is the fallback. When neither loads, taxonomy rows are inconclusive, not
+// drift.
+let parserLoadError = null;
+
+async function loadParseCategories() {
+  try {
+    const { tsImport } = await import("tsx/esm/api");
+    const mod = await tsImport(new URL("../src/parsers.ts", import.meta.url), import.meta.url);
+    return mod.parseCategories;
+  } catch (err) {
+    parserLoadError = err; // tsx absent (production install) or src failed
+  }
+  try {
+    const mod = await import(new URL("../dist/parsers.js", import.meta.url));
+    return mod.parseCategories;
+  } catch (err) {
+    parserLoadError = err;
+    return null;
+  }
+}
+
+const parseCategories = await loadParseCategories();
+
 // Stable detail targets — strict verdicts (a missing anchor on a healthy
 // fetch is drift). Fixture mode probes the committed detail fixtures instead
 // (see DETAIL_FIXTURES; gionatan-nese-26 has no committed fixture).
@@ -55,7 +83,6 @@ const LISTING_PROBES = [
   { name: "parseListing[rollover live-url]", parser: "parseListing (live-site URL)", anchor: 'class="figure-rollover__bt"' },
   { name: "parseListing[detail href]", parser: "parseListing (detail link)", anchor: 'href="/sites/' },
   { name: "parseListing[award tag]", parser: "parseListing (award labels)", anchor: "budget-tag--" },
-  { name: "parseCategories[rollover links]", parser: "parseCategories (taxonomy page)", anchor: "figure-rollover" },
 ];
 
 const detailProbesFor = (url) => [
@@ -182,6 +209,83 @@ function sectionVerdictRows(url, html, pageOk, kind) {
   return { rows: [blobRow, pathRow], drifts: (blobRow.drift ? 1 : 0) + (pathRow.drift ? 1 : 0) };
 }
 
+// parseCategories is the taxonomy contract search_sites depends on: the tag
+// filter slugs, the color hexes, and the Technology nav section (which the old
+// "figure-rollover exists" anchor never proved). A zero count on a healthy
+// fetch is markup drift; a failed fetch or unavailable parser is inconclusive.
+const TAXONOMY_CHECKS = [
+  {
+    name: "parseCategories[filters]",
+    key: "filters",
+    unit: "filters",
+    driftNote: "no tag/technology filter links parsed — /websites/<slug>/ sidebar drift",
+  },
+  {
+    name: "parseCategories[colors]",
+    key: "colors",
+    unit: "colors",
+    driftNote: "no color filter links parsed — /websites/%23<HEX>/ sidebar drift",
+  },
+  {
+    name: "parseCategories[Technology nav]",
+    key: "technologies",
+    unit: "technologies",
+    driftNote: "Technology nav section missing or empty — nav-filters markup drift",
+  },
+];
+
+function taxonomyVerdictRows(url, html, pageOk, mode) {
+  const inconclusive = !pageOk ? "page fetch blocked/challenge — inconclusive" : null;
+  if (!parseCategories) {
+    return {
+      rows: [{
+        name: "parseCategories[shape]",
+        parser: "parseCategories",
+        url,
+        count: 0,
+        drift: false,
+        note: mode === "fixture"
+          ? `parser not loadable${parserLoadError ? ` (${parserLoadError.message})` : ""} — run npm install (tsx) or npm run build`
+          : `parser not loadable${parserLoadError ? ` (${parserLoadError.message})` : ""} — inconclusive`,
+      }],
+      drifts: 0,
+    };
+  }
+  let cats;
+  try {
+    cats = parseCategories(html);
+  } catch (err) {
+    return {
+      rows: [{
+        name: "parseCategories[shape]",
+        parser: "parseCategories",
+        url,
+        count: 0,
+        drift: false,
+        note: `parseCategories threw (${err instanceof Error ? err.message : String(err)}) — inconclusive`,
+      }],
+      drifts: 0,
+    };
+  }
+  let drifts = 0;
+  const rows = TAXONOMY_CHECKS.map((check) => {
+    const values = cats[check.key];
+    const count = Array.isArray(values) ? values.length : 0;
+    const row = { name: check.name, parser: "parseCategories", url, unit: check.unit, count, drift: false };
+    if (inconclusive) row.note = inconclusive;
+    else if (!Array.isArray(values)) {
+      row.drift = true;
+      row.note = `parseCategories.${check.key} is not an array — output shape drift`;
+    } else if (count === 0) {
+      row.drift = true;
+      row.note = check.driftNote;
+    }
+    if (row.drift) drifts++;
+    return row;
+  });
+  return { rows, drifts };
+}
+
 function anchorProbeRows(group, html, pageOk, mode) {
   const rows = [];
   let drifts = 0;
@@ -216,7 +320,11 @@ function probePage(group, html, pageOk, mode) {
   const a = anchorProbeRows(group, html, pageOk, mode);
   let rows = a.rows;
   let drifts = a.drifts;
-  if (group.kind !== "listing") {
+  if (group.kind === "listing") {
+    const t = taxonomyVerdictRows(group.url, html, pageOk, mode);
+    rows = rows.concat(t.rows);
+    drifts += t.drifts;
+  } else {
     const s = sectionVerdictRows(group.url, html, pageOk, group.kind);
     rows = rows.concat(s.rows);
     drifts += s.drifts;
@@ -251,6 +359,10 @@ function probeFixtures() {
     ...DETAIL_FIXTURES.map((fx) => detailGroup(fx, "pinned")),
   ];
   if (!determinismSelfCheck()) process.exit(3);
+  if (!parseCategories) {
+    console.error(`taxonomy parser not loadable${parserLoadError ? ` (${parserLoadError.message})` : ""} — run npm install (tsx) or npm run build`);
+    process.exit(3);
+  }
 
   const probes = [];
   const pages = [];
@@ -370,7 +482,8 @@ function render(status, groups) {
     const isDetail = group.kind !== "listing";
     lines.push(isDetail && status.mode === "live" ? `${group.url} [${group.kind}]:` : `${group.url}:`);
     const verdicts = rows.filter((r) => r.name === "parseElements[section blobs]" || r.name === "parseElements[media path scheme]");
-    const anchors = rows.filter((r) => !verdicts.includes(r));
+    const taxonomy = rows.filter((r) => r.parser === "parseCategories");
+    const anchors = rows.filter((r) => !verdicts.includes(r) && !taxonomy.includes(r));
     if (anchors.some((r) => r.drift)) {
       // something broke — show every anchor row for this page
       for (const p of anchors) {
@@ -384,6 +497,11 @@ function render(status, groups) {
         absent > 0
           ? `  ✓ ok    anchors ${anchors.length - absent}/${anchors.length} present, ${absent} absent (optional per-site)`
           : `  ✓ ok    anchors ${anchors.length}/${anchors.length} (min count ${Math.min(...anchors.map((r) => r.count))})`
+      );
+    }
+    for (const p of taxonomy) {
+      lines.push(
+        `  ${p.drift ? "✗ DRIFT" : "✓ ok   "} ${p.name} (${p.count}${p.unit ? ` ${p.unit}` : ""})${p.note ? ` — ${p.note}` : ""}`
       );
     }
     for (const p of verdicts) {

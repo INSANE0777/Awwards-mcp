@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V2 Eval Reference</title>
+<style>
+  :root {
+    --ink: #101216;
+    --paper: #f4f1ea;
+    --accent: #e4572e;
+    --space: 24px;
+    --radius: 6px;
+    --shadow: 0 12px 40px rgb(0 0 0 / 18%);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--paper);
+    font-family: "Helvetica Neue", Arial, sans-serif;
+  }
+  .site-header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 40px;
+    background: rgb(244 241 234 / 86%);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgb(16 18 22 / 10%);
+  }
+  .brand { font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
+  .nav { display: flex; gap: 22px; }
+  .nav a { color: inherit; text-decoration: none; font-size: 13px; }
+  .nav a:hover { color: var(--accent); }
+  .btn {
+    padding: 10px 18px; border: 1px solid var(--ink); border-radius: 999px;
+    background: transparent; font: inherit; font-size: 13px; cursor: pointer;
+    transition: background 220ms ease, color 220ms ease, transform 220ms ease;
+  }
+  .btn:hover { background: var(--ink); color: var(--paper); transform: translateY(-2px); }
+  main > section { min-height: 78vh; padding: 96px 40px; }
+  .hero { background: linear-gradient(140deg, #101216 0%, #2b3038 100%); color: var(--paper); }
+  .hero h1 { max-width: 12ch; margin: 0 0 24px; font-size: clamp(48px, 9vw, 128px); line-height: 0.92; }
+  .hero p { max-width: 46ch; color: #c9c4ba; }
+  .work { background: #fff; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space); margin-top: 48px; }
+  .card {
+    display: block; padding: 20px; color: inherit; text-decoration: none;
+    border: 1px solid rgb(16 18 22 / 14%); border-radius: var(--radius);
+    background: var(--paper); box-shadow: var(--shadow);
+    transition: transform 320ms cubic-bezier(.2,.8,.2,1), box-shadow 320ms ease;
+  }
+  .card:hover { transform: translateY(-8px) rotate(-0.4deg); box-shadow: 0 24px 60px rgb(0 0 0 / 22%); }
+  .card img { width: 100%; height: 160px; object-fit: cover; border-radius: 4px; }
+  .about { background: #e9e4d8; }
+  .contact { background: var(--ink); color: var(--paper); }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(48px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes drift {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(18px); }
+  }
+  .reveal {
+    animation: rise linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 55%;
+  }
+  .drift { animation: drift 3s ease-in-out infinite; }
+  @media (max-width: 800px) {
+    .grid { grid-template-columns: 1fr; }
+    main > section { padding: 64px 20px; }
+  }
+</style>
+</head>
+<body>
+<header class="site-header" id="top">
+  <span class="brand">Keep&amp;Co</span>
+  <nav class="nav" aria-label="Primary">
+    <a href="#work">Work</a>
+    <a href="#about">About</a>
+    <a href="#contact">Contact</a>
+  </nav>
+  <button class="btn" type="button">Start a project</button>
+</header>
+<main>
+  <section class="hero" id="hero">
+    <p class="drift">Independent design studio</p>
+    <h1>We build quiet, exacting websites.</h1>
+    <p>Structure first. Motion only where it carries meaning. This page is a local fixture for a v2 adoption evaluation.</p>
+  </section>
+  <section class="work" id="work">
+    <h2 class="reveal">Selected work</h2>
+    <div class="grid">
+      <a class="card" href="#work" data-scroll>
+        <img src="/img/one.svg" width="480" height="300" alt="Abstract red study">
+        <h3>Field Notes</h3>
+      </a>
+      <a class="card" href="#work" data-scroll>
+        <img src="/img/two.svg" width="480" height="300" alt="Blue geometric study" loading="lazy">
+        <h3>North Window</h3>
+      </a>
+      <a class="card" href="#work" data-scroll>
+        <img src="/img/three.svg" width="480" height="300">
+        <h3>Paper Room</h3>
+      </a>
+    </div>
+  </section>
+  <section class="about" id="about">
+    <h2 class="reveal">A small studio, on purpose.</h2>
+    <p>Four people, one table, a bias for typography and restraint.</p>
+  </section>
+  <section class="contact" id="contact">
+    <h2 class="reveal">Say hello.</h2>
+    <p><a class="btn" href="mailto:hello@example.test">hello@example.test</a></p>
+  </section>
+</main>
+<script>
+  // Hover-only JS interaction for verify_flow boundary evidence.
+  document.querySelector(".btn")?.addEventListener("click", () => {
+    document.body.dataset.clicked = "1";
+  });
+</script>
+</body>
+</html>

@@ -47,6 +47,10 @@ export const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
 
 export const SITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const CATEGORY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// Legacy taxonomy caches (written before technology facets existed) refresh on
+// read. A failed refresh waits this long before retrying, so a flaky network
+// cannot turn every list_categories call into a request.
+export const TAXONOMY_RETRY_MS = 60 * 60 * 1000;
 
 // The text block lists every element; only this many posters are fetched inline.
 export const MAX_INLINE_POSTERS = 8;
