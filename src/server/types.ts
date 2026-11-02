@@ -295,8 +295,9 @@ export function compactVerifyReport(r: VerifyReport): {
   verdict: VerifyReport["verdict"];
   overall: number;
   bands: { score: number; matched: number; refOnly: number; buildOnly: number };
-  motion: { score: number };
+  motion: { score: number; captureStable?: boolean | null };
 } {
+  const acq = r.motion.acquisition;
   return {
     verdict: r.verdict,
     overall: r.overall,
@@ -306,7 +307,37 @@ export function compactVerifyReport(r: VerifyReport): {
       refOnly: r.bands.refOnly.length,
       buildOnly: r.bands.buildOnly.length,
     },
-    motion: { score: r.motion.score },
+    motion: {
+      score: r.motion.score,
+      // Context survives the diet. true requires both captures to be stable
+      // AND comparable (same rendered height and animation count); false means
+      // at least one capture moved or the two captured different states;
+      // null means we could not verify. Key absent for reports whose censuses
+      // lack acquisition state.
+      ...(acq
+        ? (() => {
+            const ref = acq.reference;
+            const build = acq.build;
+            const comparable =
+              ref.documentHeight != null &&
+              build.documentHeight != null &&
+              ref.animationCount != null &&
+              build.animationCount != null;
+            const differ =
+              comparable &&
+              (ref.documentHeight !== build.documentHeight ||
+                ref.animationCount !== build.animationCount);
+            return {
+              captureStable:
+                ref.stable === false || build.stable === false || differ
+                  ? false
+                  : ref.stable === true && build.stable === true && comparable
+                    ? true
+                    : null,
+            };
+          })()
+        : {}),
+    },
   };
 }
 

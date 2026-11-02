@@ -68,6 +68,10 @@ export interface ScrollScan {
   gsapTriggers: GsapTriggerRow[];
   /** Full registry size BEFORE the 20-row detail cap — always emitted (0 when no GSAP). */
   gsapRegistryTotal: number;
+  /** Rendered document height at the start of the census evaluate. Optional so legacy saved scans stay valid. */
+  startHeight?: number | null;
+  /** Rendered document height at the end of the census evaluate. Optional so legacy saved scans stay valid. */
+  documentHeight?: number | null;
 }
 
 export interface ScrollCensus {
@@ -84,6 +88,37 @@ export interface ScrollCensus {
   /** L3 scrub probe curves — present ONLY when opts.scrubProbe was true; [] when the probe found nothing or failed. Absent (never []) when the flag is off, so disabled keeps the payload lean. */
   scrubCurves?: ScrubCurve[];
   reducedMotion: boolean;
+  /** What the fixed waits actually sampled. Absent when the census does not carry it (legacy/saved evidence). */
+  acquisition?: CensusAcquisition;
+}
+
+/**
+ * Acquisition state for one live census. Fixed waits (goto strategy + settle +
+ * preScroll + post-scroll pause) mean an async section can land before, during
+ * or after the sample: two runs can then fingerprint different pages. This
+ * block is the disclosure — capturedAt/documentHeight/animationCount show what
+ * was captured, and `stable: false` means the document height changed across
+ * the census evaluate itself (late content landed mid-capture). `stable: null`
+ * means the post-capture probe was unavailable; absence of the block means no
+ * acquisition evidence at all.
+ */
+export interface CensusAcquisition {
+  /** goto wait strategy actually used for this capture. */
+  waitStrategy: WaitStrategy;
+  /** Fixed post-goto settle before preScroll (ms). */
+  settleMs: number;
+  /** Fixed pause after preScroll before the census evaluate (ms). */
+  postScrollMs: number;
+  /** Epoch ms of the census reduce (same value as ScrollCensus.capturedAt). */
+  capturedAt: number;
+  /** Rendered document height when the census ran; null when the scan couldn't report it. */
+  documentHeight: number | null;
+  /** Animation rows sampled (ScrollCensus.anims.length). */
+  animationCount: number;
+  /** GSAP registry total at capture time. */
+  gsapRegistryCount: number;
+  /** true = height unchanged from the start of the census evaluate through the post-capture probe; false = content landed mid-capture; null = unknown. Content arriving before the evaluate starts is not detectable. */
+  stable: boolean | null;
 }
 
 const TRIGGER_SOURCES: ScrollTriggerSource[] = [
@@ -135,6 +170,20 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
   const anims: ScrollScan["anims"] = [];
   const smilSelectors: string[] = [];
   const nativeTimelines: ScrollScan["nativeTimelines"] = [];
+
+  function docHeight(): number | null {
+    try {
+      const de = doc?.documentElement;
+      const body = doc?.body;
+      const h = Math.round(
+        Math.max(de ? de.scrollHeight || 0 : 0, body ? body.scrollHeight || 0 : 0),
+      );
+      return Number.isFinite(h) ? h : null;
+    } catch {
+      return null;
+    }
+  }
+  const startHeight = docHeight();
 
   // CSS selector path up to depth 6: tagName lowercase, nth-of-type
   // disambiguation only when same-tag siblings exceed 1.
@@ -364,7 +413,10 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
     }
   } catch {}
 
-  return { anims, smilSelectors, nativeTimelines, gsapTriggers, gsapRegistryTotal };
+  // Rendered height at scan end (second half of the acquisition bracket).
+  const documentHeight = docHeight();
+
+  return { anims, smilSelectors, nativeTimelines, gsapTriggers, gsapRegistryTotal, startHeight, documentHeight };
 };
 
 // Phase-0 of the L3 scrub probe. Runs IN THE PAGE once, AFTER the census
@@ -510,6 +562,24 @@ export const SCRUB_SCROLL_TO = function (y: number): void {
   } catch {}
 };
 
+// Runs IN THE PAGE via page.evaluate after the census: second half of the
+// acquisition bracket. A height delta means content landed while the census
+// was sampling, so the fingerprint describes a half-acquired page. Height can
+// miss content that arrives after this probe — that residual limit is why the
+// acquisition block is reported rather than treated as a guarantee.
+export const ACQUISITION_HEIGHT = function (): number | null {
+  try {
+    const doc = (globalThis as any).document;
+    const de = doc && doc.documentElement;
+    const body = doc && doc.body;
+    return Math.round(
+      Math.max(de ? de.scrollHeight || 0 : 0, body ? body.scrollHeight || 0 : 0),
+    );
+  } catch {
+    return null;
+  }
+};
+
 // PURE: aggregates a raw scan into the census. Counts per trigger source,
 // propagates stroke flags (SMIL owners count as strokes), sorts the preview
 // list scrub-first then pin-first.
@@ -591,6 +661,41 @@ export async function captureScrollCensus(
       await page.waitForTimeout(500);
       const scan = (await page.evaluate(SCROLL_CENSUS_SNIPPET)) as ScrollScan;
       const census = reduceScrollCensus(url, scan, Date.now(), !!opts?.reducedMotion);
+      // Acquisition disclosure: record what the fixed waits actually sampled.
+      // The bracket is start-of-evaluate -> end-of-evaluate -> post-evaluate
+      // probe; any height delta across those three points means async content
+      // landed mid-capture (stable:false). Content that arrives before the
+      // evaluate starts is already in all three and cannot be detected. A
+      // failed probe leaves stable:null rather than claiming stability.
+      const scanHeight = (v: unknown): number | null =>
+        typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
+      const startHeight = scanHeight(scan.startHeight);
+      const sampledHeight = scanHeight(scan.documentHeight);
+      let afterHeight: number | null = null;
+      try {
+        afterHeight = scanHeight(await page.evaluate(ACQUISITION_HEIGHT));
+      } catch {
+        /* probe is best-effort: stable stays null */
+      }
+      census.acquisition = {
+        waitStrategy: opts?.waitStrategy ?? "networkidle",
+        settleMs: 3000,
+        postScrollMs: 500,
+        capturedAt: census.capturedAt,
+        documentHeight: startHeight ?? sampledHeight ?? afterHeight,
+        animationCount: census.anims.length,
+        gsapRegistryCount: census.gsapRegistryCount,
+        stable: (() => {
+          const sawMismatch =
+            (startHeight !== null && sampledHeight !== null && startHeight !== sampledHeight) ||
+            (sampledHeight !== null && afterHeight !== null && sampledHeight !== afterHeight) ||
+            (startHeight !== null && afterHeight !== null && startHeight !== afterHeight);
+          if (sawMismatch) return false;
+          return startHeight !== null && sampledHeight !== null && afterHeight !== null
+            ? true
+            : null;
+        })(),
+      };
       // L3 scrub probe: opt-in second phase, page still open after the census
       // evaluate. Drives ≤8 evenly spaced scrollTo steps across 0..maxScroll
       // and samples the same triggers' live progress each step. ZERO extra

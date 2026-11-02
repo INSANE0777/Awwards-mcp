@@ -13,7 +13,7 @@ import {
 } from "../src/verify-build.js";
 import type { BandRow, MotionCensusInput, DomDiffResult } from "../src/verify-build.js";
 import type { PageStructure } from "../src/structure.js";
-import type { ScrollCensus } from "../src/census.js";
+import type { CensusAcquisition, ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { ComponentPack, ComponentNode } from "../src/component.js";
 
@@ -420,6 +420,130 @@ describe("verifyBuild orchestrator", () => {
     expect(report.bands.refOnly).toEqual([]);
   });
 
+  // Motion-repeatability evidence: two censuses saved from the local fixture
+  // (one sampled before the async section landed, one after). Re-scoring the
+  // SAME saved inputs must reproduce the SAME fingerprint and score; the 91
+  // seen in the field is exactly one keyframe-class difference, not noise in
+  // motionDiffScore.
+  describe("saved census evidence (motion repeatability)", () => {
+    const saved = (name: string): ScrollCensus =>
+      JSON.parse(readFileSync(join(__dirname, "fixtures", "motion-variance", name), "utf8")) as ScrollCensus;
+    const early = saved("census-early.json");
+    const late = saved("census-late.json");
+
+    it("pins the fingerprints and the 100/91 scores for identical saved inputs", () => {
+      const earlyFp = motionFingerprint(early);
+      const lateFp = motionFingerprint(late);
+      expect(earlyFp).toBe("k1|tr:g1,c0,v0,d0,k0,s0|nat:0|sc:1|pin:0|e:linear");
+      expect(lateFp).toBe("k1|tr:g1,c0,v0,d0,k3,s0|nat:0|sc:1|pin:0|e:linear,linear,linear,linear");
+      expect(motionDiffScore(earlyFp, earlyFp)).toBe(100);
+      expect(motionDiffScore(lateFp, lateFp)).toBe(100);
+      // One extra css-keyframe animation class → trigger-set Jaccard 5/7.
+      expect(motionDiffScore(earlyFp, lateFp)).toBe(91);
+      // Repeated calls over the same saved inputs never drift.
+      expect(motionFingerprint(early)).toBe(earlyFp);
+      expect(motionFingerprint(late)).toBe(lateFp);
+      expect(motionDiffScore(earlyFp, lateFp)).toBe(91);
+    });
+
+    it("verifyBuild re-scores saved inputs identically and invents no acquisition context", async () => {
+      const run = () =>
+        verifyBuild({
+          buildUrl: "https://build.test",
+          referenceUrl: "https://ref.test",
+          structureFn: async () => refStruct(),
+          scrollFn: async (url) => (url === "https://ref.test" ? early : late),
+          hoverFn: async () => hoverCensus(),
+          ...offlineEvidence,
+        });
+      const a = await run();
+      const b = await run();
+      expect("error" in a || "error" in b).toBe(false);
+      if ("error" in a || "error" in b) return;
+      expect(a.motion.score).toBe(91);
+      expect(a.motion.refFingerprint).toBe(b.motion.refFingerprint);
+      expect(a.motion.buildFingerprint).toBe(b.motion.buildFingerprint);
+      expect(a.overall).toBe(b.overall);
+      // Saved evidence carries no acquisition state: no fabricated block/line.
+      expect(a.motion.acquisition).toBeUndefined();
+      expect(a.evidence.some((l) => l.startsWith("capture:"))).toBe(false);
+    });
+
+    const acquisition = (over: Partial<CensusAcquisition> = {}): CensusAcquisition => ({
+      waitStrategy: "networkidle",
+      settleMs: 3000,
+      postScrollMs: 500,
+      capturedAt: 1_793_537_000_000,
+      documentHeight: 5000,
+      animationCount: 1,
+      gsapRegistryCount: 1,
+      stable: true,
+      ...over,
+    });
+    const withAcq = (c: ScrollCensus, over: Partial<CensusAcquisition>) => ({
+      ...c,
+      acquisition: acquisition(over),
+    });
+
+    it("discloses acquisition state beside the score when live censuses carry it", async () => {
+      const report = await verifyBuild({
+        buildUrl: "https://build.test",
+        referenceUrl: "https://ref.test",
+        structureFn: async () => refStruct(),
+        scrollFn: async (url) =>
+          url === "https://ref.test" ? withAcq(early, {}) : withAcq(early, { documentHeight: 5600 }),
+        hoverFn: async () => hoverCensus(),
+        ...offlineEvidence,
+      });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(report.motion.score).toBe(100);
+      expect(report.motion.acquisition).toEqual({
+        reference: acquisition({}),
+        build: acquisition({ documentHeight: 5600 }),
+      });
+      expect(report.evidence.at(-1)).toBe(
+        "capture: reference h=5000 anims=1 gsap=1 stable; build h=5600 anims=1 gsap=1 stable (wait=networkidle/networkidle, settle=3000+500ms)",
+      );
+      // Stable heights never touch the score-derived motion line.
+      expect(report.evidence[1]).toBe("Motion: 100/100 fingerprint similarity");
+    });
+
+    it("marks a mid-capture mutation on the motion line and the capture line", async () => {
+      const report = await verifyBuild({
+        buildUrl: "https://build.test",
+        referenceUrl: "https://ref.test",
+        structureFn: async () => refStruct(),
+        scrollFn: async (url) =>
+          url === "https://ref.test" ? withAcq(early, {}) : withAcq(early, { stable: false }),
+        hoverFn: async () => hoverCensus(),
+        ...offlineEvidence,
+      });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(report.evidence[1]).toBe(
+        "Motion: 100/100 fingerprint similarity (capture unstable: page changed during sampling)",
+      );
+      expect(report.evidence.at(-1)).toContain("build h=5000 anims=1 gsap=1 MUTATED");
+    });
+
+    it("says stability-unknown when the probe could not verify the bracket", async () => {
+      const report = await verifyBuild({
+        buildUrl: "https://build.test",
+        referenceUrl: "https://ref.test",
+        structureFn: async () => refStruct(),
+        scrollFn: async (url) =>
+          url === "https://ref.test" ? withAcq(early, { stable: null }) : withAcq(early, { stable: null }),
+        hoverFn: async () => hoverCensus(),
+        ...offlineEvidence,
+      });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(report.evidence[1]).toBe("Motion: 100/100 fingerprint similarity");
+      expect(report.evidence.at(-1)).toContain("reference h=5000 anims=1 gsap=1 stability-unknown");
+    });
+  });
+
   it("appends measured perf + anti-pattern evidence after the score-derived lines", async () => {
     const rulesFn = () => [
       { ruleId: "blur-heavy", severity: "HIGH" as const, message: "Heavy blur", why: "w", improvements: "i", source: "css" as const },
@@ -809,6 +933,25 @@ describe("compact census helpers (C3)", () => {
     expect(c as unknown as Record<string, unknown>).not.toHaveProperty("scrubCurves");
     expect(c.gsapTriggers[0]).not.toHaveProperty("vars");
     expect(compactScrollCensus(census())).toEqual(c);
+  });
+
+  it("scroll diet keeps the acquisition disclosure when present", () => {
+    const withAcq = {
+      ...census(),
+      acquisition: {
+        waitStrategy: "networkidle" as const,
+        settleMs: 3000,
+        postScrollMs: 500,
+        capturedAt: 1_793_537_000_000,
+        documentHeight: 5000,
+        animationCount: 2,
+        gsapRegistryCount: 1,
+        stable: false,
+      },
+    };
+    const c = compactScrollCensus(withAcq);
+    expect(c.acquisition).toEqual(withAcq.acquisition);
+    expect(compactScrollCensus(census())).not.toHaveProperty("acquisition");
   });
 
   it("scroll diet is total: drops keyframes, scrubCurves, per-anim props", () => {

@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalFacet, compactAuditResult, compactSiteDetails, createHandlers, SITE_TTL_MS, slugifyTag, suggestTags, TAXONOMY_RETRY_MS, tokenizeQuery } from "../src/server.js";
+import { canonicalFacet, compactAuditResult, compactSiteDetails, compactVerifyReport, createHandlers, SITE_TTL_MS, slugifyTag, suggestTags, TAXONOMY_RETRY_MS, tokenizeQuery } from "../src/server.js";
 import { detailArgsSchema } from "../src/detail-schema.js";
 import type { AuditUrlResult } from "../src/audit-url.js";
 import type { ScrollCensus } from "../src/census.js";
+import type { VerifyReport } from "../src/verify-build.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { UnifiedMotionDna } from "../src/motion-dna.js";
 import type { ComponentPack } from "../src/component.js";
@@ -3535,6 +3536,58 @@ describe("audit_url and verify_build compact payloads", () => {
     });
     expect("evidence" in parsed).toBe(false);
     expect("domDiff" in parsed).toBe(false);
+  });
+
+  it("verify_build compact keeps capture-stability context, legacy shape unchanged", () => {
+    const base = verifyReport();
+    const acq = {
+      waitStrategy: "networkidle" as const,
+      settleMs: 3000,
+      postScrollMs: 500,
+      capturedAt: 1_793_537_000_000,
+      documentHeight: 5000,
+      animationCount: 1,
+      gsapRegistryCount: 1,
+      stable: true as boolean | null,
+    };
+    expect(compactVerifyReport(base as unknown as VerifyReport).motion).toEqual({ score: 64 });
+    const unstable = compactVerifyReport({
+      ...base,
+      motion: {
+        ...base.motion,
+        acquisition: { reference: acq, build: { ...acq, stable: false } },
+      },
+    } as unknown as VerifyReport);
+    expect(unstable.motion).toEqual({ score: 64, captureStable: false });
+    const unknown = compactVerifyReport({
+      ...base,
+      motion: {
+        ...base.motion,
+        acquisition: { reference: acq, build: { ...acq, stable: null } },
+      },
+    } as unknown as VerifyReport);
+    expect(unknown.motion).toEqual({ score: 64, captureStable: null });
+    const comparable = compactVerifyReport({
+      ...base,
+      motion: { ...base.motion, acquisition: { reference: acq, build: { ...acq } } },
+    } as unknown as VerifyReport);
+    expect(comparable.motion).toEqual({ score: 64, captureStable: true });
+    const differentHeight = compactVerifyReport({
+      ...base,
+      motion: {
+        ...base.motion,
+        acquisition: { reference: acq, build: { ...acq, documentHeight: 5600 } },
+      },
+    } as unknown as VerifyReport);
+    expect(differentHeight.motion).toEqual({ score: 64, captureStable: false });
+    const differentAnims = compactVerifyReport({
+      ...base,
+      motion: {
+        ...base.motion,
+        acquisition: { reference: acq, build: { ...acq, animationCount: 4 } },
+      },
+    } as unknown as VerifyReport);
+    expect(differentAnims.motion).toEqual({ score: 64, captureStable: false });
   });
 
   it("verify_build full payload is unchanged", async () => {

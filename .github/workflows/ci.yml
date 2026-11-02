@@ -14,19 +14,69 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # `main`'s protection requires the contexts `test (22)` and `test (24)`,
+    # so the ubuntu rows keep those exact labels; extra platforms get their own.
+    name: test (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    # Node 22 latest is the supported 22.x line; FTS5 is compiled out of some
+    # early 22.x builds, so pinning 22.13.0 would test the fallback path only
+    # while most FTS assertions expect the real index.
+    # The real-Chromium smoke (test/component-chromium.smoke.ts) runs on the
+    # Node 24 entries. Sets AWWWARDS_CHROMIUM_SMOKE so a missing browser is a
+    # failure there instead of a quiet skip.
+    env:
+      AWWWARDS_CHROMIUM_SMOKE: ${{ matrix.browser && '1' || '' }}
     strategy:
+      fail-fast: false
       matrix:
-        node: [22, 24]
+        include:
+          - os: ubuntu-latest
+            node: "22"
+            browser: false
+            label: "22"
+          - os: ubuntu-latest
+            node: "24"
+            browser: true
+            label: "24"
+          - os: windows-latest
+            node: "24"
+            browser: true
+            label: "windows-24"
+          - os: macos-15
+            node: "24"
+            browser: true
+            label: "macos-24"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      # macos-15 is an arm64 runner; fail loudly if it ever is not, so the
+      # Apple Silicon coverage this entry promises is real.
+      - name: Assert arm64 (Apple Silicon)
+        if: matrix.os == 'macos-15'
+        run: test "$(uname -m)" = arm64
       - run: npm ci
       - run: npm run typecheck
+      # Chromium only where the browser smoke runs. Ubuntu runners need the
+      # distro libraries Playwright's bundled build links against.
+      - name: Install Chromium (Linux)
+        if: matrix.browser && runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium (macOS/Windows)
+        if: matrix.browser && runner.os != 'Linux'
+        run: npx playwright install chromium
+      - run: npm test -- --maxWorkers=2
+        if: runner.os == 'Windows'
       - run: npm test
+        if: runner.os != 'Windows'
+      # Isolated from the parallel suite: one fixture page, no external network.
+      - name: Real-Chromium fixture smoke
+        if: matrix.browser
+        run: npm run test:browser
       - run: npm run build
       - run: npm pack --dry-run
+      # pack:smoke installs the tarball into a throwaway --prefix (no global
+      # state) and handles Windows .cmd shims, so every entry runs it as-is.
       - run: npm run pack:smoke

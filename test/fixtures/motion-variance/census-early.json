@@ -1,0 +1,63 @@
+{
+  "url": "http://127.0.0.1:4173/?late=9000",
+  "capturedAt": 1793537180564,
+  "counts": {
+    "gsap-scrolltrigger": 1,
+    "css-scroll-timeline": 0,
+    "css-view-timeline": 0,
+    "data-attr": 0,
+    "css-keyframe": 0,
+    "smil": 0,
+    "unknown": 0
+  },
+  "anims": [
+    {
+      "selector": "html>body>section:nth-of-type(1)>div",
+      "tag": "div",
+      "props": [
+        "transform",
+        "computedOffset"
+      ],
+      "durationMs": 60000,
+      "delayMs": 0,
+      "easing": "linear",
+      "trigger": "gsap-scrolltrigger",
+      "scrub": true,
+      "pin": false,
+      "svgStroke": false,
+      "keyframes": [
+        {
+          "offset": 0,
+          "props": {
+            "transform": "translateX(0px)"
+          }
+        },
+        {
+          "offset": 1,
+          "props": {
+            "transform": "translateX(120px)"
+          }
+        }
+      ]
+    }
+  ],
+  "svgStrokes": [],
+  "nativeScrollTimelines": 0,
+  "gsapTriggers": [
+    {
+      "selector": "html>body>section:nth-of-type(1)",
+      "scrub": true,
+      "pin": false,
+      "startPx": 921,
+      "endPx": 2321,
+      "progress": 0,
+      "vars": {
+        "y": "120",
+        "opacity": "0.4",
+        "stagger": "0.09"
+      }
+    }
+  ],
+  "gsapRegistryCount": 1,
+  "reducedMotion": false
+}

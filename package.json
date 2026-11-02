@@ -41,6 +41,7 @@
     "index": "node dist/index-cli.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "smoke": "tsx test/live-smoke.ts",
     "smoke:browser": "node scripts/browser-smoke.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",

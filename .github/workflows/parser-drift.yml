@@ -3,10 +3,10 @@ name: parser-drift
 # Watches awwwards.com for markup changes that break src/parsers.ts, so drift
 # is caught within a day instead of by the next user who searches. The probe
 # hits only the page shapes the indexer already crawls, at the same 1 req/s
-# politeness as the client. Status is uploaded as an artifact every run (works
-# even when main is protected); a best-effort commit keeps a diffable history.
-# Failures are reported to a single tracking issue that stays open until the
-# parsers catch up and a subsequent run passes.
+# politeness as the client. Status is uploaded as a 30-day artifact every run;
+# that artifact bucket is the only history (the workflow never writes to the
+# repository). Failures are reported to a single tracking issue that stays open
+# until the parsers catch up and a subsequent run passes.
 
 on:
   schedule:
@@ -15,7 +15,7 @@ on:
 
 permissions:
   issues: write
-  contents: write
+  contents: read
 
 concurrency:
   group: parser-drift
@@ -49,15 +49,6 @@ jobs:
           path: .drift/status.json
           if-no-files-found: warn
           retention-days: 30
-      - name: Commit probe status (drift history, best effort)
-        if: always()
-        run: |
-          git config user.name "awwwards-mcp-ci"
-          git config user.email "actions@users.noreply.github.com"
-          git add .drift/status.json 2>/dev/null || true
-          git commit -m "chore(drift): probe status [skip ci]" || echo "nothing to commit"
-          git pull --rebase origin main || true
-          git push origin HEAD:main || echo "status push failed (non-fatal; artifact retained)"
       - name: Report (open or update tracking issue on drift/fetch-fail)
         if: steps.probe.outputs.exit_code != '0'
         env:

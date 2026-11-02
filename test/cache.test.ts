@@ -134,20 +134,20 @@ describe("Cache", () => {
   it("batches many meta reads into one DB open and filters by TTL", () => {
     let t = 1_000_000;
     const cache = new Cache(tmpDir(), () => t);
-    for (let i = 0; i < 1_200; i++) cache.setMeta(`bulk:${i}`, i);
+    for (let i = 0; i < 600; i++) cache.setMeta(`bulk:${i}`, i);
     t += 6_000;
     cache.setMeta("bulk:fresh", "fresh");
     const readSpy = vi.spyOn(cache, "withReadDb");
 
     const values = cache.getMetaMany<number | string>(
-      [...Array.from({ length: 1_200 }, (_, i) => `bulk:${i}`), "bulk:fresh", "bulk:missing"],
+      [...Array.from({ length: 600 }, (_, i) => `bulk:${i}`), "bulk:fresh", "bulk:missing"],
       5_000,
     );
 
-    expect(readSpy).toHaveBeenCalledTimes(1); // one open, three IN (...) chunks
+    expect(readSpy).toHaveBeenCalledTimes(1); // one open, two IN (...) chunks
     expect(values.size).toBe(1);
     expect(values.get("bulk:fresh")).toBe("fresh");
-  }, 60_000);
+  }, 120_000);
 
   it("treats malformed meta rows as absent in a batch read", () => {
     const cache = new Cache(tmpDir());

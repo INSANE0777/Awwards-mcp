@@ -11,7 +11,7 @@
 // score/verdict math above is untouched. Defaults lazy-import like the
 // structure/scroll/hover defaults; offline tests inject fakes.
 import type { PageBand, PageStructure, WaitStrategy } from "./structure.js";
-import type { ScrollCensus } from "./census.js";
+import type { CensusAcquisition, ScrollCensus } from "./census.js";
 import type { HoverCensus } from "./hover-census.js";
 import type { ViewportName } from "./viewport.js";
 import type { PerfMeasurement } from "./perf-live.js";
@@ -38,7 +38,13 @@ export interface VerifyReport {
   buildUrl: string;
   referenceUrl: string;
   bands: { score: number; matched: string[]; refOnly: string[]; buildOnly: string[] };
-  motion: { score: number; refFingerprint: string; buildFingerprint: string };
+  motion: {
+    score: number;
+    refFingerprint: string;
+    buildFingerprint: string;
+    /** Present only when BOTH censuses carried acquisition state (absent for legacy/saved evidence that lacks it). */
+    acquisition?: { reference: CensusAcquisition; build: CensusAcquisition };
+  };
   overall: number;
   verdict: "pass" | "warn" | "fail";
   evidence: string[];
@@ -212,6 +218,25 @@ export function verdictFrom(bandScore: number, motionScore: number) {
     `Overall: ${overall}/100 → ${verdict.toUpperCase()}`,
   ];
   return { overall, verdict, evidence };
+}
+
+// One-line acquisition disclosure appended to live reports. The zero/absent
+// case stays byte-identical: when either side lacks acquisition state, no
+// line is added, so legacy output is preserved.
+function captureEvidenceLine(
+  reference: CensusAcquisition,
+  build: CensusAcquisition,
+): string {
+  const side = (a: CensusAcquisition): string => {
+    const h = a.documentHeight === null ? "?" : String(a.documentHeight);
+    const stable =
+      a.stable === null ? "stability-unknown" : a.stable ? "stable" : "MUTATED";
+    return `h=${h} anims=${a.animationCount} gsap=${a.gsapRegistryCount} ${stable}`;
+  };
+  return (
+    `capture: reference ${side(reference)}; build ${side(build)} ` +
+    `(wait=${reference.waitStrategy}/${build.waitStrategy}, settle=${reference.settleMs}+${reference.postScrollMs}ms)`
+  );
 }
 
 // ---- D2: DOM-structure diff between two component captures ----
@@ -546,6 +571,21 @@ export async function verifyBuild(
     const motionScore = motionDiffScore(refFp, buildFp);
     const { overall, verdict, evidence } = verdictFrom(bands.score, motionScore);
 
+    // Acquisition disclosure: the score above is a pure function of the two
+    // fingerprints (identical saved inputs ⇒ identical score), but the live
+    // fixed waits can sample different states of an async page. The full block
+    // and capture line are added only when BOTH censuses carry acquisition;
+    // the motion-line mutation suffix is added when either side reports
+    // stable:false. Output stays unchanged when acquisition is absent.
+    const refAcq = refScroll.acquisition;
+    const buildAcq = buildScroll.acquisition;
+    const captureUnstable = refAcq?.stable === false || buildAcq?.stable === false;
+    if (captureUnstable) {
+      evidence[1] = `${evidence[1]} (capture unstable: page changed during sampling)`;
+    }
+    const captureLine =
+      refAcq && buildAcq ? captureEvidenceLine(refAcq, buildAcq) : null;
+
     // Aegon-port evidence pass, AFTER the score-derived lines. Evidence only:
     // never touches bands/motion/overall/verdict; every failure degrades to a
     // one-line note. Runs only on this happy path — the early {error} returns
@@ -582,7 +622,14 @@ export async function verifyBuild(
       buildUrl: args.buildUrl,
       referenceUrl: args.referenceUrl,
       bands,
-      motion: { score: motionScore, refFingerprint: refFp, buildFingerprint: buildFp },
+      motion: {
+        score: motionScore,
+        refFingerprint: refFp,
+        buildFingerprint: buildFp,
+        ...(refAcq && buildAcq
+          ? { acquisition: { reference: refAcq, build: buildAcq } }
+          : {}),
+      },
       overall,
       verdict,
       // Display order per the plan: perf line first, then anti-patterns.
@@ -594,6 +641,7 @@ export async function verifyBuild(
         perfLine,
         rulesLine,
         ...(domLine ? [domLine] : []),
+        ...(captureLine ? [captureLine] : []),
       ],
       // Key absent when domDiff is off — pinned by a keys-absence test.
       ...(domDiff ? { domDiff } : {}),
@@ -624,10 +672,12 @@ export function compactScrollCensus(c: ScrollCensus): {
   pinCount: number;
   scrubCurveCount: number;
   reducedMotion: boolean;
+  acquisition?: ScrollCensus["acquisition"];
 } {
   return {
     url: c.url,
     capturedAt: c.capturedAt,
+    ...(c.acquisition ? { acquisition: c.acquisition } : {}),
     counts: c.counts,
     nativeScrollTimelines: c.nativeScrollTimelines,
     svgStrokes: c.svgStrokes,
