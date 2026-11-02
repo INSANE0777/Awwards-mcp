@@ -43,9 +43,11 @@
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "smoke": "tsx test/live-smoke.ts",
+    "smoke:browser": "node scripts/browser-smoke.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",
+    "perf:bench": "node scripts/perf-bench.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

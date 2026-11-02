@@ -26,7 +26,7 @@ export async function get_index_status(ctx: HandlerContext): Promise<ToolRespons
     const indexAge = finishedAt === null ? null : Math.max(0, now - finishedAt);
     const active = lockAge !== null && lockAge < INDEX_LOCK_STALE_MS;
     const categoryTotal = ctx.cache.getMeta<Categories>("categories", Number.POSITIVE_INFINITY)?.filters.length;
-    return { content: [text(JSON.stringify({
+    const body = {
       sitesCount: ctx.cache.countSites(),
       progress: {
         pagesDone: progress?.length ?? (active ? 0 : status?.pagesDone ?? 0),
@@ -44,7 +44,8 @@ export async function get_index_status(ctx: HandlerContext): Promise<ToolRespons
         ageMs: indexAge,
         staleAfterMs: INDEX_STALE_MS,
       },
-    }, null, 2))] };
+    };
+    return { content: [text(JSON.stringify(body, null, 2))], structuredContent: body };
   } catch (err) {
     return errorResponse(err);
   }
@@ -56,7 +57,11 @@ export async function get_index_stats(ctx: HandlerContext, args: IndexStatsArgs)
     const stats =
       ctx.deps.indexStatsFn ??
       ((a: IndexStatsArgs) => import("../../index-stats.js").then((m) => m.getIndexStats(a, { cache: ctx.cache })));
-    return { content: [text(JSON.stringify(await stats(args), null, 1))] };
+    const result = await stats(args);
+    return {
+      content: [text(JSON.stringify(result, null, 1))],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
   } catch (err) {
     return errorResponse(err);
   }

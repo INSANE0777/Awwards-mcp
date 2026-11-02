@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { detailArgsSchema } from "../detail-schema.js";
+import { indexStatsOutputSchema, indexStatusOutputSchema } from "../index-contracts.js";
 import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } from "./shared.js";
 
 export function registerSearchSites(ctx: ToolContext): void {
@@ -93,6 +94,7 @@ export function registerGetIndexStatus(ctx: ToolContext): void {
     {},
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     () => asMcpResult(ctx.handlers.get_index_status()),
+    indexStatusOutputSchema,
   );
 }
 
@@ -118,6 +120,7 @@ export function registerGetIndexStats(ctx: ToolContext): void {
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: any) => asMcpResult(ctx.handlers.get_index_stats(args)),
+    indexStatsOutputSchema,
   );
 }
 
