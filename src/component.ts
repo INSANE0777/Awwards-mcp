@@ -58,6 +58,8 @@ export interface CaptureComponentOptions {
   /** Max serialized tree depth, root = 0 (clamped 0..64; 0/undefined = unlimited). */
   maxDepth?: number;
   loader?: () => Promise<any>;
+  /** Route every browser connection through this loopback guard proxy. */
+  proxyServer?: string;
 }
 
 /** Bounded computed-style subset collected per node (brief Step 3 list). */
@@ -549,7 +551,11 @@ export async function captureComponent(
     // Lazy default: playwright is only touched when the tool actually runs.
     const loader = opts?.loader ?? (() => import("playwright" as string));
     ({ chromium: chrome } = await loader());
-    const browser = await chrome.launch();
+    const browser = await chrome.launch(
+      opts?.proxyServer
+        ? { proxy: { server: opts.proxyServer, bypass: "<-loopback>" } }
+        : {},
+    );
     try {
       // Viewport profile split as in structure.ts: width/height fill the
       // `viewport` key; mobile-profile flags are sibling context options.

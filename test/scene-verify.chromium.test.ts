@@ -75,6 +75,40 @@ if (!${JSON.stringify(variant === "blank")}) {
 </body></html>`;
 }
 
+// Same pixels as sceneHtml("same"), but a decoy canvas pre-marked with the old
+// fixed marker value sits first in document order at a different position.
+function decoyHtml(): string {
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:3000px;background:#0b0d12}
+#decoy{position:fixed;left:700px;top:30px;width:600px;height:400px;display:block}
+#scene{position:fixed;left:40px;top:30px;width:600px;height:400px;display:block}
+</style></head><body>
+<canvas id="decoy" data-awwwards-scene-canvas="1" width="600" height="400"></canvas>
+<canvas id="scene" width="600" height="400"></canvas>
+<script>
+const decoy = document.getElementById("decoy");
+const dx = decoy.getContext("2d");
+dx.fillStyle = "#808080";
+dx.fillRect(0, 0, 600, 400);
+const c = document.getElementById("scene");
+const x = c.getContext("2d");
+x.fillStyle = "#0d1b2a";
+x.fillRect(0, 0, 600, 400);
+x.fillStyle = "#e63946";
+x.fillRect(40, 40, 240, 160);
+x.fillStyle = "#2a9d8f";
+x.fillRect(320, 60, 200, 200);
+x.fillStyle = "#e9c46a";
+x.beginPath();
+x.arc(160, 320, 60, 0, Math.PI * 2);
+x.fill();
+x.fillStyle = "#8338ec";
+x.fillRect(340, 300, 180, 60);
+</script>
+</body></html>`;
+}
+
 // Same pixels as sceneHtml("same"), but with an absolutely positioned canvas
 // at y=1100 so the capture only lines up when the build scrolls to 1100.
 function scrollCanvasHtml(): string {
@@ -343,6 +377,7 @@ async function startFixture(): Promise<Fixture> {
     "/build-shot-move.html": shotMoveHtml(),
     "/build-scroll-drift.html": scrollDriftHtml(),
     "/build-lose-context.html": loseContextHtml(),
+    "/build-decoy.html": decoyHtml(),
     "/capture-moving.html": captureMovingHtml(),
   } as const;
   const server = createServer((req, res) => {
@@ -487,6 +522,24 @@ if (!chromiumAvailable && REQUIRED) {
           expect(checkpoint.diffImage).toContain(join("verify"));
         }
         expect(result.limitations.join(" ")).toContain("Pixel comparison only");
+      },
+    );
+
+    it(
+      "a pre-marked decoy canvas does not hijack verification",
+      { timeout: 90_000 },
+      async () => {
+        const result = await verify("build-decoy.html", { tolerances });
+        if ("error" in result) throw new Error(result.error);
+
+        // The decoy is first in document order and pre-carries the old fixed
+        // marker value. Verification must still compare #scene (identical
+        // pixels), not the grey decoy, which would read outside-tolerance.
+        expect(result.status).toBe("comparable");
+        expect(result.verdict).toBe("within-tolerance");
+        for (const checkpoint of result.checkpoints) {
+          expect(checkpoint.changedPixelFraction).toBe(0);
+        }
       },
     );
 

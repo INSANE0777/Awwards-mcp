@@ -144,7 +144,7 @@ function fakePage(opts: {
       if (fn === SCENE_CANVAS_PICK) {
         return {
           canvases: 1,
-          selector: 'canvas[data-awwwards-scene-canvas="1"]',
+          selector: `canvas[data-awwwards-scene-canvas="${String(arg?.marker ?? "")}"]`,
           rect: { x: 0, y: 0, width: 800, height: 600 },
           backing: { width: 1600, height: 1200 },
           dpr: 2,
@@ -499,16 +499,34 @@ describe("SCENE_CANVAS_PICK", () => {
     rect: { x: number; y: number; width: number; height: number },
     picked: boolean[],
     index: number,
+    marker = "",
   ) {
-    return {
+    const el: any = {
       tagName: "CANVAS",
       width: 100,
       height: 100,
+      marker,
       getBoundingClientRect: () => rect,
-      setAttribute: () => {
+      setAttribute: (name: string, value: string) => {
+        if (name === "data-awwwards-scene-canvas") el.marker = value;
         picked[index] = true;
       },
     };
+    return el;
+  }
+
+  function stubCanvasDocument(canvases: any[], selectors: Record<string, any> = {}) {
+    vi.stubGlobal("document", {
+      querySelectorAll: (selector: string) => {
+        if (selector === "canvas") return canvases;
+        const match = /^canvas\[data-awwwards-scene-canvas="([^"]+)"\]$/.exec(selector);
+        return match ? canvases.filter((canvas) => canvas.marker === match[1]) : [];
+      },
+      querySelector: (selector: string) => selectors[selector] ?? null,
+    });
+    vi.stubGlobal("getComputedStyle", () => ({ display: "block", visibility: "visible" }));
+    vi.stubGlobal("innerWidth", 1280);
+    vi.stubGlobal("innerHeight", 720);
   }
 
   it("ignores a larger offscreen canvas in favour of a smaller visible one", () => {
@@ -517,17 +535,12 @@ describe("SCENE_CANVAS_PICK", () => {
       canvasAt({ x: 0, y: 5000, width: 3000, height: 2000 }, picked, 0),
       canvasAt({ x: 100, y: 100, width: 400, height: 300 }, picked, 1),
     ];
-    vi.stubGlobal("document", {
-      querySelectorAll: () => canvases,
-      querySelector: () => null,
-    });
-    vi.stubGlobal("getComputedStyle", () => ({ display: "block", visibility: "visible" }));
-    vi.stubGlobal("innerWidth", 1280);
-    vi.stubGlobal("innerHeight", 720);
+    stubCanvasDocument(canvases);
 
-    const result = SCENE_CANVAS_PICK({ selector: "" });
+    const result = SCENE_CANVAS_PICK({ selector: "", marker: "run-marker-a" });
     expect(result.problem).toBe("");
     expect(picked).toEqual([false, true]);
+    expect(result.selector).toBe('canvas[data-awwwards-scene-canvas="run-marker-a"]');
   });
 
   it("ranks by visible intersection, not the full offscreen area", () => {
@@ -537,16 +550,37 @@ describe("SCENE_CANVAS_PICK", () => {
       canvasAt({ x: -1800, y: 0, width: 2000, height: 1000 }, picked, 0),
       canvasAt({ x: 0, y: 0, width: 500, height: 400 }, picked, 1),
     ];
-    vi.stubGlobal("document", {
-      querySelectorAll: () => canvases,
-      querySelector: () => null,
-    });
-    vi.stubGlobal("getComputedStyle", () => ({ display: "block", visibility: "visible" }));
-    vi.stubGlobal("innerWidth", 1280);
-    vi.stubGlobal("innerHeight", 720);
+    stubCanvasDocument(canvases);
 
-    expect(SCENE_CANVAS_PICK({ selector: "" }).problem).toBe("");
+    expect(SCENE_CANVAS_PICK({ selector: "", marker: "run-marker-b" }).problem).toBe("");
     expect(picked).toEqual([false, true]);
+  });
+
+  it("tags the element the explicit selector resolved, not a pre-marked decoy", () => {
+    const picked = [false, false];
+    const decoy = canvasAt({ x: 500, y: 0, width: 400, height: 300 }, picked, 0, "1");
+    const wanted = canvasAt({ x: 0, y: 0, width: 400, height: 300 }, picked, 1);
+    stubCanvasDocument([decoy, wanted], { "#wanted": wanted });
+
+    const result = SCENE_CANVAS_PICK({ selector: "#wanted", marker: "run-marker-c" });
+    expect(result.problem).toBe("");
+    // Only the canvas the selector resolved was tagged; the decoy's fixed
+    // attribute value is never used as a handle.
+    expect(picked).toEqual([false, true]);
+    expect(result.selector).toBe('canvas[data-awwwards-scene-canvas="run-marker-c"]');
+  });
+
+  it("fails closed when the run marker is not unique", () => {
+    const picked = [false, false];
+    const chosen = canvasAt({ x: 0, y: 0, width: 500, height: 400 }, picked, 0);
+    // A page that copied the run marker onto another canvas.
+    const decoy = canvasAt({ x: 500, y: 0, width: 100, height: 100 }, picked, 1, "run-marker-d");
+    stubCanvasDocument([decoy, chosen]);
+
+    const result = SCENE_CANVAS_PICK({ selector: "", marker: "run-marker-d" });
+    expect(result.problem).toBe("marker-not-unique");
+    expect(result.selector).toBe("");
+    expect(result.rect).toBeNull();
   });
 });
 
@@ -1176,9 +1210,15 @@ describe("captureScene3d", () => {
     expect(result.checkpoints).toHaveLength(SCENE_LIMITS.defaultCheckpoints);
     expect(result.viewport).toEqual({ name: "desktop", width: 1440, height: 900 });
 
-    // Canvas pick: no selector given, so the in-page snippet chooses.
+    // Canvas pick: no selector given, so the in-page snippet chooses and the
+    // returned handle is the outside-generated marker, never a fixed value.
     const pick = fake.calls.evaluates.find((call) => call.name === "SCENE_CANVAS_PICK");
-    expect(pick?.arg).toEqual({ selector: "" });
+    expect(pick?.arg).toEqual({ selector: "", marker: expect.any(String) });
+    expect(pick?.arg.marker).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.canvas.requestedSelector).toBeNull();
+    expect(result.canvas.usedSelector).toBe(
+      `canvas[data-awwwards-scene-canvas="${pick?.arg.marker}"]`,
+    );
 
     // Redaction: query strings never reach evidence.
     expect(result.resources).toHaveLength(3);
@@ -1280,9 +1320,17 @@ describe("captureScene3d", () => {
     expect("error" in result).toBe(false);
     if ("error" in result) return;
 
-    expect(
-      fake.calls.evaluates.find((call) => call.name === "SCENE_CANVAS_PICK")?.arg,
-    ).toEqual({ selector: "#hero-canvas" });
+    const pick = fake.calls.evaluates.find((call) => call.name === "SCENE_CANVAS_PICK");
+    expect(pick?.arg).toEqual({ selector: "#hero-canvas", marker: expect.any(String) });
+    // The refined selector is the run marker set on #hero-canvas, never a fixed
+    // attribute value that page content could pre-set or duplicate.
+    expect(result.canvas.requestedSelector).toBe("#hero-canvas");
+    expect(result.canvas.usedSelector).toBe(
+      `canvas[data-awwwards-scene-canvas="${pick?.arg.marker}"]`,
+    );
+    const probes = fake.calls.evaluates.filter((call) => call.name === "SCENE_PROBE");
+    expect(probes.length).toBeGreaterThan(0);
+    expect(probes.every((call) => call.arg.canvasSelector === result.canvas.usedSelector)).toBe(true);
     expect(result.checkpoints).toHaveLength(1);
     expect(result.checkpoints[0].pointer).toEqual({ x: 0.5, y: 0.25 });
     expect(result.checkpoints[0].pointerPx).toEqual({ x: 195, y: 211 });

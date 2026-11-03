@@ -271,7 +271,11 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
   transforms are lost.
   It never fetches, installs, copies an asset body or writes a directory: copy
   the `assetCopies` yourself, then `npm install && npm run build`. It never
-  executes captured code, shader source, `userData` or callbacks.
+  executes captured code, shader source, `userData` or callbacks. `scene.json`
+  frame references are basenames extracted from either Windows or POSIX paths.
+- **`build_motion` `pose_stub` frame loading.** Same-index frame requests are
+  deduped and stale texture completions are discarded, so scrubbing cannot
+  replace the newest frame with an older decode.
 - **`verify_build` `scene3d` is a separate gate.** `verify_build` stays flat in
   v2, including `scene3d: {referenceCaptureId, buildSelector, tolerances?}`.
   The id comes from a `capture_page` `{kind:"scene"}` pack; `status`/`verdict`
@@ -284,9 +288,16 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
   accepted; capture cannot detect reference-side context loss. The gate
   re-probes the build after the screenshot and requires the scroll to stay
   within 2 px of both the pre-shot position and the reference `actualScrollTop`,
-  plus an unchanged canvas rect/backing/DPR and no context loss. The 15 s
-  watchdog starts before pack resolution and covers pack read, DNS, artifact
-  prep, frame reads, Playwright import/loader, launch and comparison. Cleanup
+  plus an unchanged canvas rect/backing/DPR and no context loss. The build
+  canvas gets a per-run random marker; duplicate or pre-marked decoys are
+  refused. A requested `scene3d` first preflights both URLs on one shared
+  DNS/private-IP guard before any legacy scan, and every legacy acquisition
+  plus the static HTML read runs behind its loopback proxy; a private/loopback
+  or non-http(s) URL is refused with zero requests. The whole-run deadline is
+  dynamic: replayed checkpoint waits + 10 s headroom, floored at 15 s and
+  capped at 45 s (10 x 2000 ms waits => 30 s); it starts before pack resolution
+  and covers pack read, DNS, artifact prep, frame reads, Playwright
+  import/loader, launch and comparison. Cleanup
   closes tracked resources concurrently under one shared 3 s grace; the result
   returns within the deadline plus roughly 3 s, hung closes are abandoned
   (underlying teardown may linger), and late resources get an unawaited closure

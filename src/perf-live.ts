@@ -483,6 +483,8 @@ export interface MeasureRuntimeOpts {
   findBrowserFn?: () => string | null;
   /** CDP /json/list fetch and websocket-open deadline (ms). Default 5000; min 10. */
   cdpTimeoutMs?: number;
+  /** Route every page connection through this loopback guard proxy. */
+  proxyServer?: string;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -550,6 +552,14 @@ export async function measureRuntime(
         "--disable-extensions",
         `--window-size=${width},${height}`,
         "--remote-debugging-port=0",
+        ...(opts.proxyServer
+          ? [
+              `--proxy-server=${opts.proxyServer}`,
+              // Chromium bypasses proxies for loopback by default; the scene
+              // guard's `<-loopback>` rule removes that bypass.
+              "--proxy-bypass-list=<-loopback>",
+            ]
+          : []),
         "about:blank",
       ],
       { stdio: ["ignore", "ignore", "pipe"] },

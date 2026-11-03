@@ -112,6 +112,31 @@ window.__sceneReady = true;
 </script>
 </body></html>`;
 
+// A decoy canvas pre-marked with the old fixed marker value and placed first in
+// document order. A picker that trusts that fixed value resolves the decoy, not
+// the explicitly requested #wanted canvas.
+const DECOY_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:3000px;background:#0b0d12}
+#decoy{position:fixed;left:700px;top:30px;width:400px;height:300px;display:block}
+#wanted{position:fixed;left:40px;top:30px;width:600px;height:400px;display:block}
+</style></head><body>
+<canvas id="decoy" data-awwwards-scene-canvas="1" width="400" height="300"></canvas>
+<canvas id="wanted" width="600" height="400"></canvas>
+<script>
+const decoy = document.getElementById("decoy");
+const dx = decoy.getContext("2d");
+dx.fillStyle = "#808080";
+dx.fillRect(0, 0, 400, 300);
+const wanted = document.getElementById("wanted");
+const wx = wanted.getContext("2d");
+wx.fillStyle = "#1b4dff";
+wx.fillRect(0, 0, 600, 400);
+wx.fillStyle = "#ffaa00";
+wx.fillRect(40, 40, 240, 160);
+</script>
+</body></html>`;
+
 const POPUP_HTML = (popupUrl: string) => `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:3000px;background:#0b0d12}
@@ -230,6 +255,11 @@ async function startFixtures(): Promise<Fixture> {
     if (path === "/idle.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(IDLE_HTML);
+      return;
+    }
+    if (path === "/decoy.html") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(DECOY_HTML);
       return;
     }
     if (path === "/three.module.js") {
@@ -432,6 +462,42 @@ if (!chromiumAvailable && REQUIRED) {
             ),
           ).toBe(true);
           expect(result.blockedRequests.count).toBe(0);
+        } finally {
+          await fixture.close();
+        }
+      },
+    );
+
+    it(
+      "captures the canvas the selector resolved, not a pre-marked decoy",
+      { timeout: 90_000 },
+      async () => {
+        const fixture = await startFixtures();
+        try {
+          const result = await captureScene3d(`${fixture.origin}/decoy.html`, {
+            loader,
+            allowPrivateOrigins: [fixture.origin],
+            sceneDir: sceneDir(),
+            canvasSelector: "#wanted",
+            includeViewportShots: false,
+            checkpoints: [{ scrollRatio: 0, waitMs: 100 }],
+          });
+          if ("error" in result) throw new Error(result.error);
+
+          expect(result.canvas.requestedSelector).toBe("#wanted");
+          // The decoy is first in document order and pre-carries the old fixed
+          // marker value; the captured geometry must still be #wanted's.
+          expect(result.checkpoints[0].canvas).toEqual({
+            rect: { x: 40, y: 30, width: 600, height: 400 },
+            backing: { width: 600, height: 400 },
+            dpr: 1,
+          });
+          const png = readFileSync(result.checkpoints[0].files.canvas);
+          expect(pngSize(png)).toEqual({ width: 600, height: 400 });
+          // #wanted is saturated blue/orange; the decoy is uniform grey, so a
+          // decoy capture would contain no colourful pixels.
+          const stats = await pixelStats(result.checkpoints[0].files.canvas);
+          expect(stats.colorful).toBeGreaterThan(600 * 400 * 0.9);
         } finally {
           await fixture.close();
         }

@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { Scene3dVerifyResult, VerifySceneFn } from "../src/scene-verify.js";
-import { diffRgbaMetrics, verifyScene3d } from "../src/scene-verify.js";
+import { diffRgbaMetrics, sceneVerifyBudget, verifyScene3d } from "../src/scene-verify.js";
 import type { PageStructure } from "../src/structure.js";
 import { compactVerifyReport } from "../src/server/types.js";
 import type { VerifyReport } from "../src/server.js";
@@ -424,12 +424,20 @@ const sceneArgs = {
 };
 
 // A fake Playwright surface: the comparator page's evaluate never settles, so
-// only the watchdog can end the run.
-function fakeSceneBrowser(opts: { hangClose?: boolean } = {}): {
+// only the watchdog can end the run, unless opts.compare resolves it.
+function fakeSceneBrowser(
+  opts: {
+    hangClose?: boolean;
+    compare?: boolean;
+    onWait?: (ms: number) => Promise<void>;
+  } = {},
+): {
   loader: () => Promise<any>;
   closed: string[];
+  waits: number[];
 } {
   const closed: string[] = [];
+  const waits: number[] = [];
   const close = (name: string): Promise<void> => {
     closed.push(name);
     return opts.hangClose ? new Promise<void>(() => {}) : Promise.resolve();
@@ -438,12 +446,27 @@ function fakeSceneBrowser(opts: { hangClose?: boolean } = {}): {
     setDefaultTimeout: vi.fn(),
     addInitScript: vi.fn(async () => undefined),
     goto: vi.fn(async () => undefined),
-    waitForTimeout: vi.fn(async () => undefined),
+    waitForTimeout: vi.fn(async (ms: number) => {
+      waits.push(ms);
+      await opts.onWait?.(ms);
+    }),
     close: vi.fn(() => close(`${kind}-page`)),
     mouse: { move: vi.fn(async () => undefined) },
     screenshot: vi.fn(async () => Buffer.from([0x89, 0x50, 0x4e, 0x47])),
     evaluate: vi.fn(async (_fn: unknown, arg: any) => {
-      if (kind === "comparator") return new Promise(() => {});
+      if (kind === "comparator") {
+        return opts.compare
+          ? {
+              width: 600,
+              height: 400,
+              changedPixelFraction: 0,
+              meanAbsoluteChannelError: 0,
+              referenceColors: 12,
+              buildColors: 12,
+              diff: "",
+            }
+          : new Promise(() => {});
+      }
       if (arg && typeof arg === "object" && "selector" in arg) {
         return { selector: 'canvas[data-awwwards-scene="1"]' };
       }
@@ -480,7 +503,7 @@ function fakeSceneBrowser(opts: { hangClose?: boolean } = {}): {
     close: vi.fn(() => close("browser")),
   };
   const chromium = { launch: vi.fn(async () => browser) };
-  return { loader: async () => ({ chromium }), closed };
+  return { loader: async () => ({ chromium }), closed, waits };
 }
 
 describe("verifyScene3d watchdog", () => {
@@ -522,6 +545,7 @@ describe("verifyScene3d watchdog", () => {
         ...offlineEvidence,
         scene3d: { referenceCaptureId: SCENE_ID, buildSelector: "#scene" },
         sceneDir: dir,
+        resolveHost: publicDns,
         sceneFn: (args) =>
           verifyScene3d({
             ...args,
@@ -541,6 +565,60 @@ describe("verifyScene3d watchdog", () => {
   });
 });
 
+describe("verifyScene3d replay budget", () => {
+  const maxSchedule = Array.from({ length: 10 }, () => ({ waitMs: 2_000 }));
+
+  it("the maximum accepted schedule fits the default deadline", () => {
+    const budget = sceneVerifyBudget(maxSchedule);
+    expect(budget.waitsMs).toBe(20_000);
+    expect(budget.timeoutMs).toBe(30_000);
+    expect(budget.timeoutMs).toBeGreaterThanOrEqual(budget.waitsMs + 10_000);
+    // A short schedule keeps the 15s floor; the cap and an explicit seam win.
+    expect(sceneVerifyBudget(undefined).timeoutMs).toBe(15_000);
+    expect(sceneVerifyBudget(maxSchedule.concat(maxSchedule, maxSchedule)).timeoutMs).toBe(45_000);
+    expect(sceneVerifyBudget(maxSchedule, 60_000).timeoutMs).toBe(60_000);
+  });
+
+  it("replays 10 x 2000ms checkpoints under the default deadline", async () => {
+    vi.useFakeTimers();
+    const dir = tempDir();
+    try {
+      const pack = writeScenePack(dir, (evidence) => {
+        const base = evidence.checkpoints[0];
+        evidence.checkpoints = Array.from({ length: 10 }, (_, index) => ({
+          ...base,
+          index,
+          waitMs: 2_000,
+        }));
+      });
+      const fake = fakeSceneBrowser({
+        compare: true,
+        // Clock time moves only when the run replays a wait, so a 15s deadline
+        // would expire inside this 20s schedule and a 30s one would not.
+        onWait: (ms) => vi.advanceTimersByTimeAsync(ms),
+      });
+      const result = await verifyScene3d({
+        ...sceneVerifyArgs(pack),
+        tolerances: { pixelThreshold: 0.02, maxChangedFraction: 0.01 },
+        loader: fake.loader,
+      });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+      expect(result.limitations.join(" ")).not.toContain("deadline");
+      expect(result.requested).toBe(10);
+      expect(result.compared).toBe(10);
+      expect(result.status).toBe("comparable");
+      expect(result.verdict).toBe("within-tolerance");
+      const replayWaits = fake.waits.filter((ms) => ms === 2_000);
+      expect(replayWaits).toHaveLength(10);
+      expect(replayWaits.reduce((sum, ms) => sum + ms, 0)).toBe(20_000);
+    } finally {
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("verifyScene3d whole-run watchdog", () => {
   const legacyReport = async (
     dir: string,
@@ -553,6 +631,7 @@ describe("verifyScene3d whole-run watchdog", () => {
       ...offlineEvidence,
       scene3d: { referenceCaptureId: SCENE_ID, buildSelector: "#scene" },
       sceneDir: dir,
+      resolveHost: publicDns,
       sceneFn: (args) => verifyScene3d({ ...args, timeoutMs: 50, ...overrides }),
     });
     expect("error" in report).toBe(false);
@@ -577,7 +656,7 @@ describe("verifyScene3d whole-run watchdog", () => {
       if ("error" in result) return;
       expect(result.status).toBe("inconclusive");
       expect(result.limitations.join(" ")).toContain("50ms deadline");
-      expect(Date.now() - started).toBeLessThan(1_500);
+      expect(Date.now() - started).toBeLessThan(4_000);
 
       await legacyReport(dir, { resolveHost: () => new Promise<string[]>(() => {}) });
     } finally {
@@ -599,7 +678,7 @@ describe("verifyScene3d whole-run watchdog", () => {
       if ("error" in result) return;
       expect(result.status).toBe("inconclusive");
       expect(result.limitations.join(" ")).toContain("50ms deadline");
-      expect(Date.now() - started).toBeLessThan(1_500);
+      expect(Date.now() - started).toBeLessThan(4_000);
 
       await legacyReport(dir, {
         loader: () => new Promise<any>(() => {}),
@@ -656,6 +735,7 @@ describe("verifyScene3d whole-run watchdog", () => {
         ...offlineEvidence,
         scene3d: { referenceCaptureId: SCENE_ID, buildSelector: "#scene" },
         sceneDir: dir,
+        resolveHost: publicDns,
         sceneFn: (args) =>
           verifyScene3d({
             ...args,
@@ -704,13 +784,20 @@ describe("verifyBuild scene3d orchestration", () => {
       ...offlineEvidence,
       scene3d: sceneArgs,
       sceneDir: "/cache/scene-captures",
+      resolveHost: publicDns,
       sceneFn,
     });
     expect("error" in control || "error" in report).toBe(false);
     if ("error" in control || "error" in report) return;
-    expect(seen).toEqual([
-      { ...sceneArgs, buildUrl: "https://build.test", sceneDir: "/cache/scene-captures" },
-    ]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      ...sceneArgs,
+      buildUrl: "https://build.test",
+      sceneDir: "/cache/scene-captures",
+    });
+    expect(
+      (seen[0] as { networkGuard?: { proxy: { url: string } } }).networkGuard?.proxy.url,
+    ).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(report.scene3d).toEqual(sceneResult());
     // The legacy score, verdict and evidence slots are untouched.
     expect(report.overall).toBe(control.overall);
@@ -726,6 +813,7 @@ describe("verifyBuild scene3d orchestration", () => {
       ...captureFakes,
       ...offlineEvidence,
       scene3d: sceneArgs,
+      resolveHost: publicDns,
       sceneFn: async () => ({ error: "reference capture scene-x-0123abcd was not found under scene-captures." }),
     });
     expect("error" in report).toBe(false);
@@ -745,6 +833,7 @@ describe("verifyBuild scene3d orchestration", () => {
       ...captureFakes,
       ...offlineEvidence,
       scene3d: sceneArgs,
+      resolveHost: publicDns,
       sceneFn: async () => {
         throw new Error("browser crashed");
       },

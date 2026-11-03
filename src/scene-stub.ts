@@ -5,7 +5,7 @@
 // the caller writes it. Everything not proven by the evidence is an authored
 // default, listed in the returned provenance.
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative } from "node:path";
+import { extname, isAbsolute, join, relative } from "node:path";
 import type { SceneEvidence, SceneResource } from "./scene-capture.js";
 
 export const SCENE_STUB_LIMITS = {
@@ -582,9 +582,14 @@ function html(value: string): string {
 /** JSON inside a generated module: "<" cannot start a tag or terminate markup. */
 const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, "\\u003c");
 
-function frameBasename(path: unknown): string | null {
-  if (typeof path !== "string" || !path) return null;
-  const name = basename(path).replace(/[^\w.-]+/g, "-");
+// node:path.basename only knows the host separator, so a pack captured on
+// Windows and built on POSIX (or the reverse) would keep a whole path in the
+// frame reference. Split on both separators instead.
+function frameBasename(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null;
+  const trimmed = value.replace(/[\\/]+$/, "");
+  const leaf = trimmed.slice(Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\")) + 1);
+  const name = leaf.replace(/[^\w.-]+/g, "-");
   return name && name !== "." && name !== ".." ? name : null;
 }
 

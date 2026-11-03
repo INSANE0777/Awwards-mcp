@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { createRequire } from "node:module";
 import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
@@ -829,6 +830,200 @@ async function forwardProxyTunnel(
   socket.on("error", () => upstream.destroy());
 }
 
+// ---- shared guard -------------------------------------------------------
+// verify_build owns one guard for a whole scene-enabled run: the same gate and
+// proxy cover the legacy structure/scroll/hover/component/perf acquisitions
+// and the scene gate, so no legacy path can reach the network unguarded.
+
+export interface SceneNetworkGuard {
+  gate: SceneUrlGate;
+  proxy: SceneProxy;
+  close(): Promise<void>;
+}
+
+export async function createSceneNetworkGuard(
+  opts: {
+    resolveHost?: (hostname: string) => Promise<string[]>;
+    allowPrivateOrigins?: string[];
+  } = {},
+): Promise<SceneNetworkGuard | { error: string }> {
+  const origins = normalizeScenePrivateOrigins(opts.allowPrivateOrigins);
+  if ("error" in origins) return origins;
+  const gate = createSceneUrlGate(opts.resolveHost ?? defaultSceneResolveHost, origins.origins);
+  try {
+    const proxy = await startSceneProxy(gate);
+    return { gate, proxy, close: () => proxy.close() };
+  } catch {
+    return { error: "could not start the local network guard (loopback proxy)" };
+  }
+}
+
+function pinnedSceneLookup(address: string): (hostname: string, options: any, callback?: any) => void {
+  const family = address.includes(":") ? 6 : 4;
+  return (_hostname: string, options: any, callback?: any) => {
+    const done = typeof options === "function" ? options : callback;
+    const opts = typeof options === "function" ? {} : (options ?? {});
+    if (opts.all) done(null, [{ address, family }]);
+    else done(null, address, family);
+  };
+}
+
+function firstHeader(
+  headers: Record<string, string | string[] | undefined>,
+  name: string,
+): string | undefined {
+  const raw = headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+interface GuardedHop {
+  status: number;
+  location?: string;
+  body?: string;
+}
+
+// One HTTP(S) request dialed at the gate-validated address (never a re-resolution),
+// so the HTML read in verify_build cannot be rebound between check and connect.
+function requestGuardedHop(
+  url: URL,
+  address: string,
+  timeoutMs: number,
+  maxBytes: number,
+): Promise<GuardedHop | { error: string }> {
+  return new Promise((resolve) => {
+    const secure = url.protocol === "https:";
+    const host = url.hostname.replace(/^\[|\]$/g, "");
+    let settled = false;
+    const finish = (value: GuardedHop | { error: string }): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const request = (secure ? httpsRequest : httpRequest)(
+      {
+        host,
+        port: Number(url.port || (secure ? 443 : 80)),
+        path: `${url.pathname}${url.search}`,
+        method: "GET",
+        headers: {
+          accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+          "accept-encoding": "identity",
+          "user-agent": "verify-build/1.0 (research tooling)",
+        },
+        lookup: pinnedSceneLookup(address),
+        // No pooled socket may outlive this request.
+        agent: false,
+        ...(secure ? { servername: host } : {}),
+      } as any,
+      (response: any) => {
+        const status = response.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          const location = firstHeader(response.headers ?? {}, "location");
+          response.resume();
+          finish(location ? { status, location } : { status });
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          response.resume();
+          finish({ status });
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        response.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > maxBytes) {
+            response.destroy();
+            finish({ error: `the HTML body exceeded ${Math.round(maxBytes / 1024)} KiB` });
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on("end", () => finish({ status, body: Buffer.concat(chunks).toString("utf8") }));
+        response.on("error", () => finish({ error: "the response stream failed" }));
+      },
+    );
+    request.setTimeout(timeoutMs, () => {
+      request.destroy();
+      finish({ error: `the HTML request timed out after ${timeoutMs}ms` });
+    });
+    request.on("error", (err: Error) => finish({ error: err.message }));
+    request.end();
+  });
+}
+
+export const SCENE_GUARDED_HTML = {
+  timeoutMs: 15_000,
+  maxBytes: 5 * 1024 * 1024,
+  maxRedirects: 5,
+} as const;
+
+/**
+ * Guarded raw-HTML GET for verify_build's anti-pattern evidence. Every hop,
+ * including a redirect, passes the same URL gate and is dialed at the address
+ * the gate validated. A blocked hop returns {error} and no request is made.
+ */
+export async function fetchSceneHtml(
+  gate: SceneUrlGate,
+  raw: string,
+  opts?: { timeoutMs?: number; maxBytes?: number },
+): Promise<string | { error: string }> {
+  let current: URL;
+  try {
+    current = new URL(raw);
+  } catch {
+    return { error: `invalid URL ${redactSceneUrl(raw)}` };
+  }
+  const deadline =
+    Date.now() + Math.max(1, Math.round(opts?.timeoutMs ?? SCENE_GUARDED_HTML.timeoutMs));
+  const maxBytes = Math.max(1, Math.round(opts?.maxBytes ?? SCENE_GUARDED_HTML.maxBytes));
+  for (let redirects = 0; redirects <= SCENE_GUARDED_HTML.maxRedirects; redirects++) {
+    if (!isHttpUrl(current.href)) {
+      return { error: `${redactSceneUrl(current.href)} is not an http(s) URL` };
+    }
+    let allowed = false;
+    try {
+      allowed = await gate.allows(current.href);
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) {
+      return {
+        error:
+          `refusing to fetch ${redactSceneUrl(current.href)}: the host resolves to a loopback, ` +
+          "link-local, private, metadata or reserved address, or the URL is not http(s)",
+      };
+    }
+    const secure = current.protocol === "https:";
+    const address = await gate.connectAddress(
+      current.hostname,
+      Number(current.port || (secure ? 443 : 80)),
+      [current.origin],
+    );
+    if (!address) {
+      return { error: `refusing to fetch ${redactSceneUrl(current.href)}: no validated address` };
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { error: "the HTML fetch deadline expired" };
+    const hop = await requestGuardedHop(current, address, remaining, maxBytes);
+    if ("error" in hop) return hop;
+    if (hop.status >= 300 && hop.status < 400) {
+      if (!hop.location) return { error: `HTTP ${hop.status} without a location header` };
+      try {
+        current = new URL(hop.location, current);
+      } catch {
+        return { error: "the redirect target is not a valid URL" };
+      }
+      continue;
+    }
+    if (hop.body === undefined) {
+      return { error: `HTTP ${hop.status} fetching ${redactSceneUrl(current.href)}` };
+    }
+    return hop.body;
+  }
+  return { error: `more than ${SCENE_GUARDED_HTML.maxRedirects} redirects` };
+}
+
 // ---- checkpoints and assets ---------------------------------------------
 
 export function normalizeSceneCheckpoints(
@@ -1037,9 +1232,10 @@ export type SceneCanvasProblem =
   | "invalid-selector"
   | "selector-not-found"
   | "selector-not-canvas"
-  | "no-canvas";
+  | "no-canvas"
+  | "marker-not-unique";
 
-export const SCENE_CANVAS_PICK = function (arg: { selector: string }): {
+export const SCENE_CANVAS_PICK = function (arg: { selector: string; marker: string }): {
   canvases: number;
   selector: string;
   rect: { x: number; y: number; width: number; height: number } | null;
@@ -1097,9 +1293,30 @@ export const SCENE_CANVAS_PICK = function (arg: { selector: string }): {
   if (!chosen) {
     return { canvases, selector: "", rect: null, backing: null, dpr: 0, problem };
   }
+  // Page content can pre-set or duplicate any attribute value, so the marker
+  // value is generated outside the page and the marked element must stay the
+  // only match. A selector that is not provably single is refused, never
+  // resolved to whichever element the page happens to put first.
+  const marker = String((arg && arg.marker) || "");
+  let selector = "";
   try {
-    chosen.setAttribute(attr, "1");
+    chosen.setAttribute(attr, marker);
+    selector = "canvas[" + attr + '="' + marker + '"]';
   } catch {}
+  let matches = 0;
+  try {
+    matches = selector ? doc.querySelectorAll(selector).length : 0;
+  } catch {}
+  if (!marker || matches !== 1) {
+    return {
+      canvases,
+      selector: "",
+      rect: null,
+      backing: null,
+      dpr: 0,
+      problem: "marker-not-unique",
+    };
+  }
   let rect: { x: number; y: number; width: number; height: number } | null = null;
   try {
     const r = chosen.getBoundingClientRect();
@@ -1113,7 +1330,7 @@ export const SCENE_CANVAS_PICK = function (arg: { selector: string }): {
   try {
     dpr = Number(g.devicePixelRatio) || 0;
   } catch {}
-  return { canvases, selector: "canvas[" + attr + '="1"]', rect, backing, dpr, problem: "" };
+  return { canvases, selector, rect, backing, dpr, problem: "" };
 };
 
 export const SCENE_PROBE = function (arg: { canvasSelector: string; scrollRoot: string }): {
@@ -3298,6 +3515,8 @@ export async function captureScene3d(
 
       const picked = (await page.evaluate(SCENE_CANVAS_PICK, {
         selector: opts.canvasSelector ?? "",
+        // Generated outside the page: page content cannot pre-set or guess it.
+        marker: randomUUID(),
       })) as {
         canvases?: number;
         selector?: string;
@@ -3316,7 +3535,9 @@ export async function captureScene3d(
               ? "matched an element that is not a <canvas>."
               : pickProblem === "selector-not-found"
                 ? "matched no element."
-                : "has no visible <canvas>.";
+                : pickProblem === "marker-not-unique"
+                  ? "could not be tagged uniquely for capture; refusing to guess which canvas was chosen."
+                  : "has no visible <canvas>.";
         return { error: `Scene capture failed: ${label} ${detail}` };
       }
       const usedSelector = String(picked.selector);

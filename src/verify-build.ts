@@ -22,6 +22,7 @@ import type {
   Scene3dVerifyResult,
   VerifySceneFn,
 } from "./scene-verify.js";
+import type { SceneNetworkGuard } from "./scene-capture.js";
 
 export interface MotionCensusInput {
   counts: Record<string, number>;
@@ -418,6 +419,33 @@ function sceneErrorResult(reason: string): Scene3dVerifyResult {
   };
 }
 
+// Scene-enabled verification may not make an unguarded request. When the guard
+// refuses either URL, no page is acquired and this report says so instead of
+// inventing bands or motion; the scene gate carries the same reason.
+function sceneGuardUnavailableReport(
+  args: { buildUrl: string; referenceUrl: string },
+  reason: string,
+): VerifyReport {
+  const unavailable = (what: string): string => `${what}: not acquired (${reason})`;
+  return {
+    buildUrl: args.buildUrl,
+    referenceUrl: args.referenceUrl,
+    bands: { score: 0, matched: [], refOnly: [], buildOnly: [] },
+    motion: { score: 0, refFingerprint: "k1", buildFingerprint: "k1" },
+    overall: 0,
+    verdict: "fail",
+    evidence: [
+      unavailable("Bands"),
+      unavailable("Motion"),
+      "Overall: 0/100 → FAIL (no page was acquired)",
+      unavailable("Hover"),
+      unavailable("perf"),
+      unavailable("anti-patterns"),
+    ],
+    scene3d: sceneErrorResult(reason),
+  };
+}
+
 // PerfMeasurement (perf-live.ts renamed aegon's collector fields) → evidence
 // line. Field mapping: fps→fps, droppedFrames→dropped, longTaskCount→
 // longTasks, layoutThrashCount→thrash.
@@ -470,13 +498,15 @@ function fetchBuildHtml(
 // Static scan of the fetched build HTML: finding count + worst rule by
 // SEVERITY_WEIGHTS (findings without a severity — tier rows — weigh as INFO;
 // first finding wins ties). Every failure degrades to a note.
+type HtmlFetchFn = (url: string) => Promise<string | { error: string }>;
+
 async function rulesEvidenceLine(
-  fetchFn: typeof fetch,
+  fetchHtml: HtmlFetchFn,
   rulesFn: VerifyRulesFn,
   buildUrl: string,
 ): Promise<string> {
   try {
-    const html = await fetchBuildHtml(fetchFn, buildUrl);
+    const html = await fetchHtml(buildUrl);
     if (typeof html !== "string")
       return `anti-patterns: not scanned (${html.error})`;
     const findings = await rulesFn({ html });
@@ -516,27 +546,93 @@ export async function verifyBuild(
     perfFn?: VerifyPerfFn;
     rulesFn?: VerifyRulesFn;
     fetchFn?: typeof fetch;
+    // TEST ONLY seams for the scene network guard; not exposed by a schema.
+    allowPrivateOrigins?: string[];
+    resolveHost?: (hostname: string) => Promise<string[]>;
+    /** TEST ONLY: Playwright loader shared by the default acquisitions and the scene gate. */
+    loader?: () => Promise<any>;
   },
 ): Promise<VerifyReport | { error: string }> {
   // One shared wait/viewport profile for every capture of a verification run.
-  const opts = { waitStrategy: args.waitStrategy, viewport: args.viewport };
+  const networkOpts = { waitStrategy: args.waitStrategy, viewport: args.viewport };
+
+  // Scene-enabled verification owns ONE guard: it exists before any
+  // acquisition, every browser is launched behind its proxy, and the HTML GET
+  // dials only the address it validated. A blocked URL means no request at all.
+  let sceneGuard: SceneNetworkGuard | undefined;
+  let guardedHtmlFetch: HtmlFetchFn | undefined;
+  if (args.scene3d) {
+    let reason = "";
+    try {
+      const sceneNetwork = await import("./scene-capture.js");
+      const created = await sceneNetwork.createSceneNetworkGuard({
+        resolveHost: args.resolveHost,
+        allowPrivateOrigins: args.allowPrivateOrigins,
+      });
+      if ("error" in created) {
+        reason = created.error;
+      } else {
+        sceneGuard = created;
+        guardedHtmlFetch = (url) => sceneNetwork.fetchSceneHtml(created.gate, url);
+        // Sequential on purpose: a refused reference URL must not spend a
+        // lookup on the build URL.
+        const refOk = await created.gate.allows(args.referenceUrl).catch(() => false);
+        const buildOk = refOk
+          ? await created.gate.allows(args.buildUrl).catch(() => false)
+          : false;
+        if (!refOk || !buildOk) {
+          reason =
+            `refusing scene-enabled verification: ${!refOk ? "the reference URL" : "the build URL"} ` +
+            "does not resolve exclusively to public addresses (or is not http(s)); no request was made.";
+        }
+      }
+    } catch (err) {
+      reason = `could not start the scene3d network guard: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (reason) {
+      if (sceneGuard) await sceneGuard.close().catch(() => undefined);
+      return sceneGuardUnavailableReport(args, reason);
+    }
+  }
+  const proxyServer = sceneGuard?.proxy.url;
   const structureFn =
     args.structureFn ??
     ((url: string) =>
       import("./structure.js").then((m) =>
-        m.analyzePageStructure(url, undefined, undefined, opts),
+        m.analyzePageStructure(url, args.loader, undefined, {
+          ...networkOpts,
+          ...(proxyServer ? { proxyServer } : {}),
+        }),
       ));
   const scrollFn =
     args.scrollFn ??
-    ((url: string) => import("./census.js").then((m) => m.captureScrollCensus(url, opts)));
+    ((url: string) =>
+      import("./census.js").then((m) =>
+        m.captureScrollCensus(url, {
+          ...networkOpts,
+          ...(args.loader ? { loader: args.loader } : {}),
+          ...(proxyServer ? { proxyServer } : {}),
+        }),
+      ));
   const hoverFn =
     args.hoverFn ??
     ((url: string) =>
-      import("./hover-census.js").then((m) => m.captureHoverCensus(url, opts)));
+      import("./hover-census.js").then((m) =>
+        m.captureHoverCensus(url, {
+          ...networkOpts,
+          ...(args.loader ? { loader: args.loader } : {}),
+          ...(proxyServer ? { proxyServer } : {}),
+        }),
+      ));
   const perfFn =
     args.perfFn ??
     ((url: string, perfOpts?: { seconds?: number }) =>
-      import("./perf-live.js").then((m) => m.measureRuntime(url, perfOpts)));
+      import("./perf-live.js").then((m) =>
+        m.measureRuntime(url, {
+          ...perfOpts,
+          ...(proxyServer ? { proxyServer } : {}),
+        }),
+      ));
   const rulesFn =
     args.rulesFn ??
     ((inputs: { html: string }) =>
@@ -545,9 +641,20 @@ export async function verifyBuild(
     args.componentFn ??
     ((url: string) =>
       import("./component.js").then((m) =>
-        m.captureComponent(url, { selector: "body", maxNodes: 1200, viewport: args.viewport }),
+        m.captureComponent(url, {
+          selector: "body",
+          maxNodes: 1200,
+          viewport: args.viewport,
+          ...(args.loader ? { loader: args.loader } : {}),
+          ...(proxyServer ? { proxyServer } : {}),
+        }),
       ));
   const fetchFn = args.fetchFn ?? fetch;
+  // Injected fetch is an offline test seam; the production default is the
+  // guarded reader whenever a scene guard exists.
+  const fetchHtml: HtmlFetchFn = args.fetchFn
+    ? (url) => fetchBuildHtml(args.fetchFn!, url)
+    : (guardedHtmlFetch ?? ((url) => fetchBuildHtml(fetch, url)));
   try {
     // Structure scan first: bands gate everything downstream, so a page that
     // won't load is reported before any motion capture spends time on it.
@@ -618,7 +725,7 @@ export async function verifyBuild(
     // one-line note. Runs only on this happy path — the early {error} returns
     // above (structure/scroll) never reach it, so measurement is never
     // started for a run that already failed.
-    const rulesLine = await rulesEvidenceLine(fetchFn, rulesFn, args.buildUrl);
+    const rulesLine = await rulesEvidenceLine(fetchHtml, rulesFn, args.buildUrl);
     const perfLine = await perfEvidenceLine(perfFn, args.buildUrl);
 
     // D2 opt-in dom-structure diff: a third capture pair (body subtree,
@@ -652,12 +759,18 @@ export async function verifyBuild(
       const sceneFn =
         args.sceneFn ??
         ((sceneArgs) =>
-          import("./scene-verify.js").then((m) => m.verifyScene3d(sceneArgs)));
+          import("./scene-verify.js").then((m) =>
+            m.verifyScene3d({
+              ...sceneArgs,
+              ...(args.loader ? { loader: args.loader } : {}),
+            }),
+          ));
       try {
         const result = await sceneFn({
           ...args.scene3d,
           buildUrl: args.buildUrl,
           sceneDir: args.sceneDir,
+          ...(sceneGuard ? { networkGuard: sceneGuard } : {}),
         });
         scene3d = "error" in result ? sceneErrorResult(result.error) : result;
       } catch (err) {
@@ -696,6 +809,8 @@ export async function verifyBuild(
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    if (sceneGuard) await sceneGuard.close().catch(() => undefined);
   }
 }
 

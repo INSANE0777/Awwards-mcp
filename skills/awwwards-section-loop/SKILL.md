@@ -177,16 +177,21 @@ verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
   `capture_scene_3d` pack on the build canvas as a separate gate with its own
   status/verdict; it never upgrades the legacy band pass, unstable capture
   frames are rejected, and its build URL must resolve publicly (loopback is
-  refused).
+  refused). It preflights both URLs before the legacy scans and makes zero
+  requests when either is private; the deadline is the replayed checkpoint
+  waits + 10 s headroom (floor 15 s, cap 45 s), and the canvas gets a per-run
+  marker so duplicate or pre-marked decoys are refused.
 - `audit_url compact:true` — quick perf and anti-pattern checks when you only
   need the summary, not the full evidence.
 - `capture_pose_3d` - canvas frames + synthesized camera guidance for
-  shared-canvas units (step 0); no camera transforms are recovered.
+  shared-canvas units (step 0); no camera transforms are recovered, and the
+  generated stub dedupes same-index frame loads and discards stale decodes.
 - `capture_scene_3d` + `build_scene_stub` - opt-in Three.js adapter for
   shared canvases: reachable globals only, with primitives, standard/basic
   materials and a perspective camera from its exact matrix reconstructed.
   Captured controls are never recreated and stay unresolved. Module-local
-  scenes, parent transforms and unbound textures are lost.
+  scenes, parent transforms and unbound textures are lost, and `scene.json`
+  frame references are basenames extracted from either Windows or POSIX paths.
 - `capture_scene_3d` spector adapter - optional `spectorjs@0.9.33`; captures one
   WebGL frame with command counts/statuses and capped shader source. It needs a
   drawing frame, transfers no arguments/state/raw capture, and a missing package

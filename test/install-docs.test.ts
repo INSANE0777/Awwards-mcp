@@ -34,7 +34,7 @@ describe("install documentation", () => {
     expect(text).toContain("npm run build && npm run smoke:browser");
     expect(text).toContain("127.0.0.1");
     expect(text).toContain("browser-smoke: pack + global install");
-    expect(text).toContain("browser-smoke: connected to awwwards-mcp, 39 tools");
+    expect(text).toContain("browser-smoke: connected to awwwards-mcp, 41 tools");
     expect(text).toContain("browser-smoke: analyze_page_structure -> 4 bands");
     expect(text).toContain("browser-smoke: capture_live_site -> image/png");
     expect(text).toContain("browser-smoke: PASS");

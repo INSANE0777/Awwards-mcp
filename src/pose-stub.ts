@@ -115,10 +115,24 @@ const material = new THREE.MeshBasicMaterial();
 scene.add(new THREE.Mesh(geometry, material));
 
 const textureLoader = new THREE.TextureLoader();
+// Frame loads race: every request gets a monotonically increasing id, and only
+// the newest one may swap the map. Re-requesting the index already requested is
+// a no-op, so a scrub tick cannot start a duplicate decode of the same frame.
+let requestedFrame = -1;
+let frameRequest = 0;
 function showFrame(i) {
-  const url = FRAMES[Math.max(0, Math.min(FRAMES.length - 1, Math.round(i)))];
-  if (!url) return;
+  const index = Math.max(0, Math.min(FRAMES.length - 1, Math.round(i)));
+  const url = FRAMES[index];
+  if (!url || index === requestedFrame) return;
+  requestedFrame = index;
+  const request = ++frameRequest;
   textureLoader.load(url, function (tex) {
+    if (request !== frameRequest) {
+      // A newer frame was requested while this one decoded: it must not
+      // overwrite the newest frame or re-render with the older texture.
+      tex.dispose();
+      return;
+    }
     tex.colorSpace = THREE.SRGBColorSpace;
     if (material.map && material.map !== tex) material.map.dispose();
     material.map = tex;

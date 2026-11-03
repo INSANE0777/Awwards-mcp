@@ -252,6 +252,42 @@ describe("build_scene_stub core", () => {
     expect(first.unresolved.some((row) => row.evidenceRef === "asset-1")).toBe(true);
   });
 
+  it("extracts frame basenames from Windows and POSIX paths in either host", async () => {
+    const root = tmpDir();
+    const base = evidence().checkpoints![0]!;
+    // An exported pack may be written on Windows and read on POSIX (or the
+    // reverse); scene.json must still carry only the file name.
+    const pack = evidence({
+      checkpoints: [
+        {
+          ...base,
+          index: 0,
+          files: {
+            canvas: "C:\\captures\\frames\\frame-01-canvas.png",
+            viewport: "C:\\captures\\frames\\frame-01-viewport.png",
+          },
+        },
+        {
+          ...base,
+          index: 1,
+          files: {
+            canvas: "/var/captures/frames/frame-02-canvas.png",
+            viewport: "/var/captures/frames/frame-02-viewport.png",
+          },
+        },
+      ],
+    });
+    const { sceneDir, evidencePath } = writePack(root, pack);
+
+    const result = await buildSceneStub({ evidencePath, sceneDir });
+    if ("error" in result) throw new Error(result.error);
+    const scene = JSON.parse(fileOf(result, "scene.json"));
+    expect(scene.frames).toEqual([
+      { index: 0, scrollRatio: 0, canvas: "frame-01-canvas.png", viewport: "frame-01-viewport.png" },
+      { index: 1, scrollRatio: 0, canvas: "frame-02-canvas.png", viewport: "frame-02-viewport.png" },
+    ]);
+  });
+
   it("switches to reconstructed-subset with GLTFLoader when a glb model is bound", async () => {
     const root = tmpDir();
     const { sceneDir, evidencePath } = writePack(root);

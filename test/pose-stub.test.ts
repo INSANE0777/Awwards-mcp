@@ -181,6 +181,80 @@ describe("buildPoseStubHtml input validation", () => {
   });
 });
 
+// Runs the emitted frame loader exactly as the browser would, minus three.js:
+// a fake TextureLoader records each load and hands back its callback, so a test
+// can resolve textures in any order.
+type FakeTexture = { colorSpace: string; disposed: boolean; dispose: () => void };
+function texture(): FakeTexture {
+  return {
+    colorSpace: "",
+    disposed: false,
+    dispose() {
+      this.disposed = true;
+    },
+  };
+}
+
+function frameLoader(frames: string[]) {
+  const html = buildPoseStubHtml(grid());
+  const start = html.indexOf("const textureLoader");
+  const end = html.indexOf("// Linear interpolation");
+  if (start < 0 || end <= start) throw new Error("showFrame source not found in the stub");
+  const loads: { url: string; load: (tex: FakeTexture) => void }[] = [];
+  class FakeTextureLoader {
+    load(url: string, onLoad: (tex: FakeTexture) => void) {
+      loads.push({ url, load: onLoad });
+    }
+  }
+  const material: { map: FakeTexture | null; needsUpdate: boolean } = { map: null, needsUpdate: false };
+  const renders: number[] = [];
+  const showFrame = new Function(
+    "THREE",
+    "FRAMES",
+    "material",
+    "renderer",
+    "scene",
+    "camera",
+    html.slice(start, end) + "\nreturn showFrame;",
+  )(
+    { TextureLoader: FakeTextureLoader, SRGBColorSpace: "srgb" },
+    frames,
+    material,
+    { render: () => renders.push(1) },
+    {},
+    {},
+  ) as (i: number) => void;
+  return { showFrame, loads, material, renders };
+}
+
+describe("pose stub frame loading", () => {
+  const frames = ["f0", "f1", "f2", "f3", "f4", "f5"];
+
+  it("loads a texture once per requested frame index", () => {
+    const { showFrame, loads } = frameLoader(frames);
+    showFrame(0);
+    showFrame(0);
+    showFrame(0.1); // rounds to the index already requested
+    expect(loads.map((l) => l.url)).toEqual(["f0"]);
+  });
+
+  it("drops a stale texture that finishes after a newer frame", () => {
+    const { showFrame, loads, material, renders } = frameLoader(frames);
+    showFrame(1);
+    showFrame(4);
+    const older = texture();
+    const newer = texture();
+    loads[1]!.load(newer);
+    expect(material.map).toBe(newer);
+    expect(renders).toHaveLength(1);
+    loads[0]!.load(older); // frame 1 resolving after frame 4 was shown
+    expect(material.map).toBe(newer);
+    expect(older.disposed).toBe(true);
+    expect(newer.disposed).toBe(false);
+    expect(renders).toHaveLength(1); // the stale callback did not repaint either
+  });
+});
+
 describe("pose handlers", () => {
   it("capture_pose_3d returns the injected grid as JSON", async () => {
     const h = createHandlers(deps({ pose3dFn: async () => grid() }));

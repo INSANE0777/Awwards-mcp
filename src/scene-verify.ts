@@ -27,6 +27,7 @@ import {
   startSceneProxy,
   type SceneCheckpointResult,
   type SceneEvidence,
+  type SceneNetworkGuard,
   type SceneRect,
 } from "./scene-capture.js";
 import { resolveViewport } from "./viewport.js";
@@ -39,9 +40,48 @@ export const SCENE_VERIFY_LIMITS = {
   scrollMatchPx: 2,
   /** Shared bound for closing all run resources; not a per-resource budget. */
   closeGraceMs: 3_000,
-  /** Whole run (page acquisition + comparator decode); test seams may shorten it. */
+  /** Floor for the whole-run deadline (page acquisition + comparator decode). */
   timeoutMs: 15_000,
+  /** Headroom over replayed checkpoint waits for acquisition, shots and comparison. */
+  replayHeadroomMs: 10_000,
+  /** Hard cap for a computed whole-run deadline. */
+  maxTimeoutMs: 45_000,
 } as const;
+
+export interface Scene3dVerifyBudget {
+  /** Whole-run deadline in milliseconds. */
+  timeoutMs: number;
+  /** Sum of the replayed checkpoint waits the deadline covers. */
+  waitsMs: number;
+  /** Why the deadline is this value; quoted in timeout limitations. */
+  basis: string;
+}
+
+// The capture accepts 10 checkpoints x 2000ms waits, which alone outlives the
+// 15s floor, so the deadline is computed from the schedule actually replayed.
+// An explicit override (test seam) always wins and is never extended or capped.
+export function sceneVerifyBudget(
+  checkpoints: ReadonlyArray<{ waitMs?: number }> | undefined,
+  overrideMs?: number,
+): Scene3dVerifyBudget {
+  const waitsMs = (checkpoints ?? []).reduce(
+    (sum, checkpoint) =>
+      sum + Math.max(0, Math.min(SCENE_LIMITS.maxWaitMs, Number(checkpoint?.waitMs) || 0)),
+    0,
+  );
+  const override = Math.round(Number(overrideMs) || 0);
+  if (override > 0) {
+    return { timeoutMs: override, waitsMs, basis: "an explicit timeoutMs override" };
+  }
+  return {
+    timeoutMs: Math.min(
+      SCENE_VERIFY_LIMITS.maxTimeoutMs,
+      Math.max(SCENE_VERIFY_LIMITS.timeoutMs, waitsMs + SCENE_VERIFY_LIMITS.replayHeadroomMs),
+    ),
+    waitsMs,
+    basis: `${waitsMs}ms of checkpoint waits plus ${SCENE_VERIFY_LIMITS.replayHeadroomMs}ms acquisition/comparison headroom`,
+  };
+}
 
 export interface Scene3dTolerances {
   /** Per-channel normalized delta (0..1) above which a pixel counts as changed. */
@@ -89,6 +129,8 @@ export interface Scene3dVerifyRequest extends Scene3dVerifyOptions {
   resolveHost?: (hostname: string) => Promise<string[]>;
   /** Exact http(s) origins that may resolve to loopback/private addresses. */
   allowPrivateOrigins?: string[];
+  /** Reuse a caller-owned guard; verify_build owns and closes it. */
+  networkGuard?: SceneNetworkGuard;
   /** TEST ONLY: whole-run deadline override; never exposed by a tool schema. */
   timeoutMs?: number;
 }
@@ -392,16 +434,21 @@ async function prepareArtifactRoot(
 ): Promise<{ root: string } | { error: string }> {
   const verifyDir = join(captureDir, "verify");
   try {
-    const existing = await lstatOrNull(verifyDir);
-    if (existing) {
-      if (existing.isSymbolicLink()) {
-        return { error: "the verify artifact path is a symlink or junction" };
+    let existing = await lstatOrNull(verifyDir);
+    if (!existing) {
+      try {
+        await mkdir(verifyDir, { recursive: false, mode: 0o700 });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       }
-      if (!existing.isDirectory()) {
-        return { error: "the verify artifact path is not a directory" };
-      }
-    } else {
-      await mkdir(verifyDir, { recursive: false, mode: 0o700 });
+      existing = await lstatOrNull(verifyDir);
+    }
+    if (!existing) return { error: "the verify artifact path could not be created" };
+    if (existing.isSymbolicLink()) {
+      return { error: "the verify artifact path is a symlink or junction" };
+    }
+    if (!existing.isDirectory()) {
+      return { error: "the verify artifact path is not a directory" };
     }
     const runDir = join(verifyDir, `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`);
     // Non-recursive and unique: an existing path (including a planted symlink)
@@ -545,11 +592,12 @@ export async function verifyScene3d(
   if (!isHttpUrl(opts.buildUrl ?? "")) {
     return { error: "scene3d verification accepts http:// and https:// build URLs only." };
   }
-  const timeoutMs = Math.max(
-    1,
-    Math.round(Number(opts.timeoutMs) || SCENE_VERIFY_LIMITS.timeoutMs),
-  );
-  const timeoutReason = `scene3d verification exceeded its ${timeoutMs}ms deadline; the run was abandoned and its browser resources were closed.`;
+  const startedAt = Date.now();
+  // The pack has not been read yet, so the watchdog starts on the short-run
+  // floor and is raised to the replay budget once the schedule is known.
+  let budget = sceneVerifyBudget(undefined, opts.timeoutMs);
+  const deadlineReason = (): string =>
+    `scene3d verification exceeded its ${budget.timeoutMs}ms deadline (budget: ${budget.basis}); the run was abandoned and its browser resources were closed.`;
   const closers: Array<{ close(): unknown }> = [];
   let disposed = false;
   const own = <T extends { close(): unknown }>(target: T): T => {
@@ -582,6 +630,24 @@ export async function verifyScene3d(
     ]);
   };
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let resolveDeadline!: (result: Scene3dVerifyResult) => void;
+  const deadlineHit = new Promise<Scene3dVerifyResult>((resolve) => {
+    resolveDeadline = resolve;
+  });
+  const armDeadline = (): void => {
+    if (timer) clearTimeout(timer);
+    // Measured from the run start: raising the budget never adds a fresh full
+    // window on top of the time already spent.
+    const remaining = Math.max(1, startedAt + budget.timeoutMs - Date.now());
+    timer = setTimeout(() => {
+      disposed = true;
+      resolveDeadline(scene3dInconclusive(deadlineReason()));
+    }, remaining);
+    timer.unref?.();
+  };
+  armDeadline();
+
   // The deadline covers every asynchronous step, including pack reads, DNS,
   // artifact setup, frame reads, the Playwright import and the comparison.
   const work = (async (): Promise<Scene3dVerifyResult | { error: string }> => {
@@ -601,6 +667,11 @@ export async function verifyScene3d(
           `the reference pack has ${requested} checkpoints, above the ${SCENE_LIMITS.maxCheckpoints} supported`,
         );
       }
+      const replayBudget = sceneVerifyBudget(evidence.checkpoints, opts.timeoutMs);
+      if (replayBudget.timeoutMs > budget.timeoutMs) {
+        budget = replayBudget;
+        armDeadline();
+      }
 
       const { width, height, ...contextOpts } = resolveViewport(evidence.viewport.name);
       if (width !== evidence.viewport.width || height !== evidence.viewport.height) {
@@ -610,10 +681,9 @@ export async function verifyScene3d(
       }
       const allowedOrigins = normalizeScenePrivateOrigins(opts.allowPrivateOrigins);
       if ("error" in allowedOrigins) return { error: allowedOrigins.error };
-      const gate = createSceneUrlGate(
-        opts.resolveHost ?? defaultSceneResolveHost,
-        allowedOrigins.origins,
-      );
+      const gate =
+        opts.networkGuard?.gate ??
+        createSceneUrlGate(opts.resolveHost ?? defaultSceneResolveHost, allowedOrigins.origins);
       let allowedBuild = false;
       try {
         allowedBuild = await gate.allows(opts.buildUrl);
@@ -656,7 +726,7 @@ export async function verifyScene3d(
         return { error: CAPTURE_INSTALL_HINT };
       }
 
-      const proxy = own(await startSceneProxy(gate));
+      const proxy = opts.networkGuard?.proxy ?? own(await startSceneProxy(gate));
       const browser = own(
         await chromium.launch({ proxy: { server: proxy.url, bypass: "<-loopback>" } }),
       );
@@ -717,6 +787,8 @@ export async function verifyScene3d(
 
       const picked = (await page.evaluate(SCENE_CANVAS_PICK, {
         selector: opts.buildSelector ?? "",
+        // Generated outside the page: page content cannot pre-set or guess it.
+        marker: randomUUID(),
       })) as { selector?: string; problem?: string };
       const pickProblem = String(picked?.problem ?? "");
       if (pickProblem || !picked?.selector) {
@@ -727,7 +799,9 @@ export async function verifyScene3d(
               ? "matched an element that is not a <canvas>."
               : pickProblem === "selector-not-found"
                 ? "matched no element."
-                : "matched no visible canvas.";
+                : pickProblem === "marker-not-unique"
+                  ? "could not be tagged uniquely for verification; refusing to guess which canvas was selected."
+                  : "matched no visible canvas.";
         return scene3dInconclusive(
           `buildSelector ${JSON.stringify(opts.buildSelector ?? "")} ${detail}`,
         );
@@ -1036,7 +1110,7 @@ export async function verifyScene3d(
         });
       }
 
-      if (disposed) return scene3dInconclusive(timeoutReason);
+      if (disposed) return scene3dInconclusive(deadlineReason());
       const cameraNote = evidence.checkpoints.every(
         (checkpoint) => cameraAngleOf(checkpoint, evidence) === null,
       )
@@ -1056,18 +1130,8 @@ export async function verifyScene3d(
     }
   })();
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      work,
-      new Promise<Scene3dVerifyResult>((resolve) => {
-        timer = setTimeout(() => {
-          disposed = true;
-          resolve(scene3dInconclusive(timeoutReason));
-        }, timeoutMs);
-        timer.unref?.();
-      }),
-    ]);
+    return await Promise.race([work, deadlineHit]);
   } finally {
     if (timer) clearTimeout(timer);
     disposed = true;
