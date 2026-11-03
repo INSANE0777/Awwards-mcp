@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { asMcpResult, type ToolContext } from "./shared.js";
+import { sceneAssetBindingsSchema } from "./scene.js";
 
 export function registerBuildProject(ctx: ToolContext): void {
   ctx.tool(
@@ -21,7 +22,7 @@ export function registerBuildProject(ctx: ToolContext): void {
 export function registerBuildPoseStub(ctx: ToolContext): void {
   ctx.tool(
     "build_pose_stub",
-    "Render a captured pose grid (pose-grid-v1 from capture_pose_3d) as a standalone scroll-scrubbed three.js stub page: frames preloaded inline, camera path interpolated between snapshot scroll ratios, prefers-reduced-motion static fallback, optional census-derived st/pin/ease suggestions. Pure build — no page fetches, no awwwards.com access.",
+    "Render a captured pose grid (pose-grid-v1 from capture_pose_3d) as a standalone scroll-scrubbed three.js stub page: frames preloaded inline, a synthesized camera path interpolated between snapshot scroll ratios (guidance only — the pose grid stores frames and scroll ratios, not recovered camera transforms), prefers-reduced-motion static fallback, optional census-derived st/pin/ease suggestions. Pure build — no page fetches, no awwwards.com access.",
     {
       poseGrid: z.any().describe("PoseGrid object as returned by capture_pose_3d (id pose-grid-v1)"),
       scrollCensus: z.any().optional()
@@ -35,8 +36,8 @@ export function registerBuildPoseStub(ctx: ToolContext): void {
 export function registerBuildGsapStub(ctx: ToolContext): void {
   ctx.tool(
     "build_gsap_stub",
-    "Generate a runnable GSAP+ScrollTrigger timeline stub from captured motion evidence (scroll census anims + optional pose grid camera anchors) — pure build from provided JSON, no page fetches",
-    { scrollCensus: z.any().describe("Full ScrollCensus JSON from analyze_scroll_map (anims[] + gsapTriggers[] required; compact output is rejected)"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
+    "Generate a runnable GSAP+ScrollTrigger timeline stub from captured motion evidence (scroll census anims + optional synthesized camera anchors from a pose grid) — pure build from provided JSON, no page fetches",
+    { scrollCensus: z.any().describe("Full ScrollCensus JSON from analyze_scroll_map (anims[] + gsapTriggers[] required; compact output is rejected)"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds a synthesized scroll-driven camera module — guidance, not recovered camera data)") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: any) => asMcpResult(ctx.handlers.build_gsap_stub(args)),
   );
@@ -57,6 +58,24 @@ export function registerBuildMotionManifest(ctx: ToolContext): void {
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: any) => asMcpResult(ctx.handlers.build_motion_manifest(args)),
+  );
+}
+
+export function registerBuildSceneStub(ctx: ToolContext): void {
+  ctx.tool(
+    "build_scene_stub",
+    "Generate an offline Vite + Three.js scaffold from a capture_scene_3d evidence pack (scene-evidence-v1), not a recovery: the pack stores rendered frames and observed responses, so unless the experimental three adapter recorded a bounded scene summary, no scene graph, camera, controls, shader source or geometry is read, and captured application code, shader source, userData and callbacks are never executed. With evidence.three it recreates only Box/Plane/Sphere/Cylinder primitive meshes with position/quaternion/scale, MeshStandard/MeshBasic colour/opacity and locally bound texture maps, plus a perspective camera and OrbitControls-compatible controls; unsupported geometry, materials, cameras and controls are listed as unresolved instead of guessed. Validates evidencePath itself (regular file, <=2 MiB, inside <cache>/scene-captures or a pack exported with top-level \"exported\": true) and up to 32 assetBindings (resourceId must be an observed inventory row that is not a script or shader; localPath must exist, be a regular non-symlink file <=64 MiB with a glb/gltf/bin/png/jpg/jpeg/webp/ktx2/hdr/exr extension; traversal and duplicate resourceIds are rejected). Returns files[{path,content}] (package.json with pinned three 0.160.0 + vite and dev/build/preview scripts, index.html, src/main.js with resize, reduced-motion static render, GLTFLoader for a bound model, texture loading, a clearly labelled placeholder plane when no model or captured mesh exists, disposal on pagehide and a load-failure message, scene.json describing bindings and frame references, and a provenance README), assetCopies[{from,to}] to public/assets/<assetId>.<ext>, unresolved[], authoredDefaults[] and provenance; mode is \"reconstructed-subset\" when a glb/gltf model is bound or the three adapter recorded at least one supported mesh, otherwise \"placeholder\". Deterministic and byte-stable, and strictly offline: no fetch, no install, no directory writes - copy assetCopies, then run npm install && npm run build yourself.",
+    {
+      evidencePath: z
+        .string()
+        .min(1)
+        .max(4096)
+        .describe("Local scene-evidence-v1 JSON from capture_scene_3d, under <cache>/scene-captures or an exported pack"),
+      assetBindings: sceneAssetBindingsSchema.optional(),
+      title: z.string().min(1).max(200).optional().describe("Title for index.html and the provenance README"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    (args: any) => asMcpResult(ctx.handlers.build_scene_stub(args)),
   );
 }
 

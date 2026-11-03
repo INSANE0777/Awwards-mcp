@@ -22,6 +22,10 @@ import type { IndexStatsArgs, IndexStatsResult } from "../index-stats.js";
 import type { NetworkCaptureResult } from "../network-capture.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "../structure.js";
 import type { PoseGrid } from "../pose3d.js";
+import type { CaptureSceneFn, SceneAdapterName, SceneCheckpointInput } from "../scene-capture.js";
+import type { DownloadSceneAssetsFn, SceneRights } from "../scene-assets.js";
+import type { Scene3dVerifyOptions, VerifySceneFn } from "../scene-verify.js";
+import type { SceneAssetBinding, SceneStubFn } from "../scene-stub.js";
 import type { StackFingerprint } from "../stack.js";
 import type { TokenCategory } from "../tokens.js";
 import type { MotionDna, SiteDetails, SiteSummary } from "../types.js";
@@ -124,6 +128,17 @@ export type Pose3dFn = (
   url: string,
   opts?: { steps?: number; viewport?: ViewportName },
 ) => Promise<PoseGrid | { error: string }>;
+
+// Passive scene evidence: checkpoint frames + canvas geometry + a response
+// inventory. Files are written under the cache; no inline image blocks.
+export type { CaptureSceneFn };
+// Selected asset acquisition reads one capture's evidence inventory and writes
+// the fetched originals plus provenance under that capture directory.
+export type { DownloadSceneAssetsFn };
+// Opt-in verify_build 3D gate: replays one capture's checkpoints on a build.
+export type { Scene3dVerifyOptions, VerifySceneFn };
+// Offline scene scaffold: reads one evidence pack, returns files; no writes.
+export type { SceneStubFn };
 
 export type PoseStubFn = (
   grid: PoseGrid,
@@ -290,6 +305,8 @@ export function compactVerifyReport(r: VerifyReport): {
   overall: number;
   bands: { score: number; matched: number; refOnly: number; buildOnly: number };
   motion: { score: number };
+  /** Opt-in 3D gate survives compaction whole: it is a separate verdict. */
+  scene3d?: VerifyReport["scene3d"];
 } {
   return {
     verdict: r.verdict,
@@ -301,6 +318,7 @@ export function compactVerifyReport(r: VerifyReport): {
       buildOnly: r.bands.buildOnly.length,
     },
     motion: { score: r.motion.score },
+    ...(r.scene3d ? { scene3d: r.scene3d } : {}),
   };
 }
 
@@ -493,7 +511,7 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   analyze_network_capture(args: { path: string; top?: number }): Promise<ToolResponse>;
   verify_flow(args: VerifyFlowArgs): Promise<ToolResponse>;
-  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; compact?: boolean }): Promise<ToolResponse>;
+  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; scene3d?: Scene3dVerifyOptions; compact?: boolean }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
     selector?: string;
@@ -518,6 +536,27 @@ export interface Handlers {
     url: string;
     steps?: number;
     viewport?: ViewportName;
+  }): Promise<ToolResponse>;
+  capture_scene_3d(args: {
+    url: string;
+    canvasSelector?: string;
+    scrollRoot?: string;
+    viewport?: ViewportName;
+    checkpoints?: SceneCheckpointInput[];
+    assetOrigins?: string[];
+    adapters?: SceneAdapterName[];
+    includeViewportShots?: boolean;
+  }): Promise<ToolResponse>;
+  download_scene_assets(args: {
+    captureId: string;
+    assetIds: string[];
+    rights: SceneRights;
+    allowUnknown?: boolean;
+  }): Promise<ToolResponse>;
+  build_scene_stub(args: {
+    evidencePath: string;
+    assetBindings?: SceneAssetBinding[];
+    title?: string;
   }): Promise<ToolResponse>;
   build_pose_stub(args: {
     poseGrid: PoseGrid;
@@ -564,9 +603,14 @@ export interface CreateHandlersDeps {
   networkCaptureFn?: NetworkCaptureFn;
   verifyFlowFn?: VerifyFlowFn;
   verifyBuildFn?: VerifyBuildFn;
+  // Optional 3D gate peer: verify_build forwards it only when scene3d is set.
+  verifySceneFn?: VerifySceneFn;
   captureComponentFn?: CaptureComponentFn;
   analyzeImagesFn?: AnalyzeImagesFn;
   pose3dFn?: Pose3dFn;
+  captureSceneFn?: CaptureSceneFn;
+  downloadSceneAssetsFn?: DownloadSceneAssetsFn;
+  sceneStubFn?: SceneStubFn;
   poseStubFn?: PoseStubFn;
   stackFn?: StackFn;
   gsapStubFn?: GsapStubFn;

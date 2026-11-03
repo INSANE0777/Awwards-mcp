@@ -68,7 +68,7 @@ collected now and persisted so the restarted session lands running.
 Optional env additions: `AWWWARDS_CACHE_DIR` (custom cache location),
 `AWWWARDS_AUTO_UPDATE=1` (background self-update on new releases),
 `AWWWARDS_MCP_PROFILE=core|full|v2` (`core` registers only the 13
-build-loop tools, including `get_annual_categories`; `full` exposes all 39;
+build-loop tools, including `get_annual_categories`; `full` exposes all 41;
 `v2` registers 10 consolidated tools plus 5 retained tools with their existing
 names and flat inputs (create_design_brief, build_project, verify_build,
 verify_flow, analyze_network_capture); only the 34 replaced 1.x names

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { verifyFlowArgsSchema } from "../verify-flow.js";
+import { scene3dVerifySchema } from "./scene.js";
 import { asMcpResult, viewportSchema, type ToolContext } from "./shared.js";
 
 export function registerAuditUrl(ctx: ToolContext): void {
@@ -99,7 +100,7 @@ export function registerVerifyFlow(ctx: ToolContext): void {
 export function registerVerifyBuild(ctx: ToolContext): void {
   ctx.tool(
     "verify_build",
-    "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Band labels are #id.firstClass, so give your rebuild's sections stable ids/classes; anonymous rebuild labels (empty/body, or duplicates) fall back to tag+height matching. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
+    "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Band labels are #id.firstClass, so give your rebuild's sections stable ids/classes; anonymous rebuild labels (empty/body, or duplicates) fall back to tag+height matching. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites. scene3d is a SEPARATE opt-in 3D gate: it replays a capture_scene_3d pack's checkpoints on the build canvas, compares cropped PNGs pixel-by-pixel and returns its own status/verdict under scene3d (with diff PNGs), keeping overall/verdict legacy semantics; the legacy pass never certifies a canvas, and without pixelThreshold + maxChangedFraction the gate reports metrics only (inconclusive).",
     {
       buildUrl: z.string().url().describe("URL of the build to verify"),
       referenceUrl: z.string().url().describe("URL of the reference site to match"),
@@ -110,6 +111,9 @@ export function registerVerifyBuild(ctx: ToolContext): void {
       viewport: viewportSchema,
       domDiff: z.boolean().default(false)
         .describe("body-subtree structural diff between reference and build"),
+      scene3d: scene3dVerifySchema
+        .optional()
+        .describe("opt-in visual 3D gate: replay a capture pack's checkpoints on the build canvas"),
       compact: z
         .boolean()
         .optional()

@@ -42,10 +42,12 @@ import {
   registerBuildPoseStub,
   registerBuildGsapStub,
   registerBuildMotionManifest,
+  registerBuildSceneStub,
   registerAnalyzeStack,
   registerGetMotionDna,
   registerSearchMotion,
 } from "./build.js";
+import { registerCaptureScene3d } from "./scene.js";
 
 /** Registers the full MCP tool surface in its stable, historical order. */
 export function registerAllTools(ctx: ToolContext): void {
@@ -81,10 +83,12 @@ export function registerAllTools(ctx: ToolContext): void {
   registerExportDesignTokens(ctx);
   registerAnalyzeImages(ctx);
   registerCapturePose3d(ctx);
+  registerCaptureScene3d(ctx);
   registerBuildPoseStub(ctx);
   registerAnalyzeStack(ctx);
   registerBuildGsapStub(ctx);
   registerBuildMotionManifest(ctx);
+  registerBuildSceneStub(ctx);
   registerSearchMotion(ctx);
   registerNewWinners(ctx);
   registerWatchSite(ctx);

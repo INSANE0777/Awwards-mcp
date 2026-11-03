@@ -86,6 +86,30 @@ describe("buildPoseStubHtml", () => {
     expect(buildPoseStubHtml(grid())).toContain("camera.position.lerpVectors");
   });
 
+  it("calls renderer.render after texture load, camera updates and resize", () => {
+    const html = buildPoseStubHtml(grid());
+    expect(html.match(/renderer\.render\(scene, camera\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(html).toContain('addEventListener("resize"');
+    expect(html).toContain("renderer.dispose()");
+  });
+
+  it("describes camera anchors as synthesized guidance, not recovered data", () => {
+    const html = buildPoseStubHtml(grid());
+    expect(html).toContain("Synthesized camera anchors");
+    expect(html).toContain("not recovered camera data");
+    expect(html).not.toContain("camera reference");
+  });
+
+  it("keeps evidence strings out of executable script positions", () => {
+    const g = grid();
+    g.url = 'https://example.com/"><script>window.__posePwned=1</script>';
+    g.snapshots[0]!.frames[0]!.label = "</script><script>window.__posePwned=2</script>";
+    const html = buildPoseStubHtml(g, { scrollCensus: census() });
+    expect(html).not.toContain("<script>window.__posePwned");
+    expect(html).not.toContain("</script><script>window.__posePwned");
+    expect(html).toContain("&lt;script&gt;window.__posePwned=1");
+  });
+
   it("guards prefers-reduced-motion with a static first frame", () => {
     const html = buildPoseStubHtml(grid());
     expect(html).toContain("prefers-reduced-motion");

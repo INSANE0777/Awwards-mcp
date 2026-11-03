@@ -14,6 +14,8 @@ import {
   analyze_page_structure,
   analyze_hover_census,
   capture_pose_3d,
+  capture_scene_3d,
+  download_scene_assets,
   capture_component,
   export_design_tokens,
   analyze_images,
@@ -28,6 +30,7 @@ import {
 } from "./handlers/audit.js";
 import {
   build_pose_stub,
+  build_scene_stub,
   analyze_stack,
   build_gsap_stub,
   build_motion_manifest,
@@ -88,6 +91,9 @@ export function createHandlers(deps: CreateHandlersDeps): Handlers {
     export_design_tokens: (args) => export_design_tokens(ctx, args),
     analyze_images: (args) => analyze_images(ctx, args),
     capture_pose_3d: (args) => capture_pose_3d(ctx, args),
+    capture_scene_3d: (args) => capture_scene_3d(ctx, args),
+    download_scene_assets: (args) => download_scene_assets(ctx, args),
+    build_scene_stub: (args) => build_scene_stub(ctx, args),
     build_pose_stub: (args) => build_pose_stub(ctx, args),
     analyze_stack: (args) => analyze_stack(ctx, args),
     build_gsap_stub: (args) => build_gsap_stub(ctx, args),

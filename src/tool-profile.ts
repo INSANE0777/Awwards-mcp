@@ -3,7 +3,7 @@
 // exercise it without starting the stdio server.
 
 // The 13 tool core an agent needs for the capture -> analyze -> build -> verify
-// loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 39.
+// loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 41.
 export const CORE_TOOL_NAMES: readonly string[] = [
   "search_sites",
   "get_site_details",

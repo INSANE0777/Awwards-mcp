@@ -54,6 +54,8 @@ function captureHandlers() {
     capture_live_site: vi.fn().mockResolvedValue(okResponse),
     capture_component: vi.fn().mockResolvedValue(okResponse),
     capture_pose_3d: vi.fn().mockResolvedValue(okResponse),
+    capture_scene_3d: vi.fn().mockResolvedValue(okResponse),
+    download_scene_assets: vi.fn().mockResolvedValue(okResponse),
     record_site_motion: vi.fn().mockResolvedValue(okResponse),
   };
 }
@@ -489,6 +491,54 @@ describe("capturePageRequestSchema", () => {
       waitStrategy: "load",
       viewport: "desktop",
     });
+
+    expect(capturePageRequestSchema.parse({ kind: "scene", op: "capture", url })).toEqual({
+      kind: "scene",
+      op: "capture",
+      url,
+    });
+
+    expect(
+      capturePageRequestSchema.parse({
+        kind: "scene",
+        op: "download_assets",
+        captureId: "scene-mg2k3j4p-0123abcd",
+        assetIds: ["asset-1", "asset-2"],
+        rights: { basis: "licensed", evidence: "CC BY 4.0, https://creativecommons.org/licenses/by/4.0/" },
+      }),
+    ).toEqual({
+      kind: "scene",
+      op: "download_assets",
+      captureId: "scene-mg2k3j4p-0123abcd",
+      assetIds: ["asset-1", "asset-2"],
+      rights: { basis: "licensed", evidence: "CC BY 4.0, https://creativecommons.org/licenses/by/4.0/" },
+    });
+  });
+
+  it("rejects scene requests that mix ops or omit op-specific fields", () => {
+    const captureId = "scene-mg2k3j4p-0123abcd";
+    const rights = { basis: "owned", evidence: "own studio asset" };
+    const invalid = [
+      { kind: "scene", op: "capture" },
+      { kind: "scene", url },
+      { kind: "scene", op: "capture", url, captureId },
+      { kind: "scene", op: "capture", url, rights },
+      { kind: "scene", op: "download_assets", captureId, assetIds: ["asset-1"] },
+      { kind: "scene", op: "download_assets", captureId, rights },
+      { kind: "scene", op: "download_assets", assetIds: ["asset-1"], rights },
+      { kind: "scene", op: "download_assets", url, captureId, assetIds: ["asset-1"], rights },
+      { kind: "scene", op: "download_assets", captureId, assetIds: ["../asset-1"], rights },
+      {
+        kind: "scene",
+        op: "download_assets",
+        captureId,
+        assetIds: ["asset-1"],
+        rights: { basis: "borrowed", evidence: "x" },
+      },
+    ];
+    for (const input of invalid) {
+      expect(capturePageRequestSchema.safeParse(input).success, JSON.stringify(input)).toBe(false);
+    }
   });
 
   it("rejects a valid-looking payload with a foreign branch field", () => {
@@ -566,6 +616,120 @@ describe("runCapturePage", () => {
     expect(handlers.capture_component).not.toHaveBeenCalled();
     expect(handlers.record_site_motion).not.toHaveBeenCalled();
     expect(result).toBe(okResponse);
+  });
+
+  it("dispatches scene capture and omits undefined optionals", async () => {
+    const handlers = captureHandlers();
+    const request = capturePageRequestSchema.parse({ kind: "scene", op: "capture", url });
+
+    const result = await runCapturePage(handlers as any, request);
+
+    expect(handlers.capture_scene_3d).toHaveBeenCalledTimes(1);
+    expect(handlers.capture_scene_3d).toHaveBeenCalledWith({ url });
+    expect(handlers.download_scene_assets).not.toHaveBeenCalled();
+    expect(handlers.capture_live_site).not.toHaveBeenCalled();
+    expect(handlers.capture_component).not.toHaveBeenCalled();
+    expect(handlers.capture_pose_3d).not.toHaveBeenCalled();
+    expect(handlers.record_site_motion).not.toHaveBeenCalled();
+    expect(result).toBe(okResponse);
+  });
+
+  it("dispatches scene download_assets with rights and no capture fields", async () => {
+    const handlers = captureHandlers();
+    const rights = { basis: "permission" as const, evidence: "written permission, 2026-11-01" };
+    const request = capturePageRequestSchema.parse({
+      kind: "scene",
+      op: "download_assets",
+      captureId: "scene-mg2k3j4p-0123abcd",
+      assetIds: ["asset-2"],
+      rights,
+    });
+
+    const result = await runCapturePage(handlers as any, request);
+
+    expect(handlers.download_scene_assets).toHaveBeenCalledWith({
+      captureId: "scene-mg2k3j4p-0123abcd",
+      assetIds: ["asset-2"],
+      rights,
+    });
+    expect(handlers.capture_scene_3d).not.toHaveBeenCalled();
+    expect(result).toBe(okResponse);
+  });
+
+  it("forwards scene optionals", async () => {
+    const handlers = captureHandlers();
+    const checkpoints = [
+      { scrollRatio: 0.25, pointer: { x: 0.5, y: 0.75 }, waitMs: 100 },
+      { scrollRatio: 1 },
+    ];
+    const request = capturePageRequestSchema.parse({
+      kind: "scene",
+      op: "capture",
+      url,
+      canvasSelector: "#scene",
+      scrollRoot: "#scroll",
+      viewport: "mobile",
+      checkpoints,
+      assetOrigins: ["https://cdn.example.com"],
+      adapters: ["three"],
+      includeViewportShots: false,
+    });
+
+    await runCapturePage(handlers as any, request);
+
+    expect(handlers.capture_scene_3d).toHaveBeenCalledWith({
+      url,
+      canvasSelector: "#scene",
+      scrollRoot: "#scroll",
+      viewport: "mobile",
+      checkpoints,
+      assetOrigins: ["https://cdn.example.com"],
+      adapters: ["three"],
+      includeViewportShots: false,
+    });
+  });
+
+  it("forwards both opt-in scene adapters and rejects duplicates or download use", async () => {
+    const handlers = captureHandlers();
+    const request = capturePageRequestSchema.parse({
+      kind: "scene",
+      op: "capture",
+      url,
+      adapters: ["three", "spector"],
+    });
+
+    await runCapturePage(handlers as any, request);
+
+    expect(handlers.capture_scene_3d).toHaveBeenCalledWith({
+      url,
+      adapters: ["three", "spector"],
+    });
+    expect(
+      capturePageRequestSchema.safeParse({
+        kind: "scene",
+        op: "capture",
+        url,
+        adapters: ["spector", "spector"],
+      }).success,
+    ).toBe(false);
+    expect(
+      capturePageRequestSchema.safeParse({
+        kind: "scene",
+        op: "capture",
+        url,
+        adapters: ["three", "spector", "specter"],
+      }).success,
+    ).toBe(false);
+    expect(
+      capturePageRequestSchema.safeParse({
+        kind: "scene",
+        op: "download_assets",
+        captureId: "scene-mg2k3j4p-0123abcd",
+        assetIds: ["asset-1"],
+        rights: { basis: "permission", evidence: "written permission" },
+        adapters: ["spector"],
+      }).success,
+    ).toBe(false);
   });
 
   it("dispatches recording with defaults", async () => {

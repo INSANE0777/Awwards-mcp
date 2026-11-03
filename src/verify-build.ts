@@ -17,6 +17,11 @@ import type { ViewportName } from "./viewport.js";
 import type { PerfMeasurement } from "./perf-live.js";
 import type { AntiPatternFinding } from "./audit-rules.js";
 import type { ComponentPack, ComponentNode } from "./component.js";
+import type {
+  Scene3dVerifyOptions,
+  Scene3dVerifyResult,
+  VerifySceneFn,
+} from "./scene-verify.js";
 
 export interface MotionCensusInput {
   counts: Record<string, number>;
@@ -44,6 +49,8 @@ export interface VerifyReport {
   evidence: string[];
   /** Only present when the caller opts into domDiff (key absent otherwise). */
   domDiff?: DomDiffResult;
+  /** Opt-in 3D gate; key absent unless scene3d was requested. */
+  scene3d?: Scene3dVerifyResult;
 }
 
 // Fixed order = positional tr tokens ("g3" = 3 gsap-scrolltrigger anims);
@@ -371,6 +378,21 @@ type VerifyComponentFn = (
 const num = (v: unknown): number =>
   typeof v === "number" && Number.isFinite(v) ? v : 0;
 
+// A scene-gate failure must never fail the legacy verification, so it degrades
+// to a well-formed inconclusive result. Kept local to avoid a runtime import of
+// scene-verify.ts (this module stays free of node/Playwright imports).
+function sceneErrorResult(reason: string): Scene3dVerifyResult {
+  return {
+    status: "inconclusive",
+    verdict: "inconclusive",
+    requested: 0,
+    compared: 0,
+    checkpoints: [],
+    coverage: { status: "unknown", collected: 0, excluded: 0, limitations: [reason] },
+    limitations: [reason],
+  };
+}
+
 // PerfMeasurement (perf-live.ts renamed aegon's collector fields) → evidence
 // line. Field mapping: fps→fps, droppedFrames→dropped, longTaskCount→
 // longTasks, layoutThrashCount→thrash.
@@ -455,8 +477,13 @@ export async function verifyBuild(
     viewport?: ViewportName;
     // D2 opt-in: structural body-subtree diff (evidence-only, like perf/rules).
     domDiff?: boolean;
+    // Opt-in 3D pixel gate: replays the reference pack's checkpoints on the build.
+    scene3d?: Scene3dVerifyOptions;
+    // <cache>/scene-captures, injected by the handler when scene3d is requested.
+    sceneDir?: string;
     // Injectable fakes for tests; lazily-imported defaults otherwise.
     structureFn?: VerifyStructureFn;
+    sceneFn?: VerifySceneFn;
     scrollFn?: VerifyScrollFn;
     hoverFn?: VerifyHoverFn;
     componentFn?: VerifyComponentFn;
@@ -578,6 +605,26 @@ export async function verifyBuild(
         (diff.incomplete ? " (incomplete)" : "");
     }
 
+    // Opt-in 3D gate: runs after the legacy score is final, touches neither
+    // overall nor verdict, and degrades to an inconclusive block on failure.
+    let scene3d: Scene3dVerifyResult | undefined;
+    if (args.scene3d) {
+      const sceneFn =
+        args.sceneFn ??
+        ((sceneArgs) =>
+          import("./scene-verify.js").then((m) => m.verifyScene3d(sceneArgs)));
+      try {
+        const result = await sceneFn({
+          ...args.scene3d,
+          buildUrl: args.buildUrl,
+          sceneDir: args.sceneDir,
+        });
+        scene3d = "error" in result ? sceneErrorResult(result.error) : result;
+      } catch (err) {
+        scene3d = sceneErrorResult(err instanceof Error ? err.message : String(err));
+      }
+    }
+
     return {
       buildUrl: args.buildUrl,
       referenceUrl: args.referenceUrl,
@@ -597,6 +644,7 @@ export async function verifyBuild(
       ],
       // Key absent when domDiff is off — pinned by a keys-absence test.
       ...(domDiff ? { domDiff } : {}),
+      ...(scene3d ? { scene3d } : {}),
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
