@@ -73,7 +73,13 @@ export function registerVerifyBuildV2(ctx: ToolContext): void {
         .describe("compact=true returns the verdict, overall and band score, band counts and motion score; omit for evidence lines"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args: any) => asMcpResult(ctx.handlers.verify_build(args)),
+    (args: any, sdkCtx?: { mcpReq?: { signal?: AbortSignal } }) =>
+      asMcpResult(
+        ctx.handlers.verify_build({
+          ...args,
+          ...(sdkCtx?.mcpReq?.signal ? { signal: sdkCtx.mcpReq.signal } : {}),
+        }),
+      ),
     verifyBuildOutputSchema,
   );
 }

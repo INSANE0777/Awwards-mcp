@@ -367,6 +367,122 @@ describe("downloadSceneAssets transfers", () => {
     expect(queued).toMatchObject({ downloaded: 1, totalBytes: PNG.length });
   });
 
+  it("returns a cancelled result without DNS or fetch when already aborted", async () => {
+    const { root } = captureWith([
+      { assetId: "asset-1", url: "https://cdn.test/a.png" },
+      { assetId: "asset-2", url: "https://cdn.test/b.png" },
+    ]);
+    let lookups = 0;
+    let fetches = 0;
+    const result = assetsOf(
+      await download(
+        root,
+        ["asset-1", "asset-2"],
+        async () => {
+          fetches += 1;
+          return hop(200, { "content-type": "image/png" }, [PNG]);
+        },
+        {
+          signal: AbortSignal.abort(),
+          resolveHost: async () => {
+            lookups += 1;
+            return ["93.184.216.34"];
+          },
+        },
+      ),
+    );
+    expect(result).toMatchObject({
+      downloaded: 0,
+      skipped: 2,
+      receivedBytes: 0,
+      totalBytes: 0,
+      cancelled: true,
+    });
+    expect(result.limitations.join(" ")).toMatch(/cancelled by the client/);
+    expect(result.limitations.filter((line) => line.includes("skipped: cancelled by the client"))).toHaveLength(2);
+    expect(lookups).toBe(0);
+    expect(fetches).toBe(0);
+  });
+
+  it("a live abort during a pending DNS lookup returns promptly and frees the queue", async () => {
+    const { root } = captureWith([{ assetId: "asset-1", url: "https://slow.test/a.png" }]);
+    const controller = new AbortController();
+    let fetches = 0;
+    const started = Date.now();
+    const pending = download(
+      root,
+      ["asset-1"],
+      async () => {
+        fetches += 1;
+        return hop(200, { "content-type": "image/png" }, [PNG]);
+      },
+      { resolveHost: () => new Promise<string[]>(() => undefined), signal: controller.signal },
+    );
+    setTimeout(() => controller.abort(), 20);
+    const result = assetsOf(await pending);
+    expect(result).toMatchObject({ downloaded: 0, skipped: 1, receivedBytes: 0, cancelled: true });
+    expect(result.limitations.join(" ")).toMatch(/cancelled by the client/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(fetches).toBe(0);
+
+    const queued = assetsOf(
+      await download(root, ["asset-1"], async () =>
+        hop(200, { "content-type": "image/png" }, [PNG]),
+      ),
+    );
+    expect(queued).toMatchObject({ downloaded: 1, totalBytes: PNG.length });
+    expect("cancelled" in queued).toBe(false);
+  });
+
+  it("a live abort stops before the next job, aborts the body and keeps received-byte accounting", async () => {
+    const { root, dir } = captureWith([
+      { assetId: "asset-1", url: "https://cdn.test/a.png" },
+      { assetId: "asset-2", url: "https://cdn.test/b.png" },
+    ]);
+    const controller = new AbortController();
+    let fetches = 0;
+    let destroyed = 0;
+    let chunkRead!: () => void;
+    const firstChunk = new Promise<void>((resolve) => (chunkRead = resolve));
+    const body = (async function* () {
+      yield PNG;
+      chunkRead();
+      await new Promise<void>(() => undefined);
+    })();
+    const pending = download(
+      root,
+      ["asset-1", "asset-2"],
+      async () => {
+        fetches += 1;
+        return {
+          status: 200,
+          headers: { "content-type": "image/png" },
+          body,
+          destroy: () => {
+            destroyed += 1;
+          },
+        };
+      },
+      { signal: controller.signal },
+    );
+    await firstChunk;
+    const started = Date.now();
+    controller.abort();
+    const result = assetsOf(await pending);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(fetches).toBe(1);
+    expect(result).toMatchObject({
+      downloaded: 0,
+      skipped: 2,
+      receivedBytes: PNG.length,
+      totalBytes: 0,
+      cancelled: true,
+    });
+    expect(result.limitations.join(" ")).toMatch(/cancelled by the client/);
+    expect(destroyed).toBeGreaterThanOrEqual(1);
+    expect(readdirSync(join(dir, "assets"))).toEqual([]);
+  });
+
   it("blocks a redirect hop that resolves to a private address", async () => {
     const { root, dir } = captureWith([{ assetId: "asset-1", url: "https://cdn.test/r.png" }]);
     const hosts: string[] = [];

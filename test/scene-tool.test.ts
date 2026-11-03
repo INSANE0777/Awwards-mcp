@@ -143,6 +143,40 @@ describe("registerCaptureScene3d", () => {
     });
   });
 
+  it("forwards the MCP request signal to both scene operations", async () => {
+    const ctx = fakeCtx({
+      capture_scene_3d: vi.fn().mockResolvedValue(ok()),
+      download_scene_assets: vi.fn().mockResolvedValue(ok()),
+    });
+    registerCaptureScene3d(ctx);
+    const callback = ctx.tool.mock.calls[0][4];
+    const controller = new AbortController();
+
+    await callback(
+      { request: { op: "capture", url, viewport: "desktop", includeViewportShots: true } },
+      { mcpReq: { signal: controller.signal } },
+    );
+    expect(ctx.handlers.capture_scene_3d).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+    );
+
+    await callback(
+      {
+        request: { op: "download_assets", captureId, assetIds: ["asset-1"], rights, allowUnknown: false },
+      },
+      { mcpReq: { signal: controller.signal } },
+    );
+    expect(ctx.handlers.download_scene_assets).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+    );
+
+    // No SDK context (older/embedded callers) carries no signal key at all.
+    await callback({
+      request: { op: "capture", url, viewport: "desktop", includeViewportShots: true },
+    });
+    expect("signal" in ctx.handlers.capture_scene_3d.mock.calls[1]![0]).toBe(false);
+  });
+
   it("rejects bad capture fields, bad rights, bad ids and unknown ops", () => {
     const ctx = fakeCtx({});
     registerCaptureScene3d(ctx);

@@ -453,6 +453,8 @@ export type VerifyBuildFn = (
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     domDiff?: boolean;
+    /** Client cancellation, forwarded to the scene gate. */
+    signal?: AbortSignal;
   },
 ) => Promise<VerifyReport | { error: string }>;
 
@@ -629,8 +631,11 @@ export async function verifyBuild(
     resolveHost?: (hostname: string) => Promise<string[]>;
     /** TEST ONLY: Playwright loader shared by the default acquisitions and the scene gate. */
     loader?: () => Promise<any>;
+    /** Client cancellation; an abort short-circuits before any acquisition. */
+    signal?: AbortSignal;
   },
 ): Promise<VerifyReport | { error: string }> {
+  if (args.signal?.aborted) return { error: "Verification cancelled by the client." };
   // One shared wait/viewport profile for every capture of a verification run.
   const networkOpts = { waitStrategy: args.waitStrategy, viewport: args.viewport };
 
@@ -849,6 +854,7 @@ export async function verifyBuild(
           buildUrl: args.buildUrl,
           sceneDir: args.sceneDir,
           ...(sceneGuard ? { networkGuard: sceneGuard } : {}),
+          ...(args.signal ? { signal: args.signal } : {}),
         });
         scene3d = "error" in result ? sceneErrorResult(result.error) : result;
       } catch (err) {

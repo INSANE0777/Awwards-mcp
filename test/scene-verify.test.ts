@@ -332,6 +332,34 @@ describe("verify_build scene3d schema (full and v2)", () => {
   }
 });
 
+describe("verify_build tool callbacks forward the client signal", () => {
+  const okResponse = { content: [{ type: "text" as const, text: "ok" }] };
+
+  for (const [name, register] of [
+    ["full", registerVerifyBuild],
+    ["v2", registerVerifyBuildV2],
+  ] as const) {
+    it(`${name}: passes mcpReq.signal and omits the key when absent`, async () => {
+      const verify = vi.fn(async (_args: any) => okResponse);
+      const ctx = { handlers: { verify_build: verify }, tool: vi.fn(), registerTool: vi.fn() } as any;
+      register(ctx);
+      const callback = ctx.tool.mock.calls[0][4];
+      const controller = new AbortController();
+      const args = { buildUrl: "https://build.test/", referenceUrl: "https://ref.test/" };
+
+      await callback(args, { mcpReq: { signal: controller.signal } });
+      expect(verify.mock.calls[0]![0]).toMatchObject({
+        buildUrl: args.buildUrl,
+        referenceUrl: args.referenceUrl,
+        signal: controller.signal,
+      });
+
+      await callback(args);
+      expect("signal" in verify.mock.calls[1]![0]).toBe(false);
+    });
+  }
+});
+
 // ---- verifyBuild wiring -------------------------------------------------
 
 const refStruct = (): PageStructure => ({
@@ -566,6 +594,77 @@ describe("verifyScene3d watchdog", () => {
   });
 });
 
+describe("verifyScene3d client cancellation", () => {
+  it("returns the cancellation error before reading the pack when already aborted", async () => {
+    const loader = vi.fn();
+    const result = await verifyScene3d({
+      referenceCaptureId: SCENE_ID,
+      buildSelector: "#scene",
+      buildUrl: "https://build.test/",
+      sceneDir: join(tmpdir(), "awwwards-scene-verify-missing-pack"),
+      loader,
+      signal: AbortSignal.abort(),
+    });
+    expect(result).toEqual({ error: "Scene3d verification cancelled by the client." });
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("a live abort while the Playwright loader is pending returns promptly", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeScenePack(dir);
+      const controller = new AbortController();
+      const started = Date.now();
+      const pending = verifyScene3d({
+        ...sceneVerifyArgs(pack),
+        loader: () => new Promise<any>(() => undefined),
+        signal: controller.signal,
+        timeoutMs: 10_000,
+      });
+      setTimeout(() => controller.abort(), 20);
+      const result = await pending;
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+      expect(result.status).toBe("inconclusive");
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain(
+        "scene3d verification was cancelled by the client.",
+      );
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a live abort mid-replay closes the build page, its context and the browser", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeScenePack(dir);
+      const controller = new AbortController();
+      // The settle wait runs after the browser, context and page exist, so this
+      // abort always lands mid-run rather than during acquisition.
+      const fake = fakeSceneBrowser({ onWait: async () => controller.abort() });
+      const result = await verifyScene3d({
+        ...sceneVerifyArgs(pack),
+        loader: fake.loader,
+        signal: controller.signal,
+        timeoutMs: 10_000,
+      });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain(
+        "scene3d verification was cancelled by the client.",
+      );
+      for (const name of ["build-page", "build-context", "browser"]) {
+        expect(fake.closed).toContain(name);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("verifyScene3d replay budget", () => {
   const maxSchedule = Array.from({ length: 10 }, () => ({ waitMs: 2_000 }));
 
@@ -689,11 +788,12 @@ describe("verifyScene3d whole-run watchdog", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  it("a browser that launches after the deadline is closed on arrival", async () => {
+  it("does not start acquisition when preflight resolves after the deadline", async () => {
     const dir = tempDir();
     try {
       const pack = writeScenePack(dir);
       let release!: (value: any) => void;
+      let launches = 0;
       const closed: string[] = [];
       const browser = {
         close: async () => {
@@ -714,11 +814,13 @@ describe("verifyScene3d whole-run watchdog", () => {
       expect(result.limitations.join(" ")).toContain("2000ms deadline");
       expect(typeof release).toBe("function");
 
-      release({ chromium: { launch: async () => browser } });
-      for (let i = 0; i < 200 && !closed.includes("browser"); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      expect(closed).toContain("browser");
+      release({ chromium: { launch: async () => {
+        launches += 1;
+        return browser;
+      } } });
+      for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(launches).toBe(0);
+      expect(closed).not.toContain("browser");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

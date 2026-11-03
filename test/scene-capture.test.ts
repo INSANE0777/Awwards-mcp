@@ -1545,6 +1545,63 @@ describe("captureScene3d", () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
+  it("returns the client-cancelled error without launching when already aborted", async () => {
+    const dir = tmpDir();
+    const loader = vi.fn();
+    const resolve = vi.fn();
+    const result = await captureScene3d("https://example.com", {
+      loader,
+      resolveHost: resolve,
+      sceneDir: dir,
+      signal: AbortSignal.abort(),
+    });
+    expect(result).toEqual({ error: "Scene capture cancelled by the client." });
+    expect(loader).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it("a live abort while DNS is pending returns at once and leaves nothing behind", async () => {
+    const dir = tmpDir();
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = captureScene3d("https://example.com", {
+      loader: vi.fn(),
+      resolveHost: () => new Promise<string[]>(() => undefined),
+      sceneDir: dir,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 20);
+    const result = await pending;
+    expect(result).toEqual({ error: "Scene capture cancelled by the client." });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it("a live abort mid-capture closes the browser, its context and the temp pack", async () => {
+    const dir = tmpDir();
+    const controller = new AbortController();
+    // The first frame write runs after the temp pack exists, so this abort also
+    // proves the staging directory is removed.
+    const fake = fakePage({
+      onScreenshot: () => {
+        controller.abort();
+        return PNG;
+      },
+    });
+    const result = await captureScene3d("https://example.com", {
+      loader: fake.loader,
+      resolveHost,
+      sceneDir: dir,
+      signal: controller.signal,
+      checkpoints: [{ scrollRatio: 0, waitMs: 0 }],
+    });
+    expect(result).toEqual({ error: "Scene capture cancelled by the client." });
+    expect(fake.calls.contextClosed).toBe(true);
+    expect(fake.calls.closed).toBe(true);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
   it("caps redacted blocked-request samples at record time", async () => {
     const dir = tmpDir();
     const blockedUrls = Array.from(

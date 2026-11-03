@@ -361,6 +361,8 @@ export interface SceneCaptureOptions {
   timeoutMs?: number;
   /** Output root; the handler passes <cache>/scene-captures. */
   sceneDir?: string;
+  /** Client cancellation; an abort returns promptly and releases the run. */
+  signal?: AbortSignal;
   loader?: () => Promise<any>;
   /** Injectable DNS so unit tests never touch the network. */
   resolveHost?: (hostname: string) => Promise<string[]>;
@@ -3311,6 +3313,7 @@ export async function captureScene3d(
   url: string,
   opts: SceneCaptureOptions = {},
 ): Promise<SceneEvidence | { error: string }> {
+  if (opts.signal?.aborted) return { error: "Scene capture cancelled by the client." };
   const startedAt = Date.now();
   const timeoutMs = Math.min(opts.timeoutMs ?? SCENE_LIMITS.timeoutMs, SCENE_LIMITS.timeoutMs);
   const deadline = startedAt + timeoutMs;
@@ -3327,11 +3330,25 @@ export async function captureScene3d(
   // only when the adapter is requested. A missing package degrades the adapter.
   let spectorBundle: SpectorBundle | null = null;
   if (wantSpector) {
+    let onAbort: (() => void) | undefined;
     try {
-      spectorBundle = await (opts.spectorBundleLoader ?? loadSpectorBundle)();
+      const pending = (opts.spectorBundleLoader ?? loadSpectorBundle)();
+      const loaded = opts.signal
+        ? Promise.race([
+            pending,
+            new Promise<never>((_resolve, reject) => {
+              onAbort = () => reject(new Error("cancelled by the client"));
+              opts.signal!.addEventListener("abort", onAbort, { once: true });
+            }),
+          ])
+        : pending;
+      spectorBundle = await loaded;
     } catch {
       spectorBundle = null;
+    } finally {
+      if (onAbort) opts.signal!.removeEventListener("abort", onAbort);
     }
+    if (opts.signal?.aborted) return { error: "Scene capture cancelled by the client." };
   }
   const allowedOrigins = normalizeScenePrivateOrigins(opts.allowPrivateOrigins);
   if ("error" in allowedOrigins) return allowedOrigins;
@@ -3938,6 +3955,14 @@ export async function captureScene3d(
       await writeFile(join(stagingDir, "evidence.json"), json, { mode: 0o600 });
       // Publish only a complete pack: frames and metadata appear together.
       await rename(stagingDir, finalDir);
+      // From here the published directory is the cleanup target: an abort
+      // during the final step must not leave a completed pack behind.
+      tmpDir = finalDir;
+      if (cancelled) {
+        tmpDir = undefined;
+        await rm(finalDir, { recursive: true, force: true }).catch(() => undefined);
+        throw new Error("capture cancelled after the deadline");
+      }
       tmpDir = undefined;
       return evidence;
     } catch (err) {
@@ -3955,11 +3980,23 @@ export async function captureScene3d(
     }, timeoutMs);
     watchdog.unref?.();
   });
+  // A client abort resolves the race like the deadline, but with its own
+  // reason; the finally below still owns closing every acquired resource.
+  let onClientAbort: (() => void) | undefined;
+  const aborted = new Promise<{ error: string }>((resolve) => {
+    if (!opts.signal) return;
+    onClientAbort = () => {
+      cancelled = true;
+      resolve({ error: "Scene capture cancelled by the client." });
+    };
+    opts.signal.addEventListener("abort", onClientAbort, { once: true });
+  });
 
   try {
-    return await Promise.race([work, timeout]);
+    return await Promise.race([work, timeout, aborted]);
   } finally {
     if (watchdog) clearTimeout(watchdog);
+    if (onClientAbort) opts.signal?.removeEventListener("abort", onClientAbort);
     cancelled = true;
     // Idempotent: an acquisition that is still in flight owns its late
     // resources and releases them on its next ensureLive() check.
