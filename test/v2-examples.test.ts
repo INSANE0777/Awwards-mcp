@@ -4,13 +4,13 @@ import { z } from "zod";
 import { registerV2Tools, V2_TOOL_NAMES } from "../src/v2/register.js";
 import { scaffoldMotionManifest } from "../src/motion-manifest.js";
 
-// Documentation guard: every request example in skills/v2-routing.md must be a
-// real v2 tool and must parse against the input schema the server actually
-// registers. The schemas are collected from registerV2Tools with a fake
-// context, so retained tools (whose shapes are inline) are covered too, and no
-// server boot or network is involved.
+// Documentation guard: every request example in the canonical v2-routing.md
+// fixture (owned by the awwwards-skills repo) must be a real v2 tool and must
+// parse against the input schema the server actually registers. The schemas are
+// collected from registerV2Tools with a fake context, so retained tools (whose
+// shapes are inline) are covered too, and no server boot or network is involved.
 const ROUTING_DOC = readFileSync(
-  new URL("../skills/v2-routing.md", import.meta.url),
+  new URL("./fixtures/v2-routing.md", import.meta.url),
   "utf8",
 );
 
@@ -92,7 +92,7 @@ function requestObject(example: Example): Record<string, unknown> {
 const SCHEMAS = registeredSchemas();
 const EXAMPLES = documentedExamples();
 
-describe("skills/v2-routing.md exact examples", () => {
+describe("v2-routing.md exact examples", () => {
   it("registers the schema for every v2 tool and no other name", () => {
     expect([...SCHEMAS.keys()].sort()).toEqual([...V2_TOOL_NAMES].sort());
   });

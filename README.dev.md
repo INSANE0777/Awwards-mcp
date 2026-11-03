@@ -102,7 +102,7 @@ including a synthetic side-by-side `playwright` / `ffmpeg-static` import.
 | `build-project.ts` | ~660 | build_project core: rebuild-shape section split (top-level roots keyed on the `c-N` class + generic fallback), style buckets (tokens hoisted, class-safe per-section mention match), timeline extraction (quote-aware balanced-paren `.from(` scan so `;`-bearing callbacks never drop a block), vite/astro/next emit dispatch + the `buildProject` orchestration the bin and MCP tool share. Emitters are pure files arrays (byte-deterministic tests); CLI arg model maps exits 0/2/3 in `build-project-cli.ts`. |
 | `build-project-cli.ts` / `emit-next.ts` | ~45 / ~410 | Thin `awwwards-build-project` bin: one JSON line, exit 0/2/3, verify-cli's DI + main-guard shape. `emit-next.ts`: kit `jsx.mjs` port (`htmlToJsx`: class→className, for→htmlFor, style string→object with kebab→camel + `!important` strip, svg camelCase tags/attrs, text-brace entity escaping) + the Next App Router tree — `package.json`/`next.config.mjs`/tsconfig, `app/layout.tsx` (metadata + font links), `app/globals.css` (tokens+shared+section buckets), `app/page.tsx` and per-section components with kit-verbatim `useEffect` + `gsap.context` + `ctx.revert()` wiring; gsap dep and imports gated on the source's CDN tags. |
 | `cli.ts` | ~65 | Startup only: cache/client/handlers, background auto-reindex, daily version/env checks, then `serveStdio` with a per-connection factory - stdout stays clean for JSON-RPC. |
-| `server-instance.ts` | ~45 | `createServer({handlers,version})`: a fresh v2 `McpServer` with the profile-selected surface (default 41, `core` 13, `v2` 15; mapping in `skills/v2-routing.md`). `serveStdio` calls it once per connection; the modern-probe -> legacy fallback discards the first instance and builds a second. |
+| `server-instance.ts` | ~45 | `createServer({handlers,version})`: a fresh v2 `McpServer` with the profile-selected surface (default 41, `core` 13, `v2` 15; mapping in `test/fixtures/v2-routing.md` and the awwwards-skills repository). `serveStdio` calls it once per connection; the modern-probe -> legacy fallback discards the first instance and builds a second. |
 | `version-check.ts` | ~131 | Daily npm-registry check, stderr-only, 3 s timeout, all failures swallowed. Self-update is opt-in via `AWWWARDS_AUTO_UPDATE=1`. |
 | `viewport.ts` | ~20 | Desktop (1440×900) / mobile (390×844, DPR 3, touch) profiles. Width/height go in playwright's `viewport` key; mobile flags spread as sibling context options. |
 | `types.ts`, `index-cli.ts` | — | Shared types (`SiteSummary`, `SiteDetails`, `ElementMedia`); thin crawl-CLI entry. |
@@ -220,8 +220,10 @@ called from `server-instance.ts`, once per `serveStdio` factory invocation.
   `v2` (beta) registers the 15-tool consolidated surface instead of the 1.x
   list. The profile is read once at startup, so changing it needs a restart.
   The complete 1.x → v2 mapping for all 36 replaced names lives in
-  `skills/v2-routing.md`; the skills carry matching profile notes so an agent
-  never calls a 1.x name in a v2 session.
+  `test/fixtures/v2-routing.md` (a copy of the doc owned by the
+  [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills));
+  the skills carry matching profile notes so an agent never calls a 1.x name
+  in a v2 session.
 - `AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default `32000000`) - text + inline image
   base64 bytes per response; over-budget calls keep `isError` and other result
   fields but replace `content` with a
@@ -257,14 +259,16 @@ one-release fallback; the canonical `AWWWARDS_MCP_*` value wins.
 | `scripts/make-demo.mjs` | Builds the README demo assets. |
 | `scripts/record-scrollthrough.mjs` | The validated recording script `motion.ts` was ported from. |
 | `scripts/pack-smoke.mjs` | `npm run pack:smoke` — packs, installs into a temp global prefix, runs all four bins and the side-by-side browser layout (CI, after build). |
-| `scripts/skill-memory.mjs` | Journal → techniques distillation for the skills flywheel (`skills/_memory/techniques.json`). |
 
 ## Skills & showcase
 
-- `skills/` ships seven agent skills (`awwwards-inspiration`,
-  `awwwards-motion-study`, `awwwards-section-loop`, `awwwards-doctor`,
-  `awwwards-setup`, `recreate`, `motion-authoring`). Shipped copies change only
-  via human PRs; local copies self-improve through the skill-memory flywheel.
+- Agent skills live in the separate
+  [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills),
+  which is their source of truth: edit, test, and review them there. This MCP
+  repository does not carry skill copies and does not ship them in the npm
+  package. `test/fixtures/v2-routing.md` is a copy of the routing doc kept only
+  so the MCP test suite can validate the v2 mapping against the registered
+  schemas; update it when that doc changes.
 - `showcase/` holds real sites built through the loop (`ridge`,
   `afjal-portfolio`, `fallow-press`, `neutomni`, `nio`, `two26`), each with `_qa/` capture evidence. They
   double as regression demos for the capture/structure/motion tools.

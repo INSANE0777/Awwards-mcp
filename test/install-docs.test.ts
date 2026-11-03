@@ -8,7 +8,7 @@ const README = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const DEV = readFileSync(new URL("../README.dev.md", import.meta.url), "utf8");
 const PKG = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-) as { scripts?: Record<string, string> };
+) as { scripts?: Record<string, string>; files?: string[] };
 const flatten = (text: string) => text.replace(/\s+/g, " ");
 
 describe("install documentation", () => {
@@ -56,9 +56,14 @@ describe("install documentation", () => {
     expect(text).toContain("manual post-release admin step");
   });
 
+  it("does not ship the skills that moved to awwwards-skills", () => {
+    expect(PKG.files).not.toContain("skills");
+  });
+
   it("README.dev documents the supported layout and the entry guard", () => {
     expect(flatten(DEV)).toContain("global side-by-side install");
     expect(flatten(DEV)).toContain("isCliEntry");
     expect(flatten(DEV)).toContain("exits 0 silently");
+    expect(flatten(DEV)).toContain("awwwards-skills repository");
   });
 });

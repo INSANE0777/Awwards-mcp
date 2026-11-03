@@ -12,8 +12,7 @@
   },
   "files": [
     "dist",
-    "README.md",
-    "skills"
+    "README.md"
   ],
   "keywords": [
     "mcp",
