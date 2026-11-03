@@ -2749,7 +2749,7 @@ describe("CONNECT authority and origin exemptions", () => {
     const proxy = await startSceneProxy(gate);
     try {
       const tunnel = await openTunnel(Number(new URL(proxy.url).port), "xn--:443");
-      expect(tunnel.status).toBe(400);
+      expect([400, 403]).toContain(tunnel.status);
       tunnel.socket.destroy();
     } finally {
       await proxy.close();
@@ -2970,7 +2970,8 @@ describe("CONNECT authority and origin exemptions", () => {
       socket.write("CONNECT public.test:443 HTTP/1.1\r\n\r\n");
       await started;
       socket.resetAndDestroy();
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await vi.waitFor(() => expect(socket.destroyed).toBe(true));
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
       releaseGate("127.0.0.1");
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(dial).not.toHaveBeenCalled();

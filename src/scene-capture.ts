@@ -791,10 +791,16 @@ async function forwardProxyTunnel(
     socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     return;
   }
+  let clientGone = false;
+  const markGone = () => {
+    clientGone = true;
+  };
+  socket.once("close", markGone);
+  socket.on("error", markGone);
   const address = await gate.connectAddress(target.hostname, target.port, [origin]);
   // Proxy close or a client reset may have run while DNS was pending: never
   // dial after either.
-  if (registry.closed || socket.destroyed) {
+  if (registry.closed || clientGone || socket.destroyed) {
     socket.destroy();
     return;
   }

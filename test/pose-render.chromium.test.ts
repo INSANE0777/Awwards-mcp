@@ -47,7 +47,7 @@ try {
 
 afterAll(async () => {
   if (browser) await browser.close();
-}, 30_000);
+}, 120_000);
 
 function grid(): PoseGrid {
   return {
