@@ -255,7 +255,7 @@ describe("downloadSceneAssets transfers", () => {
     expect(result.files).toHaveLength(1);
     const file = result.files[0];
     expect(file.assetId).toBe("asset-1");
-    expect(realpathSync(file.path)).toBe(realpathSync(join(dir, "assets", "asset-1.png")));
+    expect(realpathSync.native(file.path)).toBe(realpathSync.native(join(dir, "assets", "asset-1.png")));
     expect(file.sha256).toBe(sha256(PNG));
     expect(file.mime).toBe("image/png");
     expect(readFileSync(file.path).equals(PNG)).toBe(true);
@@ -465,7 +465,7 @@ describe("downloadSceneAssets transfers", () => {
     );
     expect(result.downloaded).toBe(1);
     expect(result.skipped).toBe(2);
-    expect(realpathSync(result.files[0].path)).toBe(realpathSync(join(dir, "assets", "asset-1.png")));
+    expect(realpathSync.native(result.files[0].path)).toBe(realpathSync.native(join(dir, "assets", "asset-1.png")));
     expect(result.limitations.join(" ")).toMatch(/total cap/);
     expect(readdirSync(join(dir, "assets"))).toEqual(["asset-1.png"]);
   });
@@ -483,7 +483,7 @@ describe("downloadSceneAssets transfers", () => {
 
     const allowed = assetsOf(await download(root, ["asset-2"], fetcher, { allowUnknown: true }));
     expect(allowed.downloaded).toBe(1);
-    expect(allowed.files[0].path && realpathSync(allowed.files[0].path)).toBe(realpathSync(join(dir, "assets", "asset-2.bin")));
+    expect(allowed.files[0].path && realpathSync.native(allowed.files[0].path)).toBe(realpathSync.native(join(dir, "assets", "asset-2.bin")));
   });
 
   it("treats a Content-Type of constructor as unknown, not an extension", async () => {
@@ -619,9 +619,9 @@ describe("downloadSceneAssets real loopback fixture", () => {
         expect(file.mime).toBe("image/png");
         expect(readFileSync(file.path).equals(PNG)).toBe(true);
       }
-      expect(result.files.map((file) => realpathSync(file.path))).toEqual([
-        realpathSync(join(dir, "assets", "asset-1.png")),
-        realpathSync(join(dir, "assets", "asset-2.png")),
+      expect(result.files.map((file) => realpathSync.native(file.path))).toEqual([
+        realpathSync.native(join(dir, "assets", "asset-1.png")),
+        realpathSync.native(join(dir, "assets", "asset-2.png")),
       ]);
       expect(hits).toHaveLength(2);
       // The default 1 s spacing is not disabled by the allowance.
