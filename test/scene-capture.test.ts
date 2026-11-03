@@ -185,6 +185,7 @@ function fakePage(opts: {
         probeCalls += 1;
         return {
           canvasFound: true,
+          canvasMatches: 1,
           rect: { x: 0, y: 0, width: 800, height: 600 },
           backing: { width: 1600, height: 1200 },
           dpr: 2,
@@ -1447,6 +1448,19 @@ describe("captureScene3d", () => {
       sceneDir: dir,
     });
     expect("error" in none && none.error).toMatch(/no visible <canvas>/);
+  });
+
+  it("fails closed when a post-pick probe sees the marker on two elements", async () => {
+    const dir = tmpDir();
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage({ probe: () => ({ canvasMatches: 2 }) }).loader,
+      resolveHost,
+      sceneDir: dir,
+      checkpoints: [{ scrollRatio: 0 }],
+    });
+    expect("error" in result && result.error).toMatch(
+      /marker now matches 2 elements at checkpoint 1; refusing a non-unique frame/,
+    );
   });
 
   it("fails on an oversized frame and removes the temp pack", async () => {

@@ -1261,4 +1261,45 @@ describe("verifyBuild scene3d network guard", () => {
       await close(blocked.server);
     }
   });
+
+  it("aborts a trickled HTML response at the absolute deadline", async () => {
+    let writes = 0;
+    const { server, origin } = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      // One byte every 40ms: each gap is below the inactivity timeout, but the
+      // full body takes ~320ms, far past the 60ms budget.
+      const timer = setInterval(() => {
+        writes++;
+        res.write("x");
+        if (writes >= 8) {
+          clearInterval(timer);
+          res.end();
+        }
+      }, 40);
+      res.on("close", () => clearInterval(timer));
+    });
+    try {
+      const guard = await createSceneNetworkGuard({
+        allowPrivateOrigins: [origin],
+        resolveHost: async () => ["127.0.0.1"],
+      });
+      if ("error" in guard) throw new Error(guard.error);
+      try {
+        const started = Date.now();
+        const result = await fetchSceneHtml(guard.gate, `${origin}/trickle`, {
+          timeoutMs: 60,
+        });
+        const elapsed = Date.now() - started;
+        expect(typeof result).not.toBe("string");
+        if (typeof result !== "string") expect(result.error).toMatch(/timed out|deadline/);
+        // A successful read would take ~320ms and return "xxxxxxxx".
+        expect(elapsed).toBeLessThan(300);
+        expect(writes).toBeLessThan(8);
+      } finally {
+        await guard.close();
+      }
+    } finally {
+      await close(server);
+    }
+  });
 });

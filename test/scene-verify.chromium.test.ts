@@ -77,7 +77,8 @@ if (!${JSON.stringify(variant === "blank")}) {
 
 // Same pixels as sceneHtml("same"), but a decoy canvas pre-marked with the old
 // fixed marker value sits first in document order at a different position.
-function decoyHtml(): string {
+// copyMarker installs a MutationObserver that copies the run marker after pick.
+function decoyHtml(copyMarker = false): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:3000px;background:#0b0d12}
@@ -105,6 +106,16 @@ x.arc(160, 320, 60, 0, Math.PI * 2);
 x.fill();
 x.fillStyle = "#8338ec";
 x.fillRect(340, 300, 180, 60);
+${copyMarker
+      ? `// Repaint the decoy identically, then copy the run marker onto it after the
+// pick, so an unchecked probe resolves the decoy and reports a false 0 diff.
+dx.clearRect(0, 0, 600, 400);
+dx.drawImage(c, 0, 0);
+new MutationObserver(() => {
+  const marker = c.getAttribute("data-awwwards-scene-canvas");
+  if (marker) decoy.setAttribute("data-awwwards-scene-canvas", marker);
+}).observe(c, { attributes: true, attributeFilter: ["data-awwwards-scene-canvas"] });`
+      : ""}
 </script>
 </body></html>`;
 }
@@ -378,6 +389,7 @@ async function startFixture(): Promise<Fixture> {
     "/build-scroll-drift.html": scrollDriftHtml(),
     "/build-lose-context.html": loseContextHtml(),
     "/build-decoy.html": decoyHtml(),
+    "/build-copy-marker.html": decoyHtml(true),
     "/capture-moving.html": captureMovingHtml(),
   } as const;
   const server = createServer((req, res) => {
@@ -539,6 +551,27 @@ if (!chromiumAvailable && REQUIRED) {
         expect(result.verdict).toBe("within-tolerance");
         for (const checkpoint of result.checkpoints) {
           expect(checkpoint.changedPixelFraction).toBe(0);
+        }
+      },
+    );
+
+    it(
+      "a run marker copied to a pixel-identical decoy is never within-tolerance",
+      { timeout: 90_000 },
+      async () => {
+        const result = await verify("build-copy-marker.html", { tolerances });
+        if ("error" in result) throw new Error(result.error);
+
+        // The decoy has identical pixels and sits first, so trusting the first
+        // marker match would report a false 0% diff. Every probe revalidates
+        // uniqueness, so the checkpoint must be inconclusive instead.
+        expect(result.status).toBe("inconclusive");
+        expect(result.verdict).toBe("inconclusive");
+        expect(result.verdict).not.toBe("within-tolerance");
+        expect(result.compared).toBe(0);
+        for (const checkpoint of result.checkpoints) {
+          expect(checkpoint.status).toBe("inconclusive");
+          expect(checkpoint.reasons.join(" ")).toMatch(/no longer unique|non-unique/);
         }
       },
     );

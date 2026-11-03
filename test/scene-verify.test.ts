@@ -474,6 +474,7 @@ function fakeSceneBrowser(
       if (arg && typeof arg === "object" && "canvasSelector" in arg) {
         return {
           canvasFound: true,
+          canvasMatches: 1,
           rect: { x: 40, y: 30, width: 600, height: 400 },
           backing: { width: 600, height: 400 },
           dpr: 1,

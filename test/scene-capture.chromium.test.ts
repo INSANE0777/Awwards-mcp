@@ -137,6 +137,36 @@ wx.fillRect(40, 40, 240, 160);
 </script>
 </body></html>`;
 
+// Same shape as DECOY_HTML, but a MutationObserver copies whatever marker the
+// picker stamps onto #wanted to the decoy that sits first in document order.
+const MARKER_COPY_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:3000px;background:#0b0d12}
+#decoy{position:fixed;left:700px;top:30px;width:400px;height:300px;display:block}
+#wanted{position:fixed;left:40px;top:30px;width:600px;height:400px;display:block}
+</style></head><body>
+<canvas id="decoy" width="400" height="300"></canvas>
+<canvas id="wanted" width="600" height="400"></canvas>
+<script>
+const decoy = document.getElementById("decoy");
+const dx = decoy.getContext("2d");
+dx.fillStyle = "#808080";
+dx.fillRect(0, 0, 400, 300);
+const wanted = document.getElementById("wanted");
+const wx = wanted.getContext("2d");
+wx.fillStyle = "#1b4dff";
+wx.fillRect(0, 0, 600, 400);
+wx.fillStyle = "#ffaa00";
+wx.fillRect(40, 40, 240, 160);
+// Copies the per-run marker after the pick, so only a fresh uniqueness check at
+// each probe can notice that the marker no longer names one element.
+new MutationObserver(() => {
+  const marker = wanted.getAttribute("data-awwwards-scene-canvas");
+  if (marker) decoy.setAttribute("data-awwwards-scene-canvas", marker);
+}).observe(wanted, { attributes: true, attributeFilter: ["data-awwwards-scene-canvas"] });
+</script>
+</body></html>`;
+
 const POPUP_HTML = (popupUrl: string) => `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:3000px;background:#0b0d12}
@@ -260,6 +290,11 @@ async function startFixtures(): Promise<Fixture> {
     if (path === "/decoy.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(DECOY_HTML);
+      return;
+    }
+    if (path === "/copy-marker.html") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(MARKER_COPY_HTML);
       return;
     }
     if (path === "/three.module.js") {
@@ -498,6 +533,31 @@ if (!chromiumAvailable && REQUIRED) {
           // decoy capture would contain no colourful pixels.
           const stats = await pixelStats(result.checkpoints[0].files.canvas);
           expect(stats.colorful).toBeGreaterThan(600 * 400 * 0.9);
+        } finally {
+          await fixture.close();
+        }
+      },
+    );
+
+    it(
+      "fails closed when the run marker is copied to a decoy after the pick",
+      { timeout: 90_000 },
+      async () => {
+        const fixture = await startFixtures();
+        try {
+          const result = await captureScene3d(`${fixture.origin}/copy-marker.html`, {
+            loader,
+            allowPrivateOrigins: [fixture.origin],
+            sceneDir: sceneDir(),
+            canvasSelector: "#wanted",
+            includeViewportShots: false,
+            checkpoints: [{ scrollRatio: 0, waitMs: 100 }],
+          });
+          // The MutationObserver copies the marker after the picker's one-shot
+          // check; every later probe must refuse the now-ambiguous selector.
+          expect("error" in result).toBe(true);
+          if (!("error" in result)) throw new Error("expected a non-unique marker to fail");
+          expect(result.error).toMatch(/matches 2 elements|non-unique|could not be tagged uniquely/);
         } finally {
           await fixture.close();
         }

@@ -894,11 +894,15 @@ function requestGuardedHop(
     const secure = url.protocol === "https:";
     const host = url.hostname.replace(/^\[|\]$/g, "");
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (value: GuardedHop | { error: string }): void => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
       resolve(value);
     };
+    // Absolute deadline: request.setTimeout only measures inactivity, so a
+    // trickled body would otherwise hold the request open past the budget.
     const request = (secure ? httpsRequest : httpRequest)(
       {
         host,
@@ -944,9 +948,13 @@ function requestGuardedHop(
       },
     );
     request.setTimeout(timeoutMs, () => {
-      request.destroy();
       finish({ error: `the HTML request timed out after ${timeoutMs}ms` });
+      request.destroy();
     });
+    timer = setTimeout(() => {
+      finish({ error: `the HTML request exceeded its ${timeoutMs}ms deadline` });
+      request.destroy();
+    }, timeoutMs);
     request.on("error", (err: Error) => finish({ error: err.message }));
     request.end();
   });
@@ -1335,6 +1343,7 @@ export const SCENE_CANVAS_PICK = function (arg: { selector: string; marker: stri
 
 export const SCENE_PROBE = function (arg: { canvasSelector: string; scrollRoot: string }): {
   canvasFound: boolean;
+  canvasMatches: number;
   rect: { x: number; y: number; width: number; height: number } | null;
   backing: { width: number; height: number } | null;
   dpr: number;
@@ -1344,10 +1353,15 @@ export const SCENE_PROBE = function (arg: { canvasSelector: string; scrollRoot: 
   const g = globalThis as any;
   const doc = g.document;
   let canvasFound = false;
+  let canvasMatches = 0;
   let rect: { x: number; y: number; width: number; height: number } | null = null;
   let backing: { width: number; height: number } | null = null;
   try {
-    const el = doc.querySelector(arg.canvasSelector);
+    // The run marker can be copied after the pick, so every probe re-counts:
+    // only exactly one match is a usable canvas, never the first of several.
+    const found = doc.querySelectorAll(arg.canvasSelector);
+    canvasMatches = found.length;
+    const el = canvasMatches === 1 ? found[0] : null;
     if (el) {
       canvasFound = true;
       const r = el.getBoundingClientRect();
@@ -1384,7 +1398,7 @@ export const SCENE_PROBE = function (arg: { canvasSelector: string; scrollRoot: 
       };
     } catch {}
   }
-  return { canvasFound, rect, backing, dpr, scroll, scrollRootFound };
+  return { canvasFound, canvasMatches, rect, backing, dpr, scroll, scrollRootFound };
 };
 export const SCENE_SCROLL = function (arg: { scrollRoot: string; top: number }): number {
   const g = globalThis as any;
@@ -3548,8 +3562,15 @@ export async function captureScene3d(
         const probe = (await page.evaluate(SCENE_PROBE, {
           canvasSelector: usedSelector,
           scrollRoot,
-        })) as { scrollRootFound?: boolean };
+        })) as { scrollRootFound?: boolean; canvasMatches?: number };
         await ensureLive();
+        if (Number(probe?.canvasMatches) > 1) {
+          return {
+            error:
+              `Scene capture failed: the selected canvas marker (${usedSelector}) now matches ` +
+              `${Number(probe?.canvasMatches)} elements; refusing a non-unique capture.`,
+          };
+        }
         if (!probe?.scrollRootFound) {
           return {
             error: `Scene capture failed: scrollRoot ${JSON.stringify(scrollRoot)} matched no element.`,
@@ -3666,8 +3687,14 @@ export async function captureScene3d(
         const before = (await page.evaluate(SCENE_PROBE, {
           canvasSelector: usedSelector,
           scrollRoot: scrollRoot ?? "",
-        })) as { scroll?: { range?: number } | null };
+        })) as { scroll?: { range?: number } | null; canvasMatches?: number };
         await ensureLive();
+        if (Number(before?.canvasMatches) > 1) {
+          throw new Error(
+            `the selected canvas marker now matches ${Number(before?.canvasMatches)} elements ` +
+              `at checkpoint ${index + 1}; refusing a non-unique frame`,
+          );
+        }
         const range = Math.max(0, Number(before?.scroll?.range) || 0);
         const requestedTop = Math.round(checkpoint.scrollRatio * range);
         const immediate = Number(
@@ -3704,6 +3731,7 @@ export async function captureScene3d(
           scrollRoot: scrollRoot ?? "",
         })) as {
           canvasFound?: boolean;
+          canvasMatches?: number;
           rect?: SceneRect | null;
           backing?: { width: number; height: number } | null;
           dpr?: number;
@@ -3711,6 +3739,12 @@ export async function captureScene3d(
           scrollRootFound?: boolean;
         };
         await ensureLive();
+        if (Number(after?.canvasMatches) > 1) {
+          throw new Error(
+            `the selected canvas marker now matches ${Number(after?.canvasMatches)} elements ` +
+              `at checkpoint ${index + 1}; refusing a non-unique frame`,
+          );
+        }
         if (!after?.canvasFound || !after.rect) {
           throw new Error(
             `the selected canvas (${usedSelector}) disappeared at checkpoint ${index + 1}`,
@@ -3750,6 +3784,7 @@ export async function captureScene3d(
             scrollRoot: scrollRoot ?? "",
           })) as {
             canvasFound?: boolean;
+            canvasMatches?: number;
             rect?: SceneRect | null;
             backing?: { width: number; height: number } | null;
             dpr?: number;
@@ -3761,7 +3796,12 @@ export async function captureScene3d(
           const expectedRect = after.rect;
           const expectedBacking = after.backing ?? { width: 0, height: 0 };
           const expectedDpr = Number(after.dpr) || 0;
-          if (!settled?.canvasFound || !settled.rect) {
+          if (Number(settled?.canvasMatches) > 1) {
+            stable = false;
+            stabilityReason =
+              `the canvas marker became non-unique while the frame was being captured ` +
+              `(${Number(settled?.canvasMatches)} elements matched)`;
+          } else if (!settled?.canvasFound || !settled.rect) {
             stable = false;
             stabilityReason = "the canvas disappeared while the frame was being captured";
           } else if (

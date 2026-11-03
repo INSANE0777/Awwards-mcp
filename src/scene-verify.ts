@@ -893,10 +893,17 @@ export async function verifyScene3d(
               scroll?: { top?: number; range?: number } | null;
               scrollRootFound?: boolean;
               canvasFound?: boolean;
+              canvasMatches?: number;
             };
             if (before?.scrollRootFound !== true) {
               reasons.push(
                 `the build page has no scroll root ${JSON.stringify(checkpoint.scrollRoot)} at this checkpoint`,
+              );
+            }
+            if (Number(before?.canvasMatches) > 1) {
+              reasons.push(
+                `the build canvas marker is no longer unique (${Number(before?.canvasMatches)} elements matched); ` +
+                  "refusing to compare",
               );
             }
             const range = Math.max(0, Number(before?.scroll?.range) || 0);
@@ -936,6 +943,7 @@ export async function verifyScene3d(
                 scrollRoot,
               })) as {
                 canvasFound?: boolean;
+                canvasMatches?: number;
                 rect?: SceneRect | null;
                 backing?: { width: number; height: number } | null;
                 dpr?: number;
@@ -947,6 +955,11 @@ export async function verifyScene3d(
               if (after?.scrollRootFound !== true) {
                 reasons.push(
                   `the build page lost the scroll root ${JSON.stringify(checkpoint.scrollRoot)} at this checkpoint`,
+                );
+              } else if (Number(after?.canvasMatches) > 1) {
+                reasons.push(
+                  `the build canvas marker is no longer unique (${Number(after?.canvasMatches)} elements matched); ` +
+                    "refusing to compare",
                 );
               } else if (!after?.canvasFound || !after.rect) {
                 reasons.push("the build canvas disappeared at this checkpoint");
@@ -1001,6 +1014,7 @@ export async function verifyScene3d(
               scrollRoot,
             })) as {
               canvasFound?: boolean;
+              canvasMatches?: number;
               rect?: SceneRect | null;
               backing?: { width: number; height: number } | null;
               dpr?: number;
@@ -1012,6 +1026,11 @@ export async function verifyScene3d(
               reasons.push("the pre-screenshot scroll position was not recorded");
             } else if (postLosses > 0) {
               reasons.push("the build page lost its WebGL context during the screenshot");
+            } else if (Number(post?.canvasMatches) > 1) {
+              reasons.push(
+                `the build canvas marker became non-unique during the screenshot ` +
+                  `(${Number(post?.canvasMatches)} elements matched); refusing to compare`,
+              );
             } else if (!post?.canvasFound || !post.rect) {
               reasons.push("the build canvas disappeared during the screenshot");
             } else {
