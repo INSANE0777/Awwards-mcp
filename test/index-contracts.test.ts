@@ -305,7 +305,12 @@ describe("index output contracts", () => {
   it("advertises outputSchema only on the contracted tools", async () => {
     const full = await listedTools(undefined);
     expect(full).toHaveLength(41);
-    expect(pilotNames(full)).toEqual(["get_index_stats", "get_index_status", "verify_build"]);
+    expect(pilotNames(full)).toEqual([
+      "create_design_brief",
+      "get_index_stats",
+      "get_index_status",
+      "verify_build",
+    ]);
 
     const core = await listedTools("core");
     expect(core).toHaveLength(13);
@@ -313,11 +318,16 @@ describe("index output contracts", () => {
 
     const v2 = await listedTools("v2");
     expect(v2).toHaveLength(15);
-    expect(pilotNames(v2)).toEqual(["get_index", "verify_build"]);
+    expect(pilotNames(v2)).toEqual(["create_design_brief", "get_index", "verify_build"]);
 
     // MCP requires an object root; a union root would be wrapped as {result:.}
     // on the 2025 wire and would no longer match the text payload.
-    for (const name of ["get_index_status", "get_index_stats", "verify_build"]) {
+    for (const name of [
+      "create_design_brief",
+      "get_index_status",
+      "get_index_stats",
+      "verify_build",
+    ]) {
       expect(full.find((tool) => tool.name === name)?.outputSchema?.type).toBe("object");
     }
     expect(v2.find((tool) => tool.name === "get_index")?.outputSchema?.type).toBe("object");
