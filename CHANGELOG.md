@@ -3,7 +3,26 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## Unreleased
+## v1.17.0 - 2026-11-03
+
+### Index output contracts
+
+- `get_index_status`, `get_index_stats` and the v2 `get_index` status/stats branches now advertise output schemas and return matching `structuredContent` while keeping their text output unchanged. Only these pilot tools advertise schemas; the rest of the surface does not.
+- The response byte budget now counts the full serialized result, including `structuredContent`; truncation drops the structured payload instead of letting it bypass the limit.
+
+### Search and taxonomy
+
+- Cached and freshly fetched site searches now use the same FTS query, including after partial top-ups; punctuation is tokenized (`next.js` -> `next` + `js`) rather than joined.
+- Tag and technology facets use canonical equality after one normalization path, so `react` no longer matches React Native.
+- Legacy taxonomy caches without technologies refresh once on read, with a one-hour backoff and coalesced concurrent reads; a partial parse keeps cached filters/colors and reports `taxonomyStale`.
+- Verification keeps full band labels and aligns motion-registry discovery with the census.
+
+### Maintenance and tooling
+
+- Parser-drift CI no longer commits, rebases or pushes to `main`; it keeps artifacts and issue reporting with read-only contents.
+- CI covers Ubuntu Node 22/24, Windows 24 and macOS 15 (arm64), plus an isolated real-Chromium smoke. Windows runs with bounded workers.
+- Added local-only v2 adoption and performance benchmarks (`scripts/v2-eval.mjs`, `npm run perf:bench`) with fail-closed egress guards.
+- `spectorjs@0.9.33` is an optional dependency for the opt-in scene capture adapter.
 
 ### Scene3d hardening (review fixes)
 
