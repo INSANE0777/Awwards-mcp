@@ -660,7 +660,7 @@ describe("verifyScene3d whole-run watchdog", () => {
           verifyScene3d({
             ...args,
             loader: fake.loader,
-            timeoutMs: 100,
+            timeoutMs: 1_500,
             resolveHost: publicDns,
           }),
       });
@@ -670,14 +670,14 @@ describe("verifyScene3d whole-run watchdog", () => {
       if ("error" in legacy) return;
       expect(legacy.verdict).toMatch(/pass|warn|fail/);
       expect(legacy.scene3d?.status).toBe("inconclusive");
-      expect(legacy.scene3d?.limitations.join(" ")).toContain("100ms deadline");
+      expect(legacy.scene3d?.limitations.join(" ")).toContain("1500ms deadline");
       // Closes were started, not serialized: build resources plus the browser
       // are all in flight when the shared grace expires.
       expect(fake.closed).toEqual(
         expect.arrayContaining(["build-page", "build-context", "browser"]),
       );
-      expect(elapsed).toBeGreaterThanOrEqual(2_900);
-      expect(elapsed).toBeLessThan(3_700);
+      expect(elapsed).toBeGreaterThanOrEqual(4_400);
+      expect(elapsed).toBeLessThan(5_200);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

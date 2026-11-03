@@ -144,12 +144,13 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "analyze_motion", "arguments": { "request": { "kind": "hover", "url": "https://example.com" } } }
 ```
 
-### `capture_page` (4 branches)
+### `capture_page` (5 branches)
 
 ```json
 { "tool": "capture_page", "arguments": { "request": { "kind": "screenshot", "url": "https://example.com" } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "component", "url": "https://example.com", "selector": "header" } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "pose", "url": "https://example.com" } } }
+{ "tool": "capture_page", "arguments": { "request": { "kind": "scene", "op": "capture", "url": "https://example.com", "adapters": ["three"] } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "recording", "url": "https://example.com" } } }
 ```
 
@@ -162,12 +163,13 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "audit_page", "arguments": { "request": { "kind": "bundle", "url": "https://example.com", "keywords": ["gsap"] } } }
 ```
 
-### `build_motion` (3 branches)
+### `build_motion` (4 branches)
 
 ```json
 { "tool": "build_motion", "arguments": { "request": { "kind": "pose_stub", "poseGrid": { "id": "pose-grid-v1", "url": "https://example.com", "capturedAt": 0, "steps": 1, "canvasSelector": "canvas", "canvasW": 1, "canvasH": 1, "snapshots": [{ "step": 0, "scrollY": 0, "scrollRatio": 0, "frames": [{ "label": "canvas", "dataUrlPng": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" }] }], "viewport": { "width": 1440, "height": 900 } } } } }
 { "tool": "build_motion", "arguments": { "request": { "kind": "gsap_stub", "scrollCensus": { "anims": [], "gsapTriggers": [] } } } }
 { "tool": "build_motion", "arguments": { "request": { "kind": "manifest", "bands": { "bands": [{ "label": "#hero", "tag": "section" }] }, "scrollCensus": { "anims": [], "gsapTriggers": [] } } } }
+{ "tool": "build_motion", "arguments": { "request": { "kind": "scene_stub", "evidencePath": "/path/to/scene-captures/scene-abc/evidence.json", "assetBindings": [] } } }
 ```
 
 ### `monitor_awards` (4 actions)

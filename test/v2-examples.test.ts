@@ -122,7 +122,7 @@ describe("skills/v2-routing.md exact examples", () => {
         expect(args, example.tool).toHaveProperty("request");
       }
     }
-    expect(EXAMPLES).toHaveLength(42);
+    expect(EXAMPLES).toHaveLength(44);
   });
 
   it("covers every consolidated branch exactly once", () => {
