@@ -469,7 +469,10 @@ export async function create_design_brief(ctx: HandlerContext, args: DesignBrief
     }
 
     const brief = createDesignBrief(args, sources);
-    return { content: [text(renderDesignBrief(brief))] };
+    return {
+      content: [text(renderDesignBrief(brief))],
+      structuredContent: brief as unknown as Record<string, unknown>,
+    };
   } catch (err) {
     return errorResponse(err);
   }

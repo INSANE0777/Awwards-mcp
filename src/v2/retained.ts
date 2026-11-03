@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { designBriefOutputSchema } from "../brief-contracts.js";
 import { verifyFlowArgsSchema } from "../verify-flow.js";
 import { scene3dVerifySchema } from "../tools/scene.js";
 import { verifyBuildOutputSchema } from "../verify-contracts.js";
@@ -10,7 +11,7 @@ import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } fro
 export function registerCreateDesignBriefV2(ctx: ToolContext): void {
   ctx.tool(
     "create_design_brief",
-    "Synthesize a cited design direction from 2-5 Awwwards site slugs plus a project goal. Uses cached detail (including its element list) and Motion DNA evidence first and fetches only missing details; includeStructure=true also runs a browser band analysis per reference. Returns one Markdown text block containing versioned JSON: shared signals vs one-site outliers, evidence gaps, an evidence-backed interaction plan, and reduced-motion/content/keyboard guardrails. Use search_references to find slugs; use get_reference for raw side-by-side DNA and inspect_page for a band map - this tool synthesizes a brief; it does not score a build or run a motion census.",
+    "Synthesize a cited design direction from 2-5 Awwwards site slugs plus a project goal. Uses cached detail (including its element list) and Motion DNA evidence first and fetches only missing details; includeStructure=true also runs a browser band analysis per reference. Returns one Markdown text block containing versioned JSON: shared signals vs one-site outliers, evidence gaps, an evidence-backed interaction plan, and reduced-motion/content/keyboard guardrails. The structuredContent field mirrors that JSON. Use search_references to find slugs; use get_reference for raw side-by-side DNA and inspect_page for a band map - this tool synthesizes a brief; it does not score a build or run a motion census.",
     {
       slugs: z
         .array(z.string().regex(/^[\w-]+$/))
@@ -31,6 +32,7 @@ export function registerCreateDesignBriefV2(ctx: ToolContext): void {
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.create_design_brief(args)),
+    designBriefOutputSchema,
   );
 }
 

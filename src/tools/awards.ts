@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { designBriefOutputSchema } from "../brief-contracts.js";
 import { detailArgsSchema } from "../detail-schema.js";
 import { indexStatsOutputSchema, indexStatusOutputSchema } from "../index-contracts.js";
 import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } from "./shared.js";
@@ -71,7 +72,7 @@ export function registerCompareSites(ctx: ToolContext): void {
 export function registerCreateDesignBrief(ctx: ToolContext): void {
   ctx.tool(
     "create_design_brief",
-    "Synthesize a cited design direction from 2–5 Awwwards site slugs plus a project goal. Uses cached detail (including its element list) and Motion DNA evidence first and fetches only missing details; includeStructure=true also runs a browser band analysis per reference. Returns one Markdown text block containing versioned JSON: shared signals vs one-site outliers, evidence gaps, an evidence-backed interaction plan, and reduced-motion/content/keyboard guardrails. Use search_sites to find slugs; use compare_sites for raw side-by-side DNA and analyze_page_structure for a band map — this tool synthesizes a brief; it does not score a build or run a motion census.",
+    "Synthesize a cited design direction from 2–5 Awwwards site slugs plus a project goal. Uses cached detail (including its element list) and Motion DNA evidence first and fetches only missing details; includeStructure=true also runs a browser band analysis per reference. Returns one Markdown text block containing versioned JSON: shared signals vs one-site outliers, evidence gaps, an evidence-backed interaction plan, and reduced-motion/content/keyboard guardrails. The structuredContent field mirrors that JSON. Use search_sites to find slugs; use compare_sites for raw side-by-side DNA and analyze_page_structure for a band map — this tool synthesizes a brief; it does not score a build or run a motion census.",
     {
       slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(5).refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "slugs must be distinct").describe("Two to five distinct site slugs from search_sites (letters, digits, underscores or hyphens; no duplicates)"),
       goal: z.string().trim().min(1).max(2000).describe("Project goal the brief must serve, e.g. 'a portfolio for a type foundry'; required and non-blank"),
@@ -84,6 +85,7 @@ export function registerCreateDesignBrief(ctx: ToolContext): void {
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.create_design_brief(args)),
+    designBriefOutputSchema,
   );
 }
 
