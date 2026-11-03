@@ -44,6 +44,7 @@
     "smoke": "tsx test/live-smoke.ts",
     "smoke:browser": "node scripts/browser-smoke.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
+    "protocol:smoke": "node scripts/protocol-smoke.mjs",
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",
     "perf:bench": "node scripts/perf-bench.mjs",
