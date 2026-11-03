@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { verifyFlowArgsSchema } from "../verify-flow.js";
+import { verifyBuildOutputSchema } from "../verify-contracts.js";
 import { scene3dVerifySchema } from "./scene.js";
 import { asMcpResult, viewportSchema, type ToolContext } from "./shared.js";
 
@@ -121,5 +122,6 @@ export function registerVerifyBuild(ctx: ToolContext): void {
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.verify_build(args)),
+    verifyBuildOutputSchema,
   );
 }

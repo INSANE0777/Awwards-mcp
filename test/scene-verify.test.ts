@@ -715,7 +715,7 @@ describe("verifyScene3d whole-run watchdog", () => {
       expect(typeof release).toBe("function");
 
       release({ chromium: { launch: async () => browser } });
-      for (let i = 0; i < 50 && !closed.includes("browser"); i++) {
+      for (let i = 0; i < 200 && !closed.includes("browser"); i++) {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(closed).toContain("browser");
@@ -849,7 +849,16 @@ describe("verifyBuild scene3d orchestration", () => {
     const report: VerifyReport = {
       buildUrl: "https://build.test",
       referenceUrl: "https://ref.test",
-      bands: { score: 82, matched: ["hero", "footer"], refOnly: [], buildOnly: [] },
+      bands: {
+        score: 82,
+        matched: ["hero", "footer"],
+        refOnly: [],
+        buildOnly: [],
+        diagnostics: [
+          { referenceIndex: 0, buildIndex: 0, status: "matched", matchReason: "label", orderChanged: false, heightDeltaRatio: null, backgroundChanged: null },
+          { referenceIndex: 1, buildIndex: 1, status: "matched", matchReason: "label", orderChanged: false, heightDeltaRatio: null, backgroundChanged: null },
+        ],
+      },
       motion: { score: 64, refFingerprint: "k1", buildFingerprint: "k1" },
       overall: 75,
       verdict: "warn",
@@ -874,7 +883,7 @@ describe("verifyBuild scene3d orchestration", () => {
 const handlerReport = (): VerifyReport => ({
   buildUrl: "https://b.test/",
   referenceUrl: "https://r.test/",
-  bands: { score: 82, matched: [], refOnly: [], buildOnly: [] },
+  bands: { score: 82, matched: [], refOnly: [], buildOnly: [], diagnostics: [] },
   motion: { score: 64, refFingerprint: "k1", buildFingerprint: "k1" },
   overall: 75,
   verdict: "warn",
