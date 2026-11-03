@@ -31,8 +31,9 @@ const commentText = (s: string): string =>
 const r4 = (n: number): number => Math.round(n * 1000) / 1000;
 
 // PURE + synchronous: renders a PoseGrid as a standalone three.js stub page —
-// snapshot frames preloaded as an image sequence, camera path linearly
-// interpolated between snapshot scrollRatios, scroll-scrubbed with gsap, and a
+// snapshot frames preloaded as an image sequence, a SYNTHESIZED camera path
+// linearly interpolated between snapshot scrollRatios (guidance, not recovered
+// camera data — PoseSnapshot has no x/y/z), scroll-scrubbed with gsap, and a
 // prefers-reduced-motion early-return to a static first frame. When a
 // ScrollCensus is supplied, st/pin/ease SUGGESTION comment lines precede the
 // module script (guidance for the implementer, never executed). Emits no eval
@@ -46,7 +47,8 @@ export function buildPoseStubHtml(
   const frames = grid.snapshots
     .flatMap((s) => s.frames.map((f) => f.dataUrlPng))
     .filter(Boolean);
-  // Camera anchors: one per snapshot — slight rise + dolly-in per scroll step.
+  // Synthesized camera anchors (guidance, not recovered camera data): one per
+  // snapshot — slight rise + dolly-in per scroll step.
   const anchors = grid.snapshots.map((s) => ({
     t: r4(s.scrollRatio),
     x: 0,
@@ -69,7 +71,7 @@ export function buildPoseStubHtml(
       );
     if (s.ease.length > 0)
       lines.push(
-        `// SUGGESTION(ease) from reference census: ${commentText(s.ease.join(", "))} — reuse these easings between camera anchors`,
+        `// SUGGESTION(ease) from reference census: ${commentText(s.ease.join(", "))} — reuse these easings between synthesized camera anchors`,
       );
     suggestions = lines.length ? lines.join("\n") + "\n" : "";
   }
@@ -100,25 +102,42 @@ import { gsap } from "https://unpkg.com/gsap@3.12.5/index.js";
 
 // Captured frames, one dataURL per scroll step (values from the PoseGrid).
 const FRAMES = ${framesJson};
-// Camera anchors per snapshot: t = scrollRatio of the source capture.
+// Synthesized camera anchors per snapshot (guidance only, not recovered camera data):
+// t = scrollRatio of the source capture.
 const ANCHORS = ${anchorsJson};
 
 const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("pose-canvas"), antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight, false);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+const geometry = new THREE.PlaneGeometry(6.4, 3.6);
 const material = new THREE.MeshBasicMaterial();
-scene.add(new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3.6), material));
+scene.add(new THREE.Mesh(geometry, material));
 
 const textureLoader = new THREE.TextureLoader();
+// Frame loads race: every request gets a monotonically increasing id, and only
+// the newest one may swap the map. Re-requesting the index already requested is
+// a no-op, so a scrub tick cannot start a duplicate decode of the same frame.
+let requestedFrame = -1;
+let frameRequest = 0;
 function showFrame(i) {
-  const url = FRAMES[Math.max(0, Math.min(FRAMES.length - 1, Math.round(i)))];
-  if (!url) return;
+  const index = Math.max(0, Math.min(FRAMES.length - 1, Math.round(i)));
+  const url = FRAMES[index];
+  if (!url || index === requestedFrame) return;
+  requestedFrame = index;
+  const request = ++frameRequest;
   textureLoader.load(url, function (tex) {
+    if (request !== frameRequest) {
+      // A newer frame was requested while this one decoded: it must not
+      // overwrite the newest frame or re-render with the older texture.
+      tex.dispose();
+      return;
+    }
     tex.colorSpace = THREE.SRGBColorSpace;
     if (material.map && material.map !== tex) material.map.dispose();
     material.map = tex;
     material.needsUpdate = true;
+    renderer.render(scene, camera);
   });
 }
 
@@ -149,12 +168,31 @@ function renderAt(t) {
   current = t;
   posAt(t);
   showFrame(t * (FRAMES.length - 1));
+  renderer.render(scene, camera);
 }
 
+function resize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderer.render(scene, camera);
+}
+window.addEventListener("resize", resize);
+
+window.addEventListener("pagehide", function (event) {
+  if (event.persisted) return; // keep resources alive for bfcache restore
+  if (material.map) material.map.dispose();
+  geometry.dispose();
+  material.dispose();
+  renderer.dispose();
+});
+
+posAt(0);
 showFrame(0);
 if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
   // Reduced motion: static first frame, no scroll-driven camera motion.
   showFrame(0);
+  renderer.render(scene, camera);
 } else {
   gsap.ticker.add(function () {
     renderAt(scrubTarget());

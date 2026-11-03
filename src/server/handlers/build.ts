@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { buildGsapStub } from "../../gsap-stub.js";
 import { censusInputError, poseCensusError, scaffoldMotionManifest, unwrapScrollCensus } from "../../motion-manifest.js";
 import { poseGridInputError, type PoseGrid } from "../../pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "../../pose-stub.js";
+import type { SceneStubOptions } from "../../scene-stub.js";
 import type { ScrollCensus } from "../../census.js";
 import type { HandlerContext } from "../context.js";
 import { errorResponse, text } from "../types.js";
@@ -117,6 +119,29 @@ export async function build_gsap_stub(ctx: HandlerContext, args: {
         stubHtml: buildGsapStub(a.poseGrid, a.scrollCensus),
       }));
     return { content: [text(JSON.stringify(build({ ...args, scrollCensus: census }), null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+// Offline scene scaffold: reads one scene-evidence-v1 pack (plus lstat of the
+// caller's local asset paths) and returns files; nothing is fetched or written.
+export async function build_scene_stub(ctx: HandlerContext, args: {
+  evidencePath: string;
+  assetBindings?: { resourceId: string; localPath: string }[];
+  title?: string;
+}): Promise<ToolResponse> {
+  try {
+    const build =
+      ctx.deps.sceneStubFn ??
+      ((opts: SceneStubOptions) =>
+        import("../../scene-stub.js").then((m) => m.buildSceneStub(opts)));
+    const result = await build({
+      ...args,
+      sceneDir: join(ctx.cache.rootDir, "scene-captures"),
+    });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    return { content: [text(JSON.stringify(result, null, 1))] };
   } catch (err) {
     return errorResponse(err);
   }

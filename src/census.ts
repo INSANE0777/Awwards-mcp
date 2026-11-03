@@ -634,6 +634,8 @@ export async function captureScrollCensus(
     reducedMotion?: boolean;
     scrubProbe?: boolean;
     loader?: () => Promise<any>;
+    /** Route every browser connection through this loopback guard proxy. */
+    proxyServer?: string;
   },
 ): Promise<ScrollCensus | { error: string }> {
   let chrome: any;
@@ -641,7 +643,11 @@ export async function captureScrollCensus(
     // Lazy default: playwright is only touched when the tool actually runs.
     const loader = opts?.loader ?? (() => import("playwright" as string));
     ({ chromium: chrome } = await loader());
-    const browser = await chrome.launch();
+    const browser = await chrome.launch(
+      opts?.proxyServer
+        ? { proxy: { server: opts.proxyServer, bypass: "<-loopback>" } }
+        : {},
+    );
     try {
       // Viewport profile split as in structure.ts: width/height fill the
       // `viewport` key; mobile-profile flags are sibling context options.

@@ -1,7 +1,8 @@
 // GSAP motion-stub builder: turns an evidence pack (pose grid + scroll census)
 // into a runnable single-file HTML stub — GSAP+ScrollTrigger timelines per
-// census anim, an optional scroll-driven camera module from pose-grid anchors,
-// and an unconditional reduced-motion guard.
+// census anim, an optional scroll-driven camera module with anchors synthesized
+// from pose-grid scroll ratios (guidance, not recovered camera data), and an
+// unconditional reduced-motion guard.
 // Pure + synchronous: never throws, never fetches, byte-deterministic output
 // (no timestamps) so consumers can pin byte-equality on it.
 // Ported from the agensi-kit gsap-stub tool (MIT); CLI/fs parts dropped.

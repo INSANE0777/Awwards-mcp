@@ -63,8 +63,14 @@ a Next source means you can mirror component shapes. Then
   real sections inside it captured fine by class.
 - **Shared canvas / WebGL hero** spanning many bands → **the page does
   not slice.** Treat that canvas region as ONE unit: `capture_pose_3d`
-  for the camera path, rebuild as a single component, then loop
-  normally for everything after it. Slicing a shared-canvas page into
+  for canvas frames + synthesized camera guidance, rebuild as a single
+  component, then loop normally for everything after it. For a Three.js
+  scene, `capture_scene_3d` with `adapters:["three"]` adds only reachable
+  nodes/cameras/lights; `build_scene_stub` recreates the supported primitive
+  subset and exact captured camera matrix, while parent transforms are lost and
+  controls are never recreated. For shader evidence, `adapters:["spector"]`
+  captures one drawing frame with command counts and capped shader source — not
+  arguments, state or raw capture. Slicing a shared-canvas page into
   per-section captures produces sections that each reference a canvas
   none of them own.
 
@@ -167,10 +173,29 @@ verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
 - `verify_build` — the per-band score gate (steps 3 and 5); evidence now
   includes measured perf (fps, dropped frames, long tasks) and anti-pattern
   counts from instrumented live probes. Runs a real browser — expect
-  ~2 min per call.
+  ~2 min per call. For a shared WebGL canvas, opt-in `scene3d` replays a
+  `capture_scene_3d` pack on the build canvas as a separate gate with its own
+  status/verdict; it never upgrades the legacy band pass, unstable capture
+  frames are rejected, and its build URL must resolve publicly (loopback is
+  refused). It preflights both URLs before the legacy scans and makes zero
+  requests when either is private; the deadline is the replayed checkpoint
+  waits + 10 s headroom (floor 15 s, cap 45 s), and the canvas gets a per-run
+  marker so duplicate or pre-marked decoys are refused.
 - `audit_url compact:true` — quick perf and anti-pattern checks when you only
   need the summary, not the full evidence.
-- `capture_pose_3d` — camera path for shared-canvas units (step 0).
+- `capture_pose_3d` - canvas frames + synthesized camera guidance for
+  shared-canvas units (step 0); no camera transforms are recovered, and the
+  generated stub dedupes same-index frame loads and discards stale decodes.
+- `capture_scene_3d` + `build_scene_stub` - opt-in Three.js adapter for
+  shared canvases: reachable globals only, with primitives, standard/basic
+  materials and a perspective camera from its exact matrix reconstructed.
+  Captured controls are never recreated and stay unresolved. Module-local
+  scenes, parent transforms and unbound textures are lost, and `scene.json`
+  frame references are basenames extracted from either Windows or POSIX paths.
+- `capture_scene_3d` spector adapter - optional `spectorjs@0.9.33`; captures one
+  WebGL frame with command counts/statuses and capped shader source. It needs a
+  drawing frame, transfers no arguments/state/raw capture, and a missing package
+  only degrades the adapter.
 - `analyze_scroll_map` / `analyze_hover_census` - per-section motion
   census to build from. `analyze_scroll_map` rows now carry keyframe
   value-pairs and a site-level `gsapTriggers` list (numeric pixel
@@ -178,8 +203,9 @@ verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
   not invented ones. Hover samples include animations captured DURING
   the hover (`activeAnims`), which is how event-driven tweens get seen.
 - `build_gsap_stub` - turns the captured censuses into a runnable
-  GSAP+ScrollTrigger stub (durations, easings, scrub/pin, camera from
-  `capture_pose_3d`, reduced-motion guard) — step 2's motion wiring, generated.
+  GSAP+ScrollTrigger stub (durations, easings, scrub/pin, synthesized
+  camera guidance from `capture_pose_3d`, reduced-motion guard) - step 2's
+  motion wiring, generated.
 - `build_project` — build → convert → own the motion: `--target vite|astro|next`
   gives native structure (section components, shell, split CSS, ordered libs);
   `--authored --motion census.json` drops site logic and emits

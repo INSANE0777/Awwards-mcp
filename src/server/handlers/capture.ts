@@ -1,7 +1,10 @@
+import { join } from "node:path";
 import { DEFAULT_MAX_INLINE_BYTES } from "../../capture.js";
 import type { CaptureOpts } from "../../capture.js";
 import { summarizePalette, summarizeTypography } from "../../component.js";
 import { summarizeImages } from "../../images.js";
+import { summarizeSceneEvidence, type SceneAdapterName, type SceneCaptureOptions } from "../../scene-capture.js";
+import type { SceneAssetDownloadOptions, SceneRights } from "../../scene-assets.js";
 import { diffBands } from "../../structure.js";
 import type { WaitOpts, WaitStrategy } from "../../structure.js";
 import { exportDesignTokens } from "../../tokens.js";
@@ -207,6 +210,66 @@ export async function capture_pose_3d(ctx: HandlerContext, args: {
         import("../../pose3d.js").then((m) => m.capturePose3d(url, opts)));
     const result = await capture(args.url, { steps: args.steps, viewport: args.viewport });
     if ("error" in result) return { content: [text(result.error)], isError: true };
+    return { content: [text(JSON.stringify(result, null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+// Passive scene evidence: checkpoint frames + canvas geometry + a response
+// inventory, written under <cache>/scene-captures. The default loader is lazy
+// (playwright is only touched when the tool runs); no image bytes are inlined.
+export async function capture_scene_3d(ctx: HandlerContext, args: {
+  url: string;
+  canvasSelector?: string;
+  scrollRoot?: string;
+  viewport?: ViewportName;
+  checkpoints?: { scrollRatio: number; pointer?: { x: number; y: number }; waitMs?: number }[];
+  assetOrigins?: string[];
+  adapters?: SceneAdapterName[];
+  includeViewportShots?: boolean;
+}): Promise<ToolResponse> {
+  try {
+    const capture =
+      ctx.deps.captureSceneFn ??
+      ((url: string, opts?: SceneCaptureOptions) =>
+        import("../../scene-capture.js").then((m) => m.captureScene3d(url, opts)));
+    const result = await capture(args.url, {
+      canvasSelector: args.canvasSelector,
+      scrollRoot: args.scrollRoot,
+      viewport: args.viewport ?? "desktop",
+      checkpoints: args.checkpoints,
+      assetOrigins: args.assetOrigins,
+      ...(args.adapters !== undefined ? { adapters: args.adapters } : {}),
+      includeViewportShots: args.includeViewportShots,
+      sceneDir: join(ctx.cache.rootDir, "scene-captures"),
+    });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    return { content: [text(JSON.stringify(summarizeSceneEvidence(result), null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+// Selected asset download for one capture: the module reads only that
+// capture's evidence inventory, enforces the caps and writes provenance.
+export async function download_scene_assets(ctx: HandlerContext, args: {
+  captureId: string;
+  assetIds: string[];
+  rights: SceneRights;
+  allowUnknown?: boolean;
+}): Promise<ToolResponse> {
+  try {
+    const download =
+      ctx.deps.downloadSceneAssetsFn ??
+      ((opts: SceneAssetDownloadOptions) =>
+        import("../../scene-assets.js").then((m) => m.downloadSceneAssets(opts)));
+    const result = await download({
+      ...args,
+      sceneDir: join(ctx.cache.rootDir, "scene-captures"),
+    });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    // Already compact: paths, hashes, counts and rights only, never bodies.
     return { content: [text(JSON.stringify(result, null, 1))] };
   } catch (err) {
     return errorResponse(err);

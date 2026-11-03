@@ -260,7 +260,7 @@ describe("index output contracts", () => {
 
   it("advertises outputSchema only on the pilot tools", async () => {
     const full = await listedTools(undefined);
-    expect(full).toHaveLength(39);
+    expect(full).toHaveLength(41);
     expect(pilotNames(full)).toEqual(["get_index_stats", "get_index_status"]);
 
     const core = await listedTools("core");

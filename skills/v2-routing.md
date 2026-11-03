@@ -7,7 +7,7 @@ call in a skill is a dead tool. Set the variable in the server `env` and
 
 | `AWWWARDS_MCP_PROFILE` | Tools | Surface |
 |---|---|---|
-| `full` (default) | 39 | Every 1.x tool, unchanged |
+| `full` (default) | 41 | Every 1.x tool, unchanged |
 | `core` | 13 | Build-loop subset of the 1.x tools; includes `get_annual_categories` |
 | `v2` | 15 | 10 consolidated tools + 5 retained flat tools |
 
@@ -26,7 +26,7 @@ branch (`kind` or `action`). There is no all-mode and no cross-branch mixing:
 
 ## Replaced operations: 1.x → v2
 
-All 34 replaced 1.x names. Fields marked `?` are optional; branch objects are
+All 36 replaced 1.x names. Fields marked `?` are optional; branch objects are
 strict, so do not send fields from another branch.
 
 | 1.x tool | v2 call |
@@ -55,6 +55,7 @@ strict, so do not send fields from another branch.
 | `capture_live_site` | `capture_page {request:{kind:"screenshot", url, waitStrategy?, viewport?, inline?, maxInlineBytes?, waitForOverlay?, scrollCapture?}}` |
 | `capture_component` | `capture_page {request:{kind:"component", url, selector?, maxNodes?, viewport?, compact?}}` |
 | `capture_pose_3d` | `capture_page {request:{kind:"pose", url, steps?, viewport?}}` |
+| `capture_scene_3d` | `capture_page {request:{kind:"scene", op:"capture", url, canvasSelector?, scrollRoot?, viewport?, checkpoints?, assetOrigins?, adapters?, includeViewportShots?}}` (then `op:"download_assets"` for inventory assets) |
 | `record_site_motion` | `capture_page {request:{kind:"recording", url, frames?, waitStrategy?, viewport?}}` |
 | `audit_url` | `audit_page {request:{kind:"performance", url, viewport?, timeoutMs?, compact?}}` |
 | `analyze_accessibility` | `audit_page {request:{kind:"accessibility", url, viewport?, limit?}}` |
@@ -63,6 +64,7 @@ strict, so do not send fields from another branch.
 | `build_pose_stub` | `build_motion {request:{kind:"pose_stub", poseGrid, scrollCensus?}}` |
 | `build_gsap_stub` | `build_motion {request:{kind:"gsap_stub", scrollCensus, poseGrid?}}` |
 | `build_motion_manifest` | `build_motion {request:{kind:"manifest", bands, scrollCensus, sections?}}` |
+| `build_scene_stub` | `build_motion {request:{kind:"scene_stub", evidencePath, assetBindings?, title?}}` |
 | `new_winners` | `monitor_awards {request:{action:"poll_winners", award?}}` |
 | `watch_site` | `monitor_awards {request:{action:"add_watch", kind, pattern, award?, note?}}` for add; `monitor_awards {request:{action:"list_watches"}}` for list; `monitor_awards {request:{action:"remove_watch", kind, pattern}}` for remove |
 
@@ -142,12 +144,13 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "analyze_motion", "arguments": { "request": { "kind": "hover", "url": "https://example.com" } } }
 ```
 
-### `capture_page` (4 branches)
+### `capture_page` (5 branches)
 
 ```json
 { "tool": "capture_page", "arguments": { "request": { "kind": "screenshot", "url": "https://example.com" } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "component", "url": "https://example.com", "selector": "header" } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "pose", "url": "https://example.com" } } }
+{ "tool": "capture_page", "arguments": { "request": { "kind": "scene", "op": "capture", "url": "https://example.com", "adapters": ["three"] } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "recording", "url": "https://example.com" } } }
 ```
 
@@ -160,12 +163,13 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "audit_page", "arguments": { "request": { "kind": "bundle", "url": "https://example.com", "keywords": ["gsap"] } } }
 ```
 
-### `build_motion` (3 branches)
+### `build_motion` (4 branches)
 
 ```json
 { "tool": "build_motion", "arguments": { "request": { "kind": "pose_stub", "poseGrid": { "id": "pose-grid-v1", "url": "https://example.com", "capturedAt": 0, "steps": 1, "canvasSelector": "canvas", "canvasW": 1, "canvasH": 1, "snapshots": [{ "step": 0, "scrollY": 0, "scrollRatio": 0, "frames": [{ "label": "canvas", "dataUrlPng": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" }] }], "viewport": { "width": 1440, "height": 900 } } } } }
 { "tool": "build_motion", "arguments": { "request": { "kind": "gsap_stub", "scrollCensus": { "anims": [], "gsapTriggers": [] } } } }
 { "tool": "build_motion", "arguments": { "request": { "kind": "manifest", "bands": { "bands": [{ "label": "#hero", "tag": "section" }] }, "scrollCensus": { "anims": [], "gsapTriggers": [] } } } }
+{ "tool": "build_motion", "arguments": { "request": { "kind": "scene_stub", "evidencePath": "/path/to/scene-captures/scene-abc/evidence.json", "assetBindings": [] } } }
 ```
 
 ### `monitor_awards` (4 actions)
@@ -207,3 +211,97 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
   `screenshot` is the only branch with `inline`/`scrollCapture`; `audit_page`
   performance uses Chrome/Edge over CDP, accessibility and images need
   Playwright, and bundle fetches chunks without a browser.
+- **`capture_page` `scene` is passive by default, with opt-in three and spector
+  adapters.** `op:"capture"` saves checkpoint frames, canvas geometry and a
+  redacted response inventory. Without any adapter it does not recover a scene
+  graph, camera, controls, shader source or geometry; treat its
+  `coverage.capabilities` blocks as authoritative. `op:"download_assets"` fetches
+  up to 32 observed `resources[].assetId` values from that capture and is a
+  licensing decision: `rights.basis` (`owned | licensed | permission`) and
+  `rights.evidence` are mandatory and recorded in `provenance.json`. It never
+  crawls, never guesses URLs, never uses credentials, and skips any observed URL
+  with a query string, fragment or credentials. Caps: 16 MiB/file, 64 MiB/run,
+  5 redirects, 1 request/second, 15s body, 120s overall; unknown types are
+  skipped unless `allowUnknown` saves them as `.bin`.
+- **`adapters` takes at most two entries, without duplicates.** `["three"]`,
+  `["spector"]` and `["three", "spector"]` are valid.
+- **`adapters:["three"]` is experimental and reads reachable globals only.**
+  After load it reads `window.THREE`, `window.scene`/`camera`/`renderer`/`controls`
+  and `window.app`/`experience`/`viewer`/`world` (including those holders'
+  scene/camera/renderer/controls fields), with no heap crawl, hooks or network.
+  Module-local scenes are invisible, so absence is not evidence of absence. The
+  pack gains `evidence.three` (`three-adapter-v1`): ≤500 nodes at depth 20, ≤8
+  cameras, ≤8 lights, ≤32 materials, ≤200 redacted texture refs that link to an
+  inventory `assetId` when matched, controls and coverage. Coverage follows what
+  was observed: a requested adapter that finds nothing leaves capabilities
+  unknown, not available.
+- **`adapters:["spector"]` captures one WebGL frame with the optional spectorjs
+  package.** `spectorjs@0.9.33` is an optional dependency; when installed, its
+  local `dist/spector.bundle.js` (~1.19 MB) is injected before load (bundle read
+  locally; no UI or worker capture), and one frame is captured. The pack gains
+  `evidence.spector` (`spector-adapter-v1`) with WebGL context attributes, command
+  total/draw calls/top 30 names/status counts, ≤8 programs, ≤16 shaders and
+  shader source (untrusted page text stored as data, never executed) capped at
+  64 Ki characters each / 256 Ki total, plus analyses, canvas dimensions, limits
+  and truncation flags. No command arguments, results, state, stack traces,
+  memory or raw capture are transferred. A missing package records the install
+  hint `npm install --save-optional spectorjs@0.9.33`; a timeout or error records
+  a reason, and neither fails the scene pack. Shader coverage is `available` only
+  when at least one shader was captured; otherwise it is `unknown`.
+- **`build_motion` `scene_stub` is a scaffold, not a recovery.** It reads one
+  `scene-evidence-v1` pack (regular file ≤2 MiB, inside the server's
+  `scene-captures` directory or a pack exported with top-level
+  `"exported": true`) and up to 32 `assetBindings` that map an observed
+  `resourceId` to a local file you already hold. It returns
+  `files[{path,content}]`, `assetCopies[{from,to}]` (→`public/assets/<assetId>.<ext>`),
+  `unresolved[]`, `authoredDefaults[]` and `provenance`; `mode` is
+  `reconstructed-subset` when a glb/gltf is bound or `evidence.three` yields at
+  least one supported adapter mesh, otherwise `placeholder`. Adapter packs
+  reconstruct only Box/Plane/Sphere/Cylinder geometry with captured dimensions
+  (missing/out-of-range dimensions become authored `1` and are listed),
+  MeshStandard/MeshBasic materials (others fall back and are listed, multi-material
+  keeps the first) and a validated perspective camera from its exact
+  `matrixWorld` (static). Captured controls are never recreated: OrbitControls is
+  not wired because its TRS update would decompose a sheared or non-orthogonal
+  pose, so any captured controls are listed in `unresolved`. Unsupported
+  geometry/materials/cameras are also listed. Captured lights are recorded but
+  not applied, shaders and `userData` are never read or executed by the scaffold,
+  the idle orbit is used only when the pack has no usable adapter scene, textures
+  bind only to bound local images, and meshes are flattened at the root so parent
+  transforms are lost.
+  It never fetches, installs, copies an asset body or writes a directory: copy
+  the `assetCopies` yourself, then `npm install && npm run build`. It never
+  executes captured code, shader source, `userData` or callbacks. `scene.json`
+  frame references are basenames extracted from either Windows or POSIX paths.
+- **`build_motion` `pose_stub` frame loading.** Same-index frame requests are
+  deduped and stale texture completions are discarded, so scrubbing cannot
+  replace the newest frame with an older decode.
+- **`verify_build` `scene3d` is a separate gate.** `verify_build` stays flat in
+  v2, including `scene3d: {referenceCaptureId, buildSelector, tolerances?}`.
+  The id comes from a `capture_page` `{kind:"scene"}` pack; `status`/`verdict`
+  live under `scene3d` and never change the legacy `overall`/`verdict`. A
+  `within-tolerance`/`outside-tolerance` verdict needs both
+  `tolerances.pixelThreshold` and `tolerances.maxChangedFraction`; otherwise the
+  gate reports metrics as `inconclusive`. Reference checkpoints must be stable:
+  `capture_scene_3d` records `stable`/`stabilityReason` from a post-screenshot
+  re-probe, `stable:false` is rejected, and packs without `stable` remain
+  accepted; capture cannot detect reference-side context loss. The gate
+  re-probes the build after the screenshot and requires the scroll to stay
+  within 2 px of both the pre-shot position and the reference `actualScrollTop`,
+  plus an unchanged canvas rect/backing/DPR and no context loss. The build
+  canvas gets a per-run random marker; duplicate or pre-marked decoys are
+  refused. A requested `scene3d` first preflights both URLs on one shared
+  DNS/private-IP guard before any legacy scan, and every legacy acquisition
+  plus the static HTML read runs behind its loopback proxy; a private/loopback
+  or non-http(s) URL is refused with zero requests. The whole-run deadline is
+  dynamic: replayed checkpoint waits + 10 s headroom, floored at 15 s and
+  capped at 45 s (10 x 2000 ms waits => 30 s); it starts before pack resolution
+  and covers pack read, DNS, artifact prep, frame reads, Playwright
+  import/loader, launch and comparison. Cleanup
+  closes tracked resources concurrently under one shared 3 s grace; the result
+  returns within the deadline plus roughly 3 s, hung closes are abandoned
+  (underlying teardown may linger), and late resources get an unawaited closure
+  attempt.
+  Build and diff PNGs land under the reference capture's `verify/<run>/`. The
+  build URL must resolve to a public host (loopback is refused), so this is not
+  a localhost-to-localhost check. `compact:true` keeps `scene3d` whole.

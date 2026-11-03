@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import type { Scene3dVerifyOptions, VerifySceneFn } from "../../scene-verify.js";
 import type { WaitStrategy } from "../../structure.js";
 import type { VerifyFlowArgs } from "../../verify-flow.js";
 import type { ViewportName } from "../../viewport.js";
@@ -133,6 +135,7 @@ export async function verify_build(ctx: HandlerContext, args: {
   waitStrategy?: WaitStrategy;
   viewport?: ViewportName;
   domDiff?: boolean;
+  scene3d?: Scene3dVerifyOptions;
   compact?: boolean;
 }): Promise<ToolResponse> {
   try {
@@ -145,13 +148,26 @@ export async function verify_build(ctx: HandlerContext, args: {
         waitStrategy?: WaitStrategy;
         viewport?: ViewportName;
         domDiff?: boolean;
+        scene3d?: Scene3dVerifyOptions;
+        sceneDir?: string;
+        sceneFn?: VerifySceneFn;
       }) => import("../../verify-build.js").then((m) => m.verifyBuild(verifyArgs)));
+    // scene3d reaches the orchestrator only when requested, so the default
+    // payload of every other verify_build call is unchanged.
+    const sceneArgs = args.scene3d
+      ? {
+          scene3d: args.scene3d,
+          sceneDir: join(ctx.cache.rootDir, "scene-captures"),
+          ...(ctx.deps.verifySceneFn ? { sceneFn: ctx.deps.verifySceneFn } : {}),
+        }
+      : {};
     const result = await verify({
       buildUrl: args.buildUrl,
       referenceUrl: args.referenceUrl,
       waitStrategy: args.waitStrategy,
       viewport: args.viewport,
       domDiff: args.domDiff,
+      ...sceneArgs,
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
     // compact=true: verdict + scores only; evidence lines and band names drop.

@@ -86,6 +86,30 @@ describe("buildPoseStubHtml", () => {
     expect(buildPoseStubHtml(grid())).toContain("camera.position.lerpVectors");
   });
 
+  it("calls renderer.render after texture load, camera updates and resize", () => {
+    const html = buildPoseStubHtml(grid());
+    expect(html.match(/renderer\.render\(scene, camera\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(html).toContain('addEventListener("resize"');
+    expect(html).toContain("renderer.dispose()");
+  });
+
+  it("describes camera anchors as synthesized guidance, not recovered data", () => {
+    const html = buildPoseStubHtml(grid());
+    expect(html).toContain("Synthesized camera anchors");
+    expect(html).toContain("not recovered camera data");
+    expect(html).not.toContain("camera reference");
+  });
+
+  it("keeps evidence strings out of executable script positions", () => {
+    const g = grid();
+    g.url = 'https://example.com/"><script>window.__posePwned=1</script>';
+    g.snapshots[0]!.frames[0]!.label = "</script><script>window.__posePwned=2</script>";
+    const html = buildPoseStubHtml(g, { scrollCensus: census() });
+    expect(html).not.toContain("<script>window.__posePwned");
+    expect(html).not.toContain("</script><script>window.__posePwned");
+    expect(html).toContain("&lt;script&gt;window.__posePwned=1");
+  });
+
   it("guards prefers-reduced-motion with a static first frame", () => {
     const html = buildPoseStubHtml(grid());
     expect(html).toContain("prefers-reduced-motion");
@@ -154,6 +178,80 @@ describe("buildPoseStubHtml input validation", () => {
     const html = buildPoseStubHtml(grid(), { scrollCensus: c });
     expect(html.toLowerCase()).not.toContain("</script><script");
     expect(html).toContain("\\u003c/script");
+  });
+});
+
+// Runs the emitted frame loader exactly as the browser would, minus three.js:
+// a fake TextureLoader records each load and hands back its callback, so a test
+// can resolve textures in any order.
+type FakeTexture = { colorSpace: string; disposed: boolean; dispose: () => void };
+function texture(): FakeTexture {
+  return {
+    colorSpace: "",
+    disposed: false,
+    dispose() {
+      this.disposed = true;
+    },
+  };
+}
+
+function frameLoader(frames: string[]) {
+  const html = buildPoseStubHtml(grid());
+  const start = html.indexOf("const textureLoader");
+  const end = html.indexOf("// Linear interpolation");
+  if (start < 0 || end <= start) throw new Error("showFrame source not found in the stub");
+  const loads: { url: string; load: (tex: FakeTexture) => void }[] = [];
+  class FakeTextureLoader {
+    load(url: string, onLoad: (tex: FakeTexture) => void) {
+      loads.push({ url, load: onLoad });
+    }
+  }
+  const material: { map: FakeTexture | null; needsUpdate: boolean } = { map: null, needsUpdate: false };
+  const renders: number[] = [];
+  const showFrame = new Function(
+    "THREE",
+    "FRAMES",
+    "material",
+    "renderer",
+    "scene",
+    "camera",
+    html.slice(start, end) + "\nreturn showFrame;",
+  )(
+    { TextureLoader: FakeTextureLoader, SRGBColorSpace: "srgb" },
+    frames,
+    material,
+    { render: () => renders.push(1) },
+    {},
+    {},
+  ) as (i: number) => void;
+  return { showFrame, loads, material, renders };
+}
+
+describe("pose stub frame loading", () => {
+  const frames = ["f0", "f1", "f2", "f3", "f4", "f5"];
+
+  it("loads a texture once per requested frame index", () => {
+    const { showFrame, loads } = frameLoader(frames);
+    showFrame(0);
+    showFrame(0);
+    showFrame(0.1); // rounds to the index already requested
+    expect(loads.map((l) => l.url)).toEqual(["f0"]);
+  });
+
+  it("drops a stale texture that finishes after a newer frame", () => {
+    const { showFrame, loads, material, renders } = frameLoader(frames);
+    showFrame(1);
+    showFrame(4);
+    const older = texture();
+    const newer = texture();
+    loads[1]!.load(newer);
+    expect(material.map).toBe(newer);
+    expect(renders).toHaveLength(1);
+    loads[0]!.load(older); // frame 1 resolving after frame 4 was shown
+    expect(material.map).toBe(newer);
+    expect(older.disposed).toBe(true);
+    expect(newer.disposed).toBe(false);
+    expect(renders).toHaveLength(1); // the stale callback did not repaint either
   });
 });
 

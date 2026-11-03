@@ -4,6 +4,25 @@
 import { z } from "zod";
 import type { Handlers, ToolResponse } from "../server.js";
 import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } from "../tools/shared.js";
+import {
+  sceneAdaptersSchema,
+  sceneAssetIdsSchema,
+  sceneCaptureIdSchema,
+  sceneHttpUrlSchema,
+  sceneRightsSchema,
+} from "../tools/scene.js";
+
+const SCENE_CAPTURE_ONLY = [
+  "url",
+  "canvasSelector",
+  "scrollRoot",
+  "viewport",
+  "checkpoints",
+  "assetOrigins",
+  "adapters",
+  "includeViewportShots",
+] as const;
+const SCENE_DOWNLOAD_ONLY = ["captureId", "assetIds", "rights", "allowUnknown"] as const;
 
 export const capturePageRequestSchema = z.discriminatedUnion("kind", [
   z
@@ -63,6 +82,104 @@ export const capturePageRequestSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("scene"),
+      op: z
+        .enum(["capture", "download_assets"])
+        .describe('"capture" records evidence; "download_assets" fetches selected inventory assets (licensing required)'),
+      url: sceneHttpUrlSchema
+        .optional()
+        .describe('Absolute http(s) page URL to capture (required for op:"capture")'),
+      canvasSelector: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("CSS selector of the canvas to track; omit to pick the largest visible canvas"),
+      scrollRoot: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("CSS selector of the element to scroll (default: the window)"),
+      viewport: z
+        .enum(["desktop", "mobile"])
+        .optional()
+        .describe("desktop = 1440x900 (default); mobile = 390x844 iPhone-class"),
+      checkpoints: z
+        .array(
+          z.object({
+            scrollRatio: z.number().min(0).max(1),
+            pointer: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional(),
+            waitMs: z.number().int().min(0).max(2000).optional(),
+          }),
+        )
+        .min(1)
+        .max(10)
+        .optional()
+        .describe("Up to 10 checkpoints (default 6 evenly spaced ratios from 0 to 1)"),
+      assetOrigins: z
+        .array(sceneHttpUrlSchema)
+        .max(8)
+        .optional()
+        .describe("Up to 8 expected asset origins to flag in the inventory; nothing is fetched"),
+      adapters: sceneAdaptersSchema.optional(),
+      includeViewportShots: z
+        .boolean()
+        .optional()
+        .describe("Save a full-viewport screenshot beside each clipped canvas frame (default true)"),
+      captureId: sceneCaptureIdSchema
+        .optional()
+        .describe('captureId from a previous op:"capture" run (required for op:"download_assets")'),
+      assetIds: sceneAssetIdsSchema
+        .optional()
+        .describe('Up to 32 resources[].assetId values from that capture (required for op:"download_assets")'),
+      rights: sceneRightsSchema
+        .optional()
+        .describe('Mandatory for op:"download_assets": licensing basis and evidence'),
+      allowUnknown: z
+        .boolean()
+        .optional()
+        .describe("Save assets of unknown type as .bin instead of skipping them"),
+    })
+    .strict()
+    .superRefine((value, ctx) => {
+      // superRefine is the only place the two scene ops can be separated: the
+      // outer union already discriminates on `kind`, and each op keeps its own
+      // required and forbidden fields here.
+      if (value.op === "capture") {
+        if (value.url === undefined) {
+          ctx.addIssue({ code: "custom", message: 'op:"capture" requires url', path: ["url"] });
+        }
+        for (const key of SCENE_DOWNLOAD_ONLY) {
+          if (value[key] !== undefined) {
+            ctx.addIssue({
+              code: "custom",
+              message: `${key} belongs to op:"download_assets"`,
+              path: [key],
+            });
+          }
+        }
+        return;
+      }
+      for (const key of ["captureId", "assetIds", "rights"] as const) {
+        if (value[key] === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `op:"download_assets" requires ${key}`,
+            path: [key],
+          });
+        }
+      }
+      for (const key of SCENE_CAPTURE_ONLY) {
+        if (value[key] !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${key} belongs to op:"capture"`,
+            path: [key],
+          });
+        }
+      }
+    }),
+  z
+    .object({
       kind: z.literal("recording"),
       url: z.string().url().describe("Absolute URL of the site to record"),
       frames: z
@@ -118,6 +235,29 @@ export async function runCapturePage(
         ...(request.steps !== undefined ? { steps: request.steps } : {}),
         viewport: request.viewport,
       });
+    case "scene":
+      // The branch's superRefine enforces the op-specific required fields, so
+      // the captures below only narrow them for TypeScript.
+      if (request.op === "capture") {
+        return handlers.capture_scene_3d({
+          url: request.url!,
+          ...(request.canvasSelector !== undefined ? { canvasSelector: request.canvasSelector } : {}),
+          ...(request.scrollRoot !== undefined ? { scrollRoot: request.scrollRoot } : {}),
+          ...(request.viewport !== undefined ? { viewport: request.viewport } : {}),
+          ...(request.checkpoints !== undefined ? { checkpoints: request.checkpoints } : {}),
+          ...(request.assetOrigins !== undefined ? { assetOrigins: request.assetOrigins } : {}),
+          ...(request.adapters !== undefined ? { adapters: request.adapters } : {}),
+          ...(request.includeViewportShots !== undefined
+            ? { includeViewportShots: request.includeViewportShots }
+            : {}),
+        });
+      }
+      return handlers.download_scene_assets({
+        captureId: request.captureId!,
+        assetIds: request.assetIds!,
+        rights: request.rights!,
+        ...(request.allowUnknown !== undefined ? { allowUnknown: request.allowUnknown } : {}),
+      });
     case "recording":
       return handlers.record_site_motion({
         url: request.url,
@@ -135,7 +275,7 @@ export async function runCapturePage(
 export function registerCapturePage(ctx: ToolContext): void {
   ctx.tool(
     "capture_page",
-    "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), or recording (motion filmstrip video of preloader, scroll and hover). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all four need the optional Playwright dependency; recording also needs ffmpeg-static. This tool is not read-only: the recording branch can click interactive elements and submit their forms to expose hover/click motion.",
+    "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), scene (two strict ops: op:\"capture\" records passive scene evidence - checkpoint frames, canvas geometry and a redacted response inventory, with no scene graph, camera, shader or geometry recovery unless the experimental adapters opt in: \"three\" adds a bounded evidence.three summary from reachable window objects (no heap crawl), and \"spector\" installs the optional spectorjs bundle before load and adds a bounded evidence.spector summary of one WebGL frame (command names/counts, context attributes, analyses and capped shader source; no command arguments, state or memory); op:\"download_assets\" downloads up to 32 inventory assetIds and requires rights.basis (owned|licensed|permission) plus rights.evidence because downloading is a licensing decision, recorded in provenance.json; caps are 16 MiB/file, 64 MiB/run, 5 redirects, 1 req/s, 15s body and 120s overall, and only observed URLs without query, fragment or credentials are fetched), or recording (motion filmstrip video of preloader, scroll and hover). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all five need the optional Playwright dependency, except scene op:\"download_assets\" which uses plain Node http(s); recording also needs ffmpeg-static. This tool is not read-only: the recording branch can click interactive elements and submit their forms to expose hover/click motion, and scene op:\"download_assets\" writes asset files.",
     capturePageInputSchema,
     { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     (args: { request: CapturePageRequest }) =>

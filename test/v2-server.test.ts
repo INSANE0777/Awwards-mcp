@@ -81,7 +81,7 @@ describe("v2 server profile", () => {
     const base = serverFor(undefined) as any;
     const v2 = serverFor("v2") as any;
     const legacy = toolNames(base).filter((name) => !V2_TOOL_NAMES.includes(name));
-    expect(legacy.length).toBe(34);
+    expect(legacy.length).toBe(36);
     for (const name of V2_TOOL_NAMES) {
       const text = `${toolTable(v2)[name].description}\n${JSON.stringify(schemaJson(v2, name))}`;
       for (const old of legacy) {
@@ -91,7 +91,7 @@ describe("v2 server profile", () => {
   });
 
   it("switches between default, core and v2 in one process", () => {
-    expect(toolNames(serverFor(undefined))).toHaveLength(39);
+    expect(toolNames(serverFor(undefined))).toHaveLength(41);
     expect(toolNames(serverFor("core"))).toHaveLength(13);
     expect(toolNames(serverFor("v2"))).toHaveLength(15);
   });

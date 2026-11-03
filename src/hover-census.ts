@@ -298,6 +298,8 @@ export async function captureHoverCensus(
     viewport?: ViewportName;
     reducedMotion?: boolean;
     loader?: () => Promise<any>;
+    /** Route every browser connection through this loopback guard proxy. */
+    proxyServer?: string;
   },
 ): Promise<HoverCensus | { error: string }> {
   let chrome: any;
@@ -305,7 +307,11 @@ export async function captureHoverCensus(
     // Lazy default: playwright is only touched when the tool actually runs.
     const loader = opts?.loader ?? (() => import("playwright" as string));
     ({ chromium: chrome } = await loader());
-    const browser = await chrome.launch();
+    const browser = await chrome.launch(
+      opts?.proxyServer
+        ? { proxy: { server: opts.proxyServer, bypass: "<-loopback>" } }
+        : {},
+    );
     try {
       const { width, height, ...contextOpts } = resolveViewport(opts?.viewport ?? "desktop");
       const page = await browser.newPage({

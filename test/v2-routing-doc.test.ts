@@ -12,6 +12,8 @@ import { inspectPageRequestSchema } from "../src/v2/inspect-page.js";
 import { monitorAwardsRequestSchema } from "../src/v2/monitor-awards.js";
 import { V2_TOOL_NAMES } from "../src/v2/register.js";
 import { searchReferencesRequestSchema } from "../src/v2/search-references.js";
+import { CORE_TOOL_NAMES } from "../src/tool-profile.js";
+import { registerAllTools } from "../src/tools/index.js";
 
 // Documentation guard: the shipped skills tell agents to use 1.x names, so the
 // shared routing doc must map every replaced name to a real v2 envelope with a
@@ -70,6 +72,7 @@ const REPLACED_1X: readonly string[] = [
   "capture_live_site",
   "capture_component",
   "capture_pose_3d",
+  "capture_scene_3d",
   "record_site_motion",
   "audit_url",
   "analyze_accessibility",
@@ -78,6 +81,7 @@ const REPLACED_1X: readonly string[] = [
   "build_pose_stub",
   "build_gsap_stub",
   "build_motion_manifest",
+  "build_scene_stub",
   "new_winners",
   "watch_site",
 ];
@@ -118,6 +122,7 @@ const EXPECTED_TARGETS: Record<string, readonly string[]> = {
   capture_live_site: ["capture_page:screenshot"],
   capture_component: ["capture_page:component"],
   capture_pose_3d: ["capture_page:pose"],
+  capture_scene_3d: ["capture_page:scene"],
   record_site_motion: ["capture_page:recording"],
   audit_url: ["audit_page:performance"],
   analyze_accessibility: ["audit_page:accessibility"],
@@ -126,6 +131,7 @@ const EXPECTED_TARGETS: Record<string, readonly string[]> = {
   build_pose_stub: ["build_motion:pose_stub"],
   build_gsap_stub: ["build_motion:gsap_stub"],
   build_motion_manifest: ["build_motion:manifest"],
+  build_scene_stub: ["build_motion:scene_stub"],
   new_winners: ["monitor_awards:poll_winners"],
   watch_site: [
     "monitor_awards:add_watch",
@@ -135,6 +141,22 @@ const EXPECTED_TARGETS: Record<string, readonly string[]> = {
 };
 
 const V2_ONLY = V2_TOOL_NAMES.filter((name) => !RETAINED.includes(name));
+
+// Derive the expected documentation coverage from the actual full-profile
+// registrations: every registered tool except the retained flat five must have
+// a routing row. A new tool without a doc row now fails here.
+function fullToolNames(): string[] {
+  const names: string[] = [];
+  const ctx = {
+    handlers: {} as never,
+    tool: (name: string) => names.push(name),
+    registerTool: (name: string) => names.push(name),
+  };
+  registerAllTools(ctx as never);
+  return names;
+}
+const FULL_TOOL_NAMES = fullToolNames();
+const DERIVED_REPLACED = FULL_TOOL_NAMES.filter((name) => !RETAINED.includes(name));
 
 type JsonSchema = {
   oneOf?: Array<{ properties?: Record<string, { const?: unknown }> }>;
@@ -212,7 +234,9 @@ function tableRows(heading: string): Array<{ from: string; to: string }> {
 describe("skills/v2-routing.md", () => {
   it("maps every replaced 1.x tool exactly once", () => {
     const rows = tableRows("## Replaced operations");
-    expect(rows).toHaveLength(34);
+    expect(rows).toHaveLength(DERIVED_REPLACED.length);
+    expect([...new Set(REPLACED_1X)].sort()).toEqual([...DERIVED_REPLACED].sort());
+    expect(ROUTING_DOC).toContain(`All ${DERIVED_REPLACED.length} replaced`);
     expect(rows.map((row) => row.from).sort()).toEqual([...REPLACED_1X].sort());
     for (const name of REPLACED_1X) expect(ROUTING_DOC, name).toContain(name);
   });
@@ -289,9 +313,9 @@ describe("skills/v2-routing.md", () => {
   it("documents every v2 tool and the exact profile counts", () => {
     for (const name of V2_TOOL_NAMES) expect(ROUTING_DOC, name).toContain(`\`${name}\``);
     expect(ROUTING_DOC).toContain("AWWWARDS_MCP_PROFILE=v2");
-    expect(ROUTING_DOC).toContain("| `full` (default) | 39 |");
-    expect(ROUTING_DOC).toContain("| `core` | 13 |");
-    expect(ROUTING_DOC).toContain("| `v2` | 15 |");
+    expect(ROUTING_DOC).toContain(`| \`full\` (default) | ${FULL_TOOL_NAMES.length} |`);
+    expect(ROUTING_DOC).toContain(`| \`core\` | ${CORE_TOOL_NAMES.length} |`);
+    expect(ROUTING_DOC).toContain(`| \`v2\` | ${V2_TOOL_NAMES.length} |`);
   });
 
   it("keeps the build_project and compact-census hand-off caveats", () => {

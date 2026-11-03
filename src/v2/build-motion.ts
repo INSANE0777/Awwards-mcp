@@ -4,12 +4,17 @@
 import { z } from "zod";
 import type { Handlers, ToolResponse } from "../server.js";
 import { asMcpResult, type ToolContext } from "../tools/shared.js";
+import { sceneAssetBindingsSchema } from "../tools/scene.js";
 
 export const buildMotionRequestSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("pose_stub"),
-      poseGrid: z.any().describe("PoseGrid object as returned by capture_page (kind=pose; id pose-grid-v1)"),
+      poseGrid: z
+        .any()
+        .describe(
+          "PoseGrid object as returned by capture_page (kind=pose; id pose-grid-v1): frames + scroll ratios only, so the stub's camera anchors are synthesized guidance, not recovered camera data",
+        ),
       scrollCensus: z
         .any()
         .optional()
@@ -24,7 +29,12 @@ export const buildMotionRequestSchema = z.discriminatedUnion("kind", [
         .describe(
           "Full ScrollCensus JSON from analyze_motion (kind=scroll): anims[] + gsapTriggers[] required; compact census output is rejected",
         ),
-      poseGrid: z.any().optional().describe("Optional PoseGrid JSON from capture_page (kind=pose)"),
+      poseGrid: z
+        .any()
+        .optional()
+        .describe(
+          "Optional PoseGrid JSON from capture_page (kind=pose): adds synthesized camera anchors (guidance, not recovered camera data)",
+        ),
     })
     .strict(),
   z
@@ -41,6 +51,20 @@ export const buildMotionRequestSchema = z.discriminatedUnion("kind", [
         .max(60)
         .optional()
         .describe("Optional section overrides in build order"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("scene_stub"),
+      evidencePath: z
+        .string()
+        .min(1)
+        .max(4096)
+        .describe(
+          "Local scene-evidence-v1 JSON from capture_page (kind=scene): under <cache>/scene-captures, or an exported pack with top-level \"exported\": true",
+        ),
+      assetBindings: sceneAssetBindingsSchema.optional(),
+      title: z.string().min(1).max(200).optional().describe("Title for index.html and the provenance README"),
     })
     .strict(),
 ]);
@@ -76,6 +100,12 @@ export async function runBuildMotion(
         scrollCensus: request.scrollCensus,
         ...(request.sections ? { sections: request.sections } : {}),
       });
+    case "scene_stub":
+      return handlers.build_scene_stub({
+        evidencePath: request.evidencePath,
+        ...(request.assetBindings !== undefined ? { assetBindings: request.assetBindings } : {}),
+        ...(request.title !== undefined ? { title: request.title } : {}),
+      });
     default: {
       const exhaustive: never = request;
       throw new Error(`unhandled build_motion request: ${JSON.stringify(exhaustive)}`);
@@ -86,7 +116,7 @@ export async function runBuildMotion(
 export function registerBuildMotion(ctx: ToolContext): void {
   ctx.tool(
     "build_motion",
-    "Generate motion scaffolding from captured evidence. Choose exactly one request.kind: pose_stub (standalone three.js scroll stub from a PoseGrid, optional scroll census), gsap_stub (GSAP+ScrollTrigger timeline stub from a scroll census, optional PoseGrid), or manifest (motion.manifest.json scaffold from page bands + scroll census, optional section overrides). Pure and offline: no page fetches and no project files. Use build_project to convert a local HTML rebuild into a framework project.",
+    "Generate motion scaffolding from captured evidence. Choose exactly one request.kind: pose_stub (standalone three.js scroll stub from a PoseGrid with synthesized camera guidance, optional scroll census), gsap_stub (GSAP+ScrollTrigger timeline stub from a scroll census, optional PoseGrid), manifest (motion.manifest.json scaffold from page bands + scroll census, optional section overrides), or scene_stub (offline Vite + Three.js scaffold from a scene-evidence-v1 pack: mode reconstructed-subset when a glb/gltf model is bound or the experimental three adapter recorded at least one supported mesh, otherwise placeholder; primitive meshes and a static perspective camera from its exact captured matrix are recreated only from evidence.three; captured controls are never recreated, unsupported types stay unresolved, and it never executes captured code). Pure and offline: no page fetches, no install and no project files written by the tool — write the returned files yourself. Use build_project to convert a local HTML rebuild into a framework project.",
     buildMotionInputSchema,
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: { request: BuildMotionRequest }) =>

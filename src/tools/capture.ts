@@ -177,7 +177,7 @@ export function registerAnalyzeImages(ctx: ToolContext): void {
 export function registerCapturePose3d(ctx: ToolContext): void {
   ctx.tool(
     "capture_pose_3d",
-    "Capture a page's WebGL/canvas 3D pose grid: samples the largest canvas (toDataURL, viewport-screenshot fallback) at up to 10 scroll steps with per-step scroll ratios, for reconstructing scroll-driven 3D camera paths. Runs on any URL — does not fetch awwwards.com. Requires the optional playwright dependency.",
+    "Capture a page's WebGL/canvas pose grid: samples the largest canvas (toDataURL, viewport-screenshot fallback) at up to 10 scroll steps with per-step scroll ratios, for studying scroll-driven canvas motion as frames. Frame evidence only — camera transforms are not recovered. Runs on any URL — does not fetch awwwards.com. Requires the optional playwright dependency.",
     {
       url: z.string().url().describe("Absolute page URL to capture (https:// or file://)"),
       steps: z.number().int().min(3).max(10).optional()

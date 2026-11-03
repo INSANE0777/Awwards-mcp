@@ -44,9 +44,9 @@ Choose tools by domain:
 - Find: search_references for sites, elements, agencies, cached motion or collection listings; get_reference for site detail (single or batch), site elements, one element, a 2-3 site comparison or one collection page.
 - Awards: browse_awards for taxonomy and the official Annual Awards; monitor_awards for winner deltas and the watchlist.
 - Inspect: get_index for local cache status/stats; inspect_page for structure, design tokens or stack; analyze_motion for Motion DNA, scroll census or hover census.
-- Capture: capture_page for a screenshot, component pack, 3D pose grid or motion recording.
+- Capture: capture_page for a screenshot, component pack, 3D pose grid, passive scene evidence or motion recording.
 - Audit: audit_page for performance, accessibility, image delivery or bundle forensics.
-- Build: create_design_brief for a cited direction; build_motion for offline pose/GSAP/manifest scaffolding; build_project to convert local HTML into Vite/Astro/Next.
+- Build: create_design_brief for a cited direction; build_motion for offline pose/GSAP/manifest/scene scaffolding; build_project to convert local HTML into Vite/Astro/Next.
 - Verify: verify_build for a scored structure/motion comparison; verify_flow for step-aligned interaction comparison; analyze_network_capture for local HAR evidence.
 
 Each consolidated tool takes exactly one request branch (kind or action); no all-mode. Evidence tools report coverage and errors, not grades. Optional browser tools need Playwright; audit performance uses installed Chrome/Edge over CDP; recordings also need ffmpeg-static. Awwwards requests are rate-limited and cached. Set AWWWARDS_MCP_PROFILE=v2 to select this surface.

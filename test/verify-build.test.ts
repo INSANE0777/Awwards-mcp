@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,6 +17,7 @@ import type { PageStructure } from "../src/structure.js";
 import type { CensusAcquisition, ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { ComponentPack, ComponentNode } from "../src/component.js";
+import { createSceneNetworkGuard, fetchSceneHtml } from "../src/scene-capture.js";
 
 const base = (p: Partial<MotionCensusInput>): MotionCensusInput => ({
   counts: {
@@ -984,5 +986,320 @@ describe("compact census helpers (C3)", () => {
     expect(compactHoverCensus(hover())).toEqual(c);
     // Purity: the input census is not mutated.
     expect(hover().samples).toHaveLength(2);
+  });
+});
+
+describe("verifyBuild scene3d network guard", () => {
+  const scene3d = {
+    referenceCaptureId: "scene-mg2k3j4p-0123abcd",
+    buildSelector: "#scene",
+  };
+  const sceneResult = () => ({
+    status: "comparable" as const,
+    verdict: "within-tolerance" as const,
+    requested: 1,
+    compared: 1,
+    checkpoints: [],
+    coverage: { status: "complete" as const, collected: 1, excluded: 0, limitations: [] },
+    limitations: [],
+  });
+
+  const fixtureStructure = (): PageStructure => ({
+    url: "https://fixture.test",
+    title: "Fixture",
+    totalHeight: 1000,
+    bands: [
+      { index: 0, tag: "section", label: "hero", background: "#000000", offsetTop: 0, height: 1000, textStart: "" },
+    ],
+  });
+  const fixtureCensus = (): ScrollCensus => ({
+    url: "https://fixture.test",
+    capturedAt: 0,
+    counts: {
+      "gsap-scrolltrigger": 0,
+      "css-scroll-timeline": 0,
+      "css-view-timeline": 0,
+      "data-attr": 0,
+      "css-keyframe": 0,
+      smil: 0,
+      unknown: 0,
+    },
+    anims: [],
+    svgStrokes: [],
+    nativeScrollTimelines: 0,
+    reducedMotion: false,
+  });
+  const fixtureHover = (): HoverCensus => ({
+    url: "https://fixture.test",
+    capturedAt: 0,
+    hoverRuleCount: 0,
+    candidates: 0,
+    samples: [],
+    reducedMotion: false,
+  });
+
+  const listen = async (
+    handler: Parameters<typeof createServer>[0],
+  ): Promise<{ server: ReturnType<typeof createServer>; origin: string }> => {
+    const server = createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no fixture port");
+    return { server, origin: `http://127.0.0.1:${address.port}` };
+  };
+  const close = (server: ReturnType<typeof createServer>) =>
+    new Promise<void>((resolve, reject) =>
+      server.close((err) => (err ? reject(err) : resolve())),
+    );
+
+  it("makes zero requests to a loopback reference/build and still returns a report", async () => {
+    let httpRequests = 0;
+    const { server, origin } = await listen((_req, res) => {
+      httpRequests++;
+      res.end("<!doctype html><title>fixture</title>");
+    });
+    try {
+      const calls = { dns: 0, browser: 0, fetch: 0, perf: 0, rules: 0, scene: 0 };
+      const report = await verifyBuild({
+        buildUrl: `${origin}/build`,
+        referenceUrl: `${origin}/reference`,
+        domDiff: true,
+        scene3d,
+        resolveHost: async () => {
+          calls.dns++;
+          return ["127.0.0.1"];
+        },
+        // The defaults are used on purpose: any browser acquisition asks this
+        // loader first, so a zero counter proves none was attempted.
+        loader: async () => {
+          calls.browser++;
+          throw new Error("browser must not launch");
+        },
+        fetchFn: (async () => {
+          calls.fetch++;
+          return { ok: true, status: 200, text: async () => "" };
+        }) as unknown as typeof fetch,
+        perfFn: async () => {
+          calls.perf++;
+          return { error: "must not run" };
+        },
+        rulesFn: () => {
+          calls.rules++;
+          return [];
+        },
+        sceneFn: async () => {
+          calls.scene++;
+          return sceneResult();
+        },
+      });
+
+      expect(httpRequests).toBe(0);
+      expect(calls).toEqual({ dns: 1, browser: 0, fetch: 0, perf: 0, rules: 0, scene: 0 });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      // The legacy-shaped report still returns, but certifies nothing.
+      expect(report.bands.score).toBe(0);
+      expect(report.motion.score).toBe(0);
+      expect(report.verdict).toBe("fail");
+      expect(report.evidence.join(" ")).toContain("not acquired");
+      expect(report.scene3d?.status).toBe("inconclusive");
+      expect(report.scene3d?.limitations.join(" ")).toMatch(/public addresses|loopback|private|reserved/);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("keeps the fixture path working through the same guard with a test-only origin allowance", async () => {
+    let httpRequests = 0;
+    let servedHtml = "";
+    const { server, origin } = await listen((_req, res) => {
+      httpRequests++;
+      servedHtml = "<!doctype html><html><body>fixture page</body></html>";
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(servedHtml);
+    });
+    try {
+      let rulesHtml = "";
+      let sceneGuardSeen = false;
+      const calls = { structure: 0, scroll: 0, hover: 0, perf: 0, rules: 0, scene: 0 };
+      const report = await verifyBuild({
+        buildUrl: `${origin}/build`,
+        referenceUrl: `${origin}/reference`,
+        domDiff: true,
+        scene3d,
+        allowPrivateOrigins: [origin],
+        resolveHost: async () => ["127.0.0.1"],
+        structureFn: async () => {
+          calls.structure++;
+          return fixtureStructure();
+        },
+        scrollFn: async () => {
+          calls.scroll++;
+          return fixtureCensus();
+        },
+        hoverFn: async () => {
+          calls.hover++;
+          return fixtureHover();
+        },
+        // The domDiff pair is evidence-only and skipped here to keep the
+        // fixture assertion to the guarded raw-HTML GET.
+        componentFn: async () => ({ error: "not needed for this fixture" }),
+        perfFn: async () => {
+          calls.perf++;
+          return {
+            seconds: 6,
+            frames: 360,
+            fps: 58,
+            droppedFrames: 0,
+            worstFrameMs: 16,
+            longTaskCount: 0,
+            longTaskMaxMs: 0,
+            longAnimationFrameCount: 0,
+            longAnimationFrameMaxBlockingMs: 0,
+            layoutThrashCount: 0,
+            measureBeforeCompositeCount: 0,
+            layoutReads: 0,
+            styleWrites: 0,
+            scrollListeners: [],
+            animationsAtEnd: 0,
+            chromePath: "fake-chrome",
+          };
+        },
+        rulesFn: ({ html }) => {
+          calls.rules++;
+          rulesHtml = html;
+          return [];
+        },
+        sceneFn: async (sceneArgs) => {
+          calls.scene++;
+          sceneGuardSeen = Boolean(sceneArgs.networkGuard);
+          return sceneResult();
+        },
+      });
+
+      expect(httpRequests).toBe(1);
+      expect(servedHtml).toContain("fixture page");
+      expect(rulesHtml).toBe(servedHtml);
+      expect(calls.structure).toBe(2);
+      expect(calls.scroll).toBe(2);
+      expect(calls.hover).toBe(2);
+      expect(calls.perf).toBe(1);
+      expect(calls.rules).toBe(1);
+      expect(calls.scene).toBe(1);
+      expect(sceneGuardSeen).toBe(true);
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(report.evidence).toContain("anti-patterns: 0");
+      expect(report.scene3d?.status).toBe("comparable");
+      expect(report.verdict).toMatch(/pass|warn|fail/);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("launches default browser acquisitions behind the shared guard proxy", async () => {
+    const launches: Array<{ proxy?: { server?: string; bypass?: string } }> = [];
+    const report = await verifyBuild({
+      buildUrl: "https://build.test/",
+      referenceUrl: "https://ref.test/",
+      scene3d,
+      resolveHost: async () => ["93.184.216.34"],
+      // Structure scans are the first acquisition; recording the launch and
+      // failing there keeps this test to the wiring claim.
+      loader: async () => ({
+        chromium: {
+          launch: async (options: { proxy?: { server?: string; bypass?: string } }) => {
+            launches.push(options);
+            throw new Error("stop after recording the launch");
+          },
+        },
+      }),
+      fetchFn: (async () => ({ ok: true, status: 200, text: async () => "" })) as unknown as typeof fetch,
+      perfFn: async () => ({ error: "not reached" }),
+      rulesFn: () => [],
+    });
+
+    expect("error" in report).toBe(true);
+    expect(launches.length).toBeGreaterThan(0);
+    for (const options of launches) {
+      expect(options.proxy?.server).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(options.proxy?.bypass).toBe("<-loopback>");
+    }
+  });
+
+  it("refuses a redirect hop to a loopback origin outside the allowance", async () => {
+    let blockedRequests = 0;
+    const blocked = await listen((_req, res) => {
+      blockedRequests++;
+      res.end("must not be reached");
+    });
+    let redirectRequests = 0;
+    const source = await listen((_req, res) => {
+      redirectRequests++;
+      res.writeHead(302, { location: `${blocked.origin}/private` });
+      res.end();
+    });
+    try {
+      const guard = await createSceneNetworkGuard({
+        allowPrivateOrigins: [source.origin],
+        resolveHost: async () => ["127.0.0.1"],
+      });
+      if ("error" in guard) throw new Error(guard.error);
+      try {
+        const result = await fetchSceneHtml(guard.gate, `${source.origin}/start`);
+        expect(typeof result).not.toBe("string");
+        if (typeof result !== "string") {
+          expect(result.error).toMatch(/loopback|private|reserved|refusing/);
+        }
+        expect(redirectRequests).toBe(1);
+        expect(blockedRequests).toBe(0);
+      } finally {
+        await guard.close();
+      }
+    } finally {
+      await close(source.server);
+      await close(blocked.server);
+    }
+  });
+
+  it("aborts a trickled HTML response at the absolute deadline", async () => {
+    let writes = 0;
+    const { server, origin } = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      // One byte every 40ms: each gap is below the inactivity timeout, but the
+      // full body takes ~320ms, far past the 60ms budget.
+      const timer = setInterval(() => {
+        writes++;
+        res.write("x");
+        if (writes >= 8) {
+          clearInterval(timer);
+          res.end();
+        }
+      }, 40);
+      res.on("close", () => clearInterval(timer));
+    });
+    try {
+      const guard = await createSceneNetworkGuard({
+        allowPrivateOrigins: [origin],
+        resolveHost: async () => ["127.0.0.1"],
+      });
+      if ("error" in guard) throw new Error(guard.error);
+      try {
+        const started = Date.now();
+        const result = await fetchSceneHtml(guard.gate, `${origin}/trickle`, {
+          timeoutMs: 60,
+        });
+        const elapsed = Date.now() - started;
+        expect(typeof result).not.toBe("string");
+        if (typeof result !== "string") expect(result.error).toMatch(/timed out|deadline/);
+        // A successful read would take ~320ms and return "xxxxxxxx".
+        expect(elapsed).toBeLessThan(300);
+        expect(writes).toBeLessThan(8);
+      } finally {
+        await guard.close();
+      }
+    } finally {
+      await close(server);
+    }
   });
 });

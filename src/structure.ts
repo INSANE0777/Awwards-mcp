@@ -671,6 +671,8 @@ export interface WaitOpts {
   responsive?: boolean;
   /** Attach to a loopback CDP endpoint (requires AWWWARDS_MCP_ATTACH=1); never navigates, scrolls, clicks or creates tabs. */
   cdpEndpoint?: string;
+  /** Route every launched-browser connection through this loopback guard proxy. */
+  proxyServer?: string;
 }
 
 /** What preScroll measured after its walk. `scrollRoot` is the detected inner scroller label, null for the document. */
@@ -864,7 +866,11 @@ export async function analyzePageStructure(
   }
   let browser: any;
   try {
-    browser = await chromium.launch();
+    browser = await chromium.launch(
+      opts?.proxyServer
+        ? { proxy: { server: opts.proxyServer, bypass: "<-loopback>" } }
+        : {},
+    );
   } catch {
     return { error: CAPTURE_INSTALL_HINT };
   }

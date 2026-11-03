@@ -34,7 +34,7 @@ describe("tool annotations", () => {
     // cannot be expressed as a raw parameter shape. All registrations go
     // through the guarded tool()/registerTool() wrappers in server-instance.ts.
     const calls = src.match(/^\s*(?:ctx\.)?(?:tool|registerTool)\(/gm) ?? [];
-    expect(calls.length).toBe(39);
+    expect(calls.length).toBe(41);
 
     // Slice out each balanced-parens registration block and require the
     // four hint keys with explicit boolean values inside it.

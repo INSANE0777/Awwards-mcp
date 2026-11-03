@@ -49,7 +49,7 @@ src/
   cache.ts      SQLite cache at ~/.awwwards-mcp/ (node:sqlite, no native deps)
   server.ts     Thin facade: re-exports public types + createHandlers
   server/       Handler domains: awards, data, capture, motion, audit, build
-  tools/        39 MCP tool registrations (zod schemas + annotations)
+  tools/        41 MCP tool registrations (zod schemas + annotations)
   capture.ts    Optional playwright: capture_live_site
   structure.ts  Optional playwright: analyze_page_structure
   motion.ts     Optional playwright + ffmpeg: record_site_motion

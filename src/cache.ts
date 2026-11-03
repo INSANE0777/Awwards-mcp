@@ -174,6 +174,7 @@ function rowToElement(r: ElementRow): ElementRecord {
 export class Cache {
   private readonly dbPath: string;
   private readonly now: () => number;
+  readonly rootDir: string;
   readonly imagesDir: string;
   // In-flight image writes keyed by target file. Parallel previews of the same
   // thumbnail share one fetch/write instead of racing two renames onto it.
@@ -190,6 +191,7 @@ export class Cache {
     // 0700/0600 keep the cache (tokens, page text) private to the OS user.
     // Windows ignores POSIX modes, so passing them must not fail there.
     mkdirSync(rootDir, { recursive: true, mode: 0o700 });
+    this.rootDir = rootDir;
     this.imagesDir = join(rootDir, "images");
     mkdirSync(this.imagesDir, { recursive: true, mode: 0o700 });
     if (process.platform !== "win32") {
