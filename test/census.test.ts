@@ -4,6 +4,7 @@ import {
   SCRUB_PROBE_INTRO,
   SCRUB_PROBE_STEP,
   SCRUB_SCROLL_TO,
+  ACQUISITION_HEIGHT,
   reduceScrollCensus,
   captureScrollCensus,
   sampleKeyframes,
@@ -299,6 +300,108 @@ describe("captureScrollCensus", () => {
     gsapRegistryTotal: 0,
   };
 
+  it("records acquisition state and marks a height mismatch unstable", async () => {
+    const run = async (scanHeight: number, afterHeight: number | null) => {
+      const fakePage = {
+        addInitScript: async () => {},
+        goto: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async (fn: unknown) => {
+          const src = String(fn);
+          if (src.includes("getAnimations")) {
+            return { ...currentScan, startHeight: scanHeight, documentHeight: scanHeight };
+          }
+          if (src.includes("documentElement")) return afterHeight;
+          return undefined;
+        },
+      };
+      const loader = async () => ({
+        chromium: { launch: async () => ({ newPage: async () => fakePage, close: async () => {} }) },
+      });
+      return captureScrollCensus("https://example.com", { loader });
+    };
+
+    const stable = await run(5000, 5000);
+    expect("error" in stable).toBe(false);
+    if ("error" in stable) return;
+    expect(stable.acquisition).toMatchObject({
+      waitStrategy: "networkidle",
+      settleMs: 3000,
+      postScrollMs: 500,
+      documentHeight: 5000,
+      animationCount: 1,
+      gsapRegistryCount: 0,
+      stable: true,
+    });
+    expect(stable.acquisition!.capturedAt).toBe(stable.capturedAt);
+
+    const mutated = await run(5000, 5600);
+    if ("error" in mutated) throw new Error(mutated.error);
+    expect(mutated.acquisition!.stable).toBe(false);
+
+    // Content landing inside the census evaluate is caught even when the
+    // post-evaluate probe matches the end height.
+    const midEvaluate = await (async () => {
+      const fakePage = {
+        addInitScript: async () => {},
+        goto: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async (fn: unknown) => {
+          const src = String(fn);
+          if (src.includes("getAnimations")) {
+            return { ...currentScan, startHeight: 5000, documentHeight: 5600 };
+          }
+          if (src.includes("documentElement")) return 5600;
+          return undefined;
+        },
+      };
+      const loader = async () => ({
+        chromium: { launch: async () => ({ newPage: async () => fakePage, close: async () => {} }) },
+      });
+      return captureScrollCensus("https://example.com", { loader });
+    })();
+    if ("error" in midEvaluate) throw new Error(midEvaluate.error);
+    expect(midEvaluate.acquisition!.stable).toBe(false);
+
+    // A proven mid-evaluate mismatch is false even when the final probe fails.
+    const mismatchNoProbe = await (async () => {
+      const fakePage = {
+        addInitScript: async () => {},
+        goto: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async (fn: unknown) => {
+          const src = String(fn);
+          if (src.includes("getAnimations")) {
+            return { ...currentScan, startHeight: 5000, documentHeight: 5600 };
+          }
+          if (src.includes("documentElement")) return null;
+          return undefined;
+        },
+      };
+      const loader = async () => ({
+        chromium: { launch: async () => ({ newPage: async () => fakePage, close: async () => {} }) },
+      });
+      return captureScrollCensus("https://example.com", { loader });
+    })();
+    if ("error" in mismatchNoProbe) throw new Error(mismatchNoProbe.error);
+    expect(mismatchNoProbe.acquisition!.stable).toBe(false);
+
+    // A failed/short probe must not claim stability it never observed.
+    const unknown = await run(5000, null);
+    if ("error" in unknown) throw new Error(unknown.error);
+    expect(unknown.acquisition!.stable).toBeNull();
+    expect(unknown.acquisition!.documentHeight).toBe(5000);
+  });
+
+  it("honours an explicit waitStrategy in the acquisition record", async () => {
+    const { loader } = harness(currentScan);
+    const result = await captureScrollCensus("https://example.com", { loader, waitStrategy: "load" });
+    if ("error" in result) throw new Error(result.error);
+    expect(result.acquisition!.waitStrategy).toBe("load");
+    // The fake page returns the scan for the height probe too → no number.
+    expect(result.acquisition!.stable).toBeNull();
+  });
+
   it("captures a census through a fake browser", async () => {
     const { loader } = harness(currentScan);
     const result = await captureScrollCensus("https://example.com", { loader });
@@ -375,6 +478,12 @@ function probeHarness(
         scrolled.push(Number(arg));
         return undefined;
       }
+      // Acquisition height probe runs after every census; it is not a probe
+      // phase call, so keep it out of the phase assertions below.
+      if (src.includes("documentElement")) {
+        calls.push("height");
+        return 0;
+      }
       calls.push("step");
       const count = intro instanceof Error ? 0 : intro.triggers.length;
       const lastY = scrolled.length > 0 ? scrolled[scrolled.length - 1] : 0;
@@ -407,9 +516,10 @@ describe("captureScrollCensus scrubProbe", () => {
     const result = await captureScrollCensus("https://example.com", { loader });
     expect("error" in result).toBe(false);
     if ("error" in result) return;
-    expect(calls.filter((c) => c !== "prescroll")).toEqual(["census"]);
+    expect(calls.filter((c) => c !== "prescroll" && c !== "height")).toEqual(["census"]);
     expect(scrolled).toEqual([]);
     expect("scrubCurves" in result).toBe(false);
+    expect(result.acquisition).toBeDefined();
   });
 
   it("enabled: drives ≤8 monotonic steps across 0..maxScroll with aligned curves", async () => {
@@ -420,10 +530,12 @@ describe("captureScrollCensus scrubProbe", () => {
     });
     expect("error" in result).toBe(false);
     if ("error" in result) return;
-    // preScroll aside: 1 census + 1 intro + 8 scrolls + 8 samples.
-    const probing = calls.filter((c) => c !== "prescroll");
+    // preScroll + the acquisition height probe aside: 1 census + 1 intro +
+    // 8 scrolls + 8 samples.
+    const probing = calls.filter((c) => c !== "prescroll" && c !== "height");
     expect(probing[0]).toBe("census");
     expect(probing[1]).toBe("intro");
+    expect(calls.filter((c) => c === "height").length).toBe(1);
     expect(calls.filter((c) => c === "scroll").length).toBe(8);
     expect(calls.filter((c) => c === "step").length).toBe(8);
     expect(scrolled.length).toBeLessThanOrEqual(8);
@@ -498,7 +610,7 @@ describe("captureScrollCensus scrubProbe", () => {
     if ("error" in result) return;
     expect(result.scrubCurves).toEqual([]);
     expect(scrolled).toEqual([]);
-    expect(calls.filter((c) => c !== "prescroll")).toEqual(["census", "intro"]);
+    expect(calls.filter((c) => c !== "prescroll" && c !== "height")).toEqual(["census", "intro"]);
   });
 });
 
@@ -594,6 +706,13 @@ describe("SCRUB_PROBE snippets (direct snippet runs + source locks)", () => {
   it("SCRUB_SCROLL_TO is a serializable plain function (no-arrow lock)", () => {
     expect(typeof SCRUB_SCROLL_TO).toBe("function");
     expect(String(SCRUB_SCROLL_TO)).not.toContain("=>");
+  });
+
+  it("ACQUISITION_HEIGHT is a serializable plain function (no-arrow lock)", () => {
+    expect(typeof ACQUISITION_HEIGHT).toBe("function");
+    expect(String(ACQUISITION_HEIGHT)).not.toContain("=>");
+    const h = ACQUISITION_HEIGHT();
+    expect(h === null || Number.isFinite(h)).toBe(true);
   });
 
   it("probe bounds are locked in source (≤6 triggers, ≤60-char transform)", () => {

@@ -51,6 +51,10 @@ export const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
 
 export const SITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const CATEGORY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// Legacy taxonomy caches (written before technology facets existed) refresh on
+// read. A failed refresh waits this long before retrying, so a flaky network
+// cannot turn every list_categories call into a request.
+export const TAXONOMY_RETRY_MS = 60 * 60 * 1000;
 
 // The text block lists every element; only this many posters are fetched inline.
 export const MAX_INLINE_POSTERS = 8;
@@ -62,6 +66,8 @@ export type Block =
 export interface ToolResponse {
   content: Block[];
   isError?: boolean;
+  // Present only on successful calls of tools that advertise an outputSchema.
+  structuredContent?: Record<string, unknown>;
 }
 
 export interface SearchArgs extends SearchFilters {
@@ -304,10 +310,11 @@ export function compactVerifyReport(r: VerifyReport): {
   verdict: VerifyReport["verdict"];
   overall: number;
   bands: { score: number; matched: number; refOnly: number; buildOnly: number };
-  motion: { score: number };
+  motion: { score: number; captureStable?: boolean | null };
   /** Opt-in 3D gate survives compaction whole: it is a separate verdict. */
   scene3d?: VerifyReport["scene3d"];
 } {
+  const acq = r.motion.acquisition;
   return {
     verdict: r.verdict,
     overall: r.overall,
@@ -317,7 +324,37 @@ export function compactVerifyReport(r: VerifyReport): {
       refOnly: r.bands.refOnly.length,
       buildOnly: r.bands.buildOnly.length,
     },
-    motion: { score: r.motion.score },
+    motion: {
+      score: r.motion.score,
+      // Context survives the diet. true requires both captures to be stable
+      // AND comparable (same rendered height and animation count); false means
+      // at least one capture moved or the two captured different states;
+      // null means we could not verify. Key absent for reports whose censuses
+      // lack acquisition state.
+      ...(acq
+        ? (() => {
+            const ref = acq.reference;
+            const build = acq.build;
+            const comparable =
+              ref.documentHeight != null &&
+              build.documentHeight != null &&
+              ref.animationCount != null &&
+              build.animationCount != null;
+            const differ =
+              comparable &&
+              (ref.documentHeight !== build.documentHeight ||
+                ref.animationCount !== build.animationCount);
+            return {
+              captureStable:
+                ref.stable === false || build.stable === false || differ
+                  ? false
+                  : ref.stable === true && build.stable === true && comparable
+                    ? true
+                    : null,
+            };
+          })()
+        : {}),
+    },
     ...(r.scene3d ? { scene3d: r.scene3d } : {}),
   };
 }

@@ -9,9 +9,8 @@ capture-build.mjs
 # reference motion study artifacts (videos stay in showcase/ref-motion only)
 /*.mp4
 
-# parser-drift probe run state (report/snapshots stay local; status.json tracked for CI diffs)
+# parser-drift probe run state (report/snapshots/status stay local; CI uploads the artifact)
 .drift/*
-!.drift/status.json
 
 # controller scratch (plans, specs, drift-snapshot captures) — local-only
 docs/

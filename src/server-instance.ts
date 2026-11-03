@@ -41,10 +41,11 @@ export function createServer({ handlers, version }: ServerOptions): McpServer {
   );
 
   // Every registration goes through the guard: AWWWARDS_MCP_PROFILE=core skips
-  // non-core tools, AWWWARDS_MCP_MAX_RESPONSE_BYTES caps text+image payloads, and
+  // non-core tools, AWWWARDS_MCP_MAX_RESPONSE_BYTES caps the full serialized
+  // result (text, inline images and structuredContent), and
   // AWWWARDS_MCP_DEBUG_MEMORY=1 logs one JSON line per call on stderr. The
   // legacy AWARDS_MCP_* names are accepted as a one-release fallback.
-  const tool = ((name: string, description: string, inputSchema: any, annotations: any, handler: any) =>
+  const tool = ((name: string, description: string, inputSchema: any, annotations: any, handler: any, outputSchema?: any) =>
     registerGuarded(server, "registerTool", [
       name,
       {
@@ -52,6 +53,7 @@ export function createServer({ handlers, version }: ServerOptions): McpServer {
         // v2 registerTool wants a z.object, while the tool modules still pass
         // raw field shapes (the v1 style). Accept both.
         inputSchema: inputSchema instanceof z.ZodType ? inputSchema : z.object(inputSchema),
+        ...(outputSchema ? { outputSchema } : {}),
         annotations,
       },
       handler,

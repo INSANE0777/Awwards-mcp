@@ -13,6 +13,7 @@ import {
   CATEGORY_TTL_MS,
   MAX_INLINE_POSTERS,
   SITE_TTL_MS,
+  TAXONOMY_RETRY_MS,
   compactSiteDetails,
   errorResponse,
   suggestTags,
@@ -22,6 +23,33 @@ import {
 } from "../types.js";
 import type { Block, SearchArgs, ToolResponse } from "../types.js";
 import type { WaitStrategy } from "../../structure.js";
+
+// One in-flight taxonomy refresh per cache: concurrent reads share the fetch
+// instead of each starting one before the retry marker exists.
+const taxonomyRefreshes = new WeakMap<
+  object,
+  Promise<{ refreshed: Categories | null; reason: string }>
+>();
+
+async function refreshLegacyTaxonomy(
+  ctx: HandlerContext,
+): Promise<{ refreshed: Categories | null; reason: string }> {
+  try {
+    const parsed = parseCategories(await ctx.client.getHtml("/websites/"));
+    if (parsed.filters.length === 0 || parsed.colors.length === 0) {
+      return { refreshed: null, reason: "the refreshed page parsed 0 categories (layout drift)" };
+    }
+    if (!Array.isArray(parsed.technologies) || parsed.technologies.length === 0) {
+      return {
+        refreshed: null,
+        reason: "the refreshed page parsed no technology navigation (layout drift)",
+      };
+    }
+    return { refreshed: parsed, reason: "" };
+  } catch (err) {
+    return { refreshed: null, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promise<ToolResponse> {
   const count = Math.min(Math.max(args.count ?? 6, 1), 12);
@@ -619,6 +647,35 @@ export async function get_element(ctx: HandlerContext, args: { id: string }): Pr
 export async function list_categories(ctx: HandlerContext): Promise<ToolResponse> {
   try {
     let cats = ctx.cache.getMeta<Categories>("categories", CATEGORY_TTL_MS);
+    let taxonomyWarning: string | undefined;
+    // Legacy taxonomies predate technology facets. Waiting out the 30-day TTL
+    // would leave those slugs unavailable, so upgrade on read; the retry marker
+    // keeps a failed refresh from firing on every later call.
+    if (cats && !Array.isArray(cats.technologies)) {
+      if (ctx.cache.getMeta<boolean>("categories:refresh-failed", TAXONOMY_RETRY_MS) === null) {
+        let pending = taxonomyRefreshes.get(ctx.cache);
+        if (!pending) {
+          pending = refreshLegacyTaxonomy(ctx);
+          taxonomyRefreshes.set(ctx.cache, pending);
+          void pending.finally(() => taxonomyRefreshes.delete(ctx.cache));
+        }
+        const { refreshed, reason } = await pending;
+        if (refreshed) {
+          cats = refreshed;
+          ctx.cache.setMeta("categories", refreshed);
+          ctx.cache.deleteMeta("categories:refresh-failed");
+        } else {
+          ctx.cache.setMeta("categories:refresh-failed", true);
+          taxonomyWarning =
+            `Cached taxonomy is missing technology facets and the refresh failed (${reason}). ` +
+            "Serving the cached filters, colors and awards; technology facets remain unavailable.";
+        }
+      } else {
+        taxonomyWarning =
+          "Cached taxonomy is missing technology facets; the last refresh failed and the next attempt is deferred. " +
+          "Serving the cached filters, colors and awards; technology facets remain unavailable.";
+      }
+    }
     if (!cats) {
       cats = parseCategories(await ctx.client.getHtml("/websites/"));
       if (cats.colors.length === 0 && cats.filters.length === 0) {
@@ -661,6 +718,7 @@ export async function list_categories(ctx: HandlerContext): Promise<ToolResponse
               awards,
               technologies,
               ...(technologiesNote ? { technologiesNote } : {}),
+              ...(taxonomyWarning ? { taxonomyStale: true, taxonomyWarning } : {}),
               usage:
                 "Pass one of: color (hex), award (any filter from awards), technology or a tag slug to the site index. Fetch the taxonomy first when unsure of a slug. Combine at most one URL filter with client-side tags.",
             },
