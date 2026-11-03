@@ -228,6 +228,7 @@ export async function capture_scene_3d(ctx: HandlerContext, args: {
   assetOrigins?: string[];
   adapters?: SceneAdapterName[];
   includeViewportShots?: boolean;
+  signal?: AbortSignal;
 }): Promise<ToolResponse> {
   try {
     const capture =
@@ -243,6 +244,7 @@ export async function capture_scene_3d(ctx: HandlerContext, args: {
       ...(args.adapters !== undefined ? { adapters: args.adapters } : {}),
       includeViewportShots: args.includeViewportShots,
       sceneDir: join(ctx.cache.rootDir, "scene-captures"),
+      ...(args.signal ? { signal: args.signal } : {}),
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
     return { content: [text(JSON.stringify(summarizeSceneEvidence(result), null, 1))] };
@@ -258,6 +260,7 @@ export async function download_scene_assets(ctx: HandlerContext, args: {
   assetIds: string[];
   rights: SceneRights;
   allowUnknown?: boolean;
+  signal?: AbortSignal;
 }): Promise<ToolResponse> {
   try {
     const download =

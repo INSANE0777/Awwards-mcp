@@ -548,7 +548,7 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   analyze_network_capture(args: { path: string; top?: number }): Promise<ToolResponse>;
   verify_flow(args: VerifyFlowArgs): Promise<ToolResponse>;
-  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; scene3d?: Scene3dVerifyOptions; compact?: boolean }): Promise<ToolResponse>;
+  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; scene3d?: Scene3dVerifyOptions; compact?: boolean; signal?: AbortSignal }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
     selector?: string;
@@ -583,12 +583,14 @@ export interface Handlers {
     assetOrigins?: string[];
     adapters?: SceneAdapterName[];
     includeViewportShots?: boolean;
+    signal?: AbortSignal;
   }): Promise<ToolResponse>;
   download_scene_assets(args: {
     captureId: string;
     assetIds: string[];
     rights: SceneRights;
     allowUnknown?: boolean;
+    signal?: AbortSignal;
   }): Promise<ToolResponse>;
   build_scene_stub(args: {
     evidencePath: string;

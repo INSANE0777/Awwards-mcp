@@ -62,6 +62,8 @@ export interface SceneAssetsResult {
   rights: SceneRights & { recordedAt: number };
   files: SceneAssetFile[];
   limitations: string[];
+  /** Present only when the client's signal aborted the run. */
+  cancelled?: true;
 }
 
 /** Test-only seams; none of these are exposed by a tool schema. */
@@ -72,6 +74,8 @@ export interface SceneAssetDownloadOptions {
   rights: SceneRights;
   /** Save assets whose MIME and magic bytes identify no known type as .bin. */
   allowUnknown?: boolean;
+  /** Client cancellation; an abort stops before the next asset and cancels the in-flight request. */
+  signal?: AbortSignal;
   resolveHost?: (hostname: string) => Promise<string[]>;
   /** Exact http(s) origins that may resolve to loopback/private addresses. */
   allowPrivateOrigins?: string[];
@@ -101,6 +105,8 @@ export type SceneAssetFetcher = (
 const CAPTURE_ID_RE = /^scene-[a-z0-9]{1,24}-[0-9a-f]{8}$/;
 const ASSET_ID_RE = /^asset-\d{1,4}$/;
 const RIGHTS_BASES: readonly string[] = ["owned", "licensed", "permission"];
+// The client-abort skip reason, shared by the job loop and the in-flight races.
+const CLIENT_CANCELLED = "cancelled by the client";
 
 // A Map, not an object literal: a Content-Type such as "constructor" must miss
 // instead of resolving through Object.prototype.
@@ -440,12 +446,65 @@ interface FetchContext {
   deadlineReason: string;
   now: () => number;
   limits: typeof SCENE_ASSET_LIMITS;
+  /** Client cancellation; races every DNS, connection and body step. */
+  signal?: AbortSignal;
 }
 
-async function acquireRequestSlot(now: () => number, limits: typeof SCENE_ASSET_LIMITS): Promise<void> {
+async function acquireRequestSlot(
+  now: () => number,
+  limits: typeof SCENE_ASSET_LIMITS,
+  signal?: AbortSignal,
+): Promise<void> {
   const wait = lastRequestAt + limits.minRequestIntervalMs - now();
-  if (wait > 0) await sleep(wait);
+  if (wait > 0) {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, wait);
+      timer.unref?.();
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new AssetSkip(CLIENT_CANCELLED, true));
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
   lastRequestAt = now();
+}
+
+/**
+ * A client abort promise that rejects the pending step with a run-stopping
+ * skip. The step's own promise is abandoned, like the deadline race; the
+ * optional hook closes whatever socket the step owns.
+ */
+function cancelWatch(
+  ctx: FetchContext,
+  beforeReject?: () => void,
+): { promise: Promise<never>; clear: () => void } | null {
+  const signal = ctx.signal;
+  if (!signal) return null;
+  let listener: (() => void) | undefined;
+  const promise = new Promise<never>((_resolve, reject) => {
+    listener = () => {
+      try {
+        beforeReject?.();
+      } catch {
+        /* the step's resource is already gone */
+      }
+      reject(new AssetSkip(CLIENT_CANCELLED, true));
+    };
+    if (signal.aborted) listener();
+    else signal.addEventListener("abort", listener, { once: true });
+  });
+  promise.catch(() => undefined);
+  return {
+    promise,
+    clear: () => {
+      if (listener) signal.removeEventListener("abort", listener);
+    },
+  };
 }
 
 async function resolveHop(url: URL, ctx: FetchContext): Promise<string> {
@@ -457,6 +516,7 @@ async function resolveHop(url: URL, ctx: FetchContext): Promise<string> {
   }
   let addresses: string[];
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = cancelWatch(ctx);
   try {
     const pending = ctx.resolveHost(host);
     // A resolver that never settles must not hold the run or the queue.
@@ -468,12 +528,17 @@ async function resolveHop(url: URL, ctx: FetchContext): Promise<string> {
       );
       timer.unref?.();
     });
-    addresses = await Promise.race([pending, deadline]);
+    addresses = await Promise.race([
+      pending,
+      deadline,
+      ...(cancel ? [cancel.promise] : []),
+    ]);
   } catch (err) {
     if (err instanceof AssetSkip) throw err;
     throw new AssetSkip("DNS lookup failed");
   } finally {
     if (timer) clearTimeout(timer);
+    cancel?.clear();
   }
   if (!addresses.length) throw new AssetSkip("DNS lookup returned no address");
   // Fail closed like the capture gate: one private answer blocks the hop.
@@ -527,12 +592,15 @@ async function readBody(hop: SceneAssetHop, ctx: FetchContext): Promise<Buffer> 
       throw new AssetSkip("the transfer failed before completion");
     }
   })();
-  // A deadline win abandons the body: never let its later rejection surface.
+  // A deadline or client win abandons the body: never let its later rejection
+  // surface, and close the socket the abandoned read still holds.
   read.catch(() => undefined);
+  const cancel = cancelWatch(ctx, () => hop.destroy());
   try {
-    return await Promise.race([read, bodyDeadline]);
+    return await Promise.race([read, bodyDeadline, ...(cancel ? [cancel.promise] : [])]);
   } finally {
     if (timer) clearTimeout(timer);
+    cancel?.clear();
   }
 }
 
@@ -552,11 +620,12 @@ async function fetchAsset(
     if (redirects > ctx.limits.maxRedirects) {
       throw new AssetSkip(`more than ${ctx.limits.maxRedirects} redirects`);
     }
+    if (ctx.signal?.aborted) throw new AssetSkip(CLIENT_CANCELLED, true);
     if (ctx.now() >= ctx.deadlineAt) {
       throw new AssetSkip(ctx.deadlineReason, true);
     }
     const address = await resolveHop(current, ctx);
-    await acquireRequestSlot(ctx.now, ctx.limits);
+    await acquireRequestSlot(ctx.now, ctx.limits, ctx.signal);
     if (ctx.now() >= ctx.deadlineAt) {
       throw new AssetSkip(ctx.deadlineReason, true);
     }
@@ -570,18 +639,26 @@ async function fetchAsset(
       rejectDeadline(new AssetSkip(ctx.deadlineReason, true));
     }, Math.max(0, ctx.deadlineAt - ctx.now()));
     abortTimer.unref?.();
+    const cancel = cancelWatch(ctx);
+    // The client signal is combined with the deadline so a fetcher that honors
+    // its signal stops dialing or reading even before the race rejects.
+    const fetchSignal = ctx.signal
+      ? AbortSignal.any([controller.signal, ctx.signal])
+      : controller.signal;
     let hop: SceneAssetHop;
     try {
       // The race keeps the overall cap even when a fetcher ignores the signal.
-      const pending = ctx.fetcher(current, address, controller.signal);
+      const pending = ctx.fetcher(current, address, fetchSignal);
       pending.catch(() => undefined);
-      hop = await Promise.race([pending, deadline]);
+      hop = await Promise.race([pending, deadline, ...(cancel ? [cancel.promise] : [])]);
     } catch (err) {
+      if (ctx.signal?.aborted) throw new AssetSkip(CLIENT_CANCELLED, true);
       if (controller.signal.aborted) throw new AssetSkip(ctx.deadlineReason, true);
       if (err instanceof AssetSkip) throw err;
       throw new AssetSkip("the request failed before a response arrived");
     } finally {
       clearTimeout(abortTimer);
+      cancel?.clear();
     }
     if (hop.status >= 300 && hop.status < 400) {
       const location = headerValue(hop.headers, "location");
@@ -682,6 +759,28 @@ async function runDownload(
     if ("error" in rights) return rights;
     const ids = normalizeAssetIds(opts.assetIds);
     if ("error" in ids) return ids;
+    const now = opts.now ?? Date.now;
+    const startedAt = now();
+    const rightsRecord = { ...rights.rights, recordedAt: startedAt };
+    // An already-aborted client gets the same shape as a cancelled run, with
+    // no directory read, DNS lookup or request.
+    if (opts.signal?.aborted) {
+      return {
+        id: "scene-assets-v1",
+        captureId: opts.captureId,
+        downloaded: 0,
+        skipped: ids.ids.length,
+        receivedBytes: 0,
+        totalBytes: 0,
+        rights: rightsRecord,
+        files: [],
+        limitations: [
+          `Cancelled by the client before any request: 0 of ${ids.ids.length} requested asset(s) were downloaded.`,
+          ...ids.ids.map((assetId) => `${assetId} skipped: ${CLIENT_CANCELLED}`),
+        ],
+        cancelled: true,
+      };
+    }
     const capture = await resolveSceneCaptureDir(opts.sceneDir, opts.captureId);
     if ("error" in capture) return capture;
     const inventory = await readInventory(capture.dir, opts.captureId, limits);
@@ -699,10 +798,7 @@ async function runDownload(
     const allowedOrigins = normalizeScenePrivateOrigins(opts.allowPrivateOrigins);
     if ("error" in allowedOrigins) return allowedOrigins;
 
-    const now = opts.now ?? Date.now;
-    const startedAt = now();
     const overallDeadline = startedAt + limits.overallDeadlineMs;
-    const rightsRecord = { ...rights.rights, recordedAt: startedAt };
     const assetsDir = await ensureAssetsDir(capture.dir);
 
     const skipped: Array<{ assetId: string; reason: string }> = [];
@@ -720,9 +816,16 @@ async function runDownload(
     let totalBytes = 0;
     const received = { receivedBytes: 0 };
     let stopReason: string | null = null;
+    let cancelled = false;
     const totalCapReason = `the ${mib(limits.maxTotalBytes)} MiB total cap was reached`;
 
     for (const asset of jobs) {
+      if (opts.signal?.aborted) {
+        cancelled = true;
+        stopReason = CLIENT_CANCELLED;
+        skipped.push({ assetId: asset.assetId, reason: stopReason });
+        continue;
+      }
       if (stopReason) {
         skipped.push({ assetId: asset.assetId, reason: stopReason });
         continue;
@@ -758,10 +861,19 @@ async function runDownload(
           deadlineReason,
           now,
           limits,
+          ...(opts.signal ? { signal: opts.signal } : {}),
         });
         const path = join(assetsDir, `${asset.assetId}.${fetched.extension}`);
         const sha256 = createHash("sha256").update(fetched.bytes).digest("hex");
+        const previous = await readFile(path).catch(() => null);
         await publishFile(path, fetched.bytes);
+        if (opts.signal?.aborted) {
+          // Restore an asset from a previous run rather than deleting it: its
+          // provenance entry is still valid after this cancelled retry.
+          if (previous) await publishFile(path, previous);
+          else await rm(path, { force: true }).catch(() => undefined);
+          throw new AssetSkip(CLIENT_CANCELLED, true);
+        }
         totalBytes += fetched.bytes.length;
         files.push({
           assetId: asset.assetId,
@@ -774,6 +886,7 @@ async function runDownload(
         if (err instanceof AssetSkip) {
           skipped.push({ assetId: asset.assetId, reason: err.message });
           if (err.stop) stopReason = err.message;
+          if (opts.signal?.aborted) cancelled = true;
           continue;
         }
         throw err;
@@ -796,6 +909,7 @@ async function runDownload(
       Buffer.from(JSON.stringify(provenance, null, 1), "utf8"),
     );
 
+    if (opts.signal?.aborted) cancelled = true;
     const limitations = [
       "Only assets recorded in this capture's own evidence inventory are downloaded: the tool never crawls the site, guesses model or source-map URLs, or supplies credentials.",
       `Rights are the caller's assertion (${rights.rights.basis}); they were recorded in provenance.json with a timestamp, not verified by the server.`,
@@ -805,6 +919,11 @@ async function runDownload(
     for (const skip of skipped.slice(0, 10)) limitations.push(`${skip.assetId} skipped: ${skip.reason}`);
     if (skipped.length > 10) {
       limitations.push(`${skipped.length - 10} more asset(s) were skipped for the stated caps or reasons.`);
+    }
+    if (cancelled) {
+      limitations.push(
+        `Cancelled by the client: the run stopped before the remaining requests; ${received.receivedBytes} received byte(s) remain counted.`,
+      );
     }
 
     return {
@@ -817,6 +936,7 @@ async function runDownload(
       rights: rightsRecord,
       files,
       limitations,
+      ...(cancelled ? { cancelled: true as const } : {}),
     };
   } catch (err) {
     return { error: `Asset download failed: ${redactSceneError(messageOf(err))}` };
@@ -830,11 +950,30 @@ async function runDownload(
 export function downloadSceneAssets(
   opts: SceneAssetDownloadOptions,
 ): Promise<SceneAssetsResult | { error: string }> {
-  const run = (): Promise<SceneAssetsResult | { error: string }> => runDownload(opts);
+  // An already-cancelled call must not wait behind the process-wide queue.
+  if (opts.signal?.aborted) return runDownload(opts);
+  let started = false;
+  const run = (): Promise<SceneAssetsResult | { error: string }> => {
+    started = true;
+    return runDownload(opts);
+  };
   const result = downloadQueue.then(run, run);
   downloadQueue = result.then(
     () => undefined,
     () => undefined,
   );
-  return result;
+  if (!opts.signal) return result;
+
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<SceneAssetsResult | { error: string }>((resolve) => {
+    onAbort = () => {
+      // Only a still-queued call resolves immediately. Once runDownload owns
+      // the slot, its own cancellation path preserves received-byte accounting.
+      if (!started) resolve(runDownload(opts));
+    };
+    opts.signal!.addEventListener("abort", onAbort, { once: true });
+  });
+  return Promise.race([result, aborted]).finally(() => {
+    if (onAbort) opts.signal!.removeEventListener("abort", onAbort);
+  });
 }

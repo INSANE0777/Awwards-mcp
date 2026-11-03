@@ -1285,6 +1285,38 @@ describe("registerCapturePage", () => {
     expect(ctx.handlers.capture_pose_3d).toHaveBeenCalledWith({ url, viewport: "desktop" });
     expect(result).toBe(okResponse);
   });
+
+  it("forwards the MCP request signal to both scene branches", async () => {
+    const ctx = fakeCtx(captureHandlers());
+    registerCapturePage(ctx);
+    const callback = ctx.tool.mock.calls[0][4];
+    const controller = new AbortController();
+    const rights = { basis: "owned" as const, evidence: "own work" };
+
+    await callback(
+      { request: capturePageRequestSchema.parse({ kind: "scene", op: "capture", url }) },
+      { mcpReq: { signal: controller.signal } },
+    );
+    expect(ctx.handlers.capture_scene_3d).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+    );
+
+    await callback(
+      {
+        request: capturePageRequestSchema.parse({
+          kind: "scene",
+          op: "download_assets",
+          captureId: "scene-mg2k3j4p-0123abcd",
+          assetIds: ["asset-1"],
+          rights,
+        }),
+      },
+      { mcpReq: { signal: controller.signal } },
+    );
+    expect(ctx.handlers.download_scene_assets).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });
 
 describe("registerAuditPage", () => {

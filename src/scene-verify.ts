@@ -124,6 +124,8 @@ export interface Scene3dVerifyRequest extends Scene3dVerifyOptions {
   buildUrl: string;
   /** Output root; the handler passes <cache>/scene-captures. */
   sceneDir?: string;
+  /** Client cancellation; an abort returns an inconclusive result promptly. */
+  signal?: AbortSignal;
   /** Test-only seams; none of these are exposed by a tool schema. */
   loader?: () => Promise<any>;
   resolveHost?: (hostname: string) => Promise<string[]>;
@@ -589,6 +591,9 @@ function finalize(
 export async function verifyScene3d(
   opts: Scene3dVerifyRequest,
 ): Promise<Scene3dVerifyResult | { error: string }> {
+  if (opts.signal?.aborted) {
+    return { error: "Scene3d verification cancelled by the client." };
+  }
   if (!isHttpUrl(opts.buildUrl ?? "")) {
     return { error: "scene3d verification accepts http:// and https:// build URLs only." };
   }
@@ -600,6 +605,8 @@ export async function verifyScene3d(
     `scene3d verification exceeded its ${budget.timeoutMs}ms deadline (budget: ${budget.basis}); the run was abandoned and its browser resources were closed.`;
   const closers: Array<{ close(): unknown }> = [];
   let disposed = false;
+  // The reason the work loop must report if it observes disposal itself.
+  let disposedReason: string | null = null;
   const own = <T extends { close(): unknown }>(target: T): T => {
     // A resource that resolves after the deadline is closed on arrival instead
     // of being leaked by the already-returned run.
@@ -636,26 +643,47 @@ export async function verifyScene3d(
     resolveDeadline = resolve;
   });
   const armDeadline = (): void => {
+    if (disposed) return;
     if (timer) clearTimeout(timer);
     // Measured from the run start: raising the budget never adds a fresh full
     // window on top of the time already spent.
     const remaining = Math.max(1, startedAt + budget.timeoutMs - Date.now());
     timer = setTimeout(() => {
       disposed = true;
+      disposedReason = deadlineReason();
       resolveDeadline(scene3dInconclusive(deadlineReason()));
     }, remaining);
     timer.unref?.();
   };
   armDeadline();
 
+  // A client abort resolves the same race as the deadline, but the result says
+  // who cancelled; the finally still owns closing the browser and contexts.
+  let onClientAbort: (() => void) | undefined;
+  const cancelHit = new Promise<Scene3dVerifyResult>((resolve) => {
+    if (!opts.signal) return;
+    onClientAbort = () => {
+      disposed = true;
+      disposedReason = "scene3d verification was cancelled by the client.";
+      resolve(scene3dInconclusive(disposedReason));
+    };
+    opts.signal.addEventListener("abort", onClientAbort, { once: true });
+  });
+
   // The deadline covers every asynchronous step, including pack reads, DNS,
   // artifact setup, frame reads, the Playwright import and the comparison.
   const work = (async (): Promise<Scene3dVerifyResult | { error: string }> => {
+    const stopped = (): boolean => disposed || opts.signal?.aborted === true;
+    const cancelled = (): Scene3dVerifyResult =>
+      scene3dInconclusive("scene3d verification was cancelled by the client.");
     try {
+      if (stopped()) return cancelled();
       const sceneDir = opts.sceneDir ?? defaultSceneDir();
       const capture = await resolveSceneCaptureDir(sceneDir, opts.referenceCaptureId);
+      if (stopped()) return cancelled();
       if ("error" in capture) return scene3dInconclusive(capture.error);
       const pack = await readReferencePack(capture.dir, opts.referenceCaptureId);
+      if (stopped()) return cancelled();
       if ("error" in pack) return scene3dInconclusive(pack.error);
       const evidence = pack.evidence;
       const requested = evidence.checkpoints.length;
@@ -668,6 +696,7 @@ export async function verifyScene3d(
         );
       }
       const replayBudget = sceneVerifyBudget(evidence.checkpoints, opts.timeoutMs);
+      if (stopped()) return cancelled();
       if (replayBudget.timeoutMs > budget.timeoutMs) {
         budget = replayBudget;
         armDeadline();
@@ -690,6 +719,7 @@ export async function verifyScene3d(
       } catch {
         allowedBuild = false;
       }
+      if (stopped()) return cancelled();
       if (!allowedBuild) {
         return scene3dInconclusive(
           "refusing to load the build page: its host resolves to a loopback, link-local, private, metadata or reserved address, or the URL is not http(s).",
@@ -704,7 +734,9 @@ export async function verifyScene3d(
           `reference capture ${opts.referenceCaptureId} directory could not be resolved`,
         );
       }
+      if (stopped()) return cancelled();
       const artifacts = await prepareArtifactRoot(capture.dir, captureReal);
+      if (stopped()) return cancelled();
       if ("error" in artifacts) {
         return scene3dInconclusive(
           `scene3d verification artifacts could not be prepared: ${artifacts.error}`,
@@ -717,6 +749,7 @@ export async function verifyScene3d(
           readFrame(checkpoint.files?.canvas, captureReal),
         ),
       );
+      if (stopped()) return cancelled();
 
       let chromium: any;
       try {
@@ -725,11 +758,14 @@ export async function verifyScene3d(
       } catch {
         return { error: CAPTURE_INSTALL_HINT };
       }
+      if (stopped()) return cancelled();
 
       const proxy = opts.networkGuard?.proxy ?? own(await startSceneProxy(gate));
+      if (stopped()) return cancelled();
       const browser = own(
         await chromium.launch({ proxy: { server: proxy.url, bypass: "<-loopback>" } }),
       );
+      if (stopped()) return cancelled();
       const context = own(
         await browser.newContext({
           viewport: { width, height },
@@ -737,6 +773,7 @@ export async function verifyScene3d(
           serviceWorkers: "block",
         }),
       );
+      if (stopped()) return cancelled();
       if (typeof context.route === "function") {
         await context.route("**/*", async (route: any) => {
           let allowed = false;
@@ -754,6 +791,7 @@ export async function verifyScene3d(
           }
         });
       }
+      if (stopped()) return cancelled();
       // Popups are closed and still pass through the connection-level gate.
       let primaryPage: any = null;
       if (typeof context.on === "function") {
@@ -770,6 +808,7 @@ export async function verifyScene3d(
         });
       }
       const page = own(await context.newPage());
+      if (stopped()) return cancelled();
       primaryPage = page;
       if (typeof page.setDefaultTimeout === "function") {
         page.setDefaultTimeout(15_000);
@@ -777,19 +816,23 @@ export async function verifyScene3d(
       if (typeof page.addInitScript === "function") {
         await page.addInitScript(SCENE_CONTEXT_LOSS_INIT);
       }
+      if (stopped()) return cancelled();
 
       try {
         await page.goto(opts.buildUrl, { waitUntil: "load", timeout: 45_000 });
       } catch (err) {
         return { error: `scene3d verification could not load the build page: ${redactSceneError(messageOf(err))}` };
       }
+      if (stopped()) return cancelled();
       await settle(page, SCENE_VERIFY_LIMITS.scrollSettleMs);
+      if (stopped()) return cancelled();
 
       const picked = (await page.evaluate(SCENE_CANVAS_PICK, {
         selector: opts.buildSelector ?? "",
         // Generated outside the page: page content cannot pre-set or guess it.
         marker: randomUUID(),
       })) as { selector?: string; problem?: string };
+      if (stopped()) return cancelled();
       const pickProblem = String(picked?.problem ?? "");
       if (pickProblem || !picked?.selector) {
         const detail =
@@ -834,11 +877,14 @@ export async function verifyScene3d(
         const comparatorContext = own(
           await browser.newContext({ serviceWorkers: "block" }),
         );
+        if (stopped()) return cancelled();
         const blankPage = own(await comparatorContext.newPage());
+        if (stopped()) return cancelled();
         if (typeof blankPage.setDefaultTimeout === "function") {
           blankPage.setDefaultTimeout(15_000);
         }
         await blankPage.goto("about:blank", { waitUntil: "load", timeout: 10_000 });
+        if (stopped()) return cancelled();
         comparator = blankPage;
         return blankPage;
       };
@@ -895,6 +941,7 @@ export async function verifyScene3d(
               canvasFound?: boolean;
               canvasMatches?: number;
             };
+            if (stopped()) return cancelled();
             if (before?.scrollRootFound !== true) {
               reasons.push(
                 `the build page has no scroll root ${JSON.stringify(checkpoint.scrollRoot)} at this checkpoint`,
@@ -917,6 +964,7 @@ export async function verifyScene3d(
             }
             if (reasons.length === 0) {
               const contextLosses = Number(await page.evaluate(SCENE_CONTEXT_LOSSES));
+              if (stopped()) return cancelled();
               if (contextLosses > 0) {
                 reasons.push("the build page lost its WebGL context");
               }
@@ -925,6 +973,7 @@ export async function verifyScene3d(
               // Replay the reference's measured position, never its requested
               // target: the pair is only comparable at the same actual scroll.
               await page.evaluate(SCENE_SCROLL, { scrollRoot, top: referenceActual });
+              if (stopped()) return cancelled();
               if (checkpoint.pointer) {
                 const px = {
                   x: Math.round(checkpoint.pointer.x * Math.max(0, width - 1)),
@@ -932,9 +981,11 @@ export async function verifyScene3d(
                 };
                 if (page.mouse && typeof page.mouse.move === "function") {
                   await page.mouse.move(px.x, px.y);
+                  if (stopped()) return cancelled();
                 }
               }
               await settle(page, Math.max(0, Math.min(SCENE_LIMITS.maxWaitMs, checkpoint.waitMs)));
+              if (stopped()) return cancelled();
 
               // The final measurement happens immediately before the screenshot;
               // scroll-snap or page motion after this point cannot be hidden.
@@ -950,6 +1001,7 @@ export async function verifyScene3d(
                 scroll?: { top?: number; range?: number } | null;
                 scrollRootFound?: boolean;
               };
+              if (stopped()) return cancelled();
               const buildActual = Number(after?.scroll?.top);
               const buildDpr = Number(after?.dpr);
               if (after?.scrollRootFound !== true) {
@@ -1006,7 +1058,9 @@ export async function verifyScene3d(
         if (reasons.length === 0 && clip && frame) {
           try {
             const shot = await page.screenshot({ clip });
+            if (stopped()) return cancelled();
             buildImage = await writeArtifact(`${stem}-build.png`, shot);
+            if (stopped()) return cancelled();
             // The screenshot is not atomic either: re-probe scroll, geometry,
             // DPR and WebGL context after it, including on the final checkpoint.
             const post = (await page.evaluate(SCENE_PROBE, {
@@ -1021,7 +1075,9 @@ export async function verifyScene3d(
               scroll?: { top?: number } | null;
               scrollRootFound?: boolean;
             };
+            if (stopped()) return cancelled();
             const postLosses = Number(await page.evaluate(SCENE_CONTEXT_LOSSES));
+            if (stopped()) return cancelled();
             if (!preShot) {
               reasons.push("the pre-screenshot scroll position was not recorded");
             } else if (postLosses > 0) {
@@ -1060,6 +1116,7 @@ export async function verifyScene3d(
               }
             }
             if (reasons.length === 0) {
+              if (stopped()) return cancelled();
               const comparedFrame = (await (await comparatorPage()).evaluate(compareFrames, {
                 reference: `data:image/png;base64,${frame.toString("base64")}`,
                 build: `data:image/png;base64,${Buffer.from(shot).toString("base64")}`,
@@ -1129,7 +1186,7 @@ export async function verifyScene3d(
         });
       }
 
-      if (disposed) return scene3dInconclusive(deadlineReason());
+      if (disposed) return scene3dInconclusive(disposedReason ?? deadlineReason());
       const cameraNote = evidence.checkpoints.every(
         (checkpoint) => cameraAngleOf(checkpoint, evidence) === null,
       )
@@ -1150,9 +1207,10 @@ export async function verifyScene3d(
   })();
 
   try {
-    return await Promise.race([work, deadlineHit]);
+    return await Promise.race([work, deadlineHit, cancelHit]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (onClientAbort) opts.signal?.removeEventListener("abort", onClientAbort);
     disposed = true;
     await closeAll();
   }

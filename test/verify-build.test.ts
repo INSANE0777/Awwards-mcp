@@ -18,6 +18,7 @@ import type { CensusAcquisition, ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { ComponentPack, ComponentNode } from "../src/component.js";
 import { createSceneNetworkGuard, fetchSceneHtml } from "../src/scene-capture.js";
+import { verifyScene3d } from "../src/scene-verify.js";
 
 const base = (p: Partial<MotionCensusInput>): MotionCensusInput => ({
   counts: {
@@ -1471,5 +1472,65 @@ describe("verifyBuild scene3d network guard", () => {
     } finally {
       await close(server);
     }
+  });
+
+  it("returns the cancellation error before any acquisition when already aborted", async () => {
+    const calls = { structure: 0, dns: 0, scene: 0 };
+    const report = await verifyBuild({
+      buildUrl: "https://build.test/",
+      referenceUrl: "https://ref.test/",
+      scene3d,
+      signal: AbortSignal.abort(),
+      resolveHost: async () => {
+        calls.dns += 1;
+        return ["93.184.216.34"];
+      },
+      structureFn: async () => {
+        calls.structure += 1;
+        return fixtureStructure();
+      },
+      sceneFn: async () => {
+        calls.scene += 1;
+        return sceneResult();
+      },
+    });
+    expect(report).toEqual({ error: "Verification cancelled by the client." });
+    expect(calls).toEqual({ structure: 0, dns: 0, scene: 0 });
+  });
+
+  it("forwards the signal so a post-scan abort leaves only the scene gate inconclusive", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const report = await verifyBuild({
+      buildUrl: "https://build.test/",
+      referenceUrl: "https://ref.test/",
+      scene3d,
+      signal: controller.signal,
+      resolveHost: async () => ["93.184.216.34"],
+      // Reaching the loader would mean an acquisition outlived the abort.
+      loader: async () => {
+        throw new Error("browser must not launch after cancellation");
+      },
+      structureFn: async () => fixtureStructure(),
+      scrollFn: async () => {
+        controller.abort();
+        return fixtureCensus();
+      },
+      hoverFn: async () => fixtureHover(),
+      fetchFn: (async () => ({ ok: true, status: 200, text: async () => "" })) as unknown as typeof fetch,
+      perfFn: async () => ({ error: "not measured" }),
+      rulesFn: () => [],
+      sceneFn: (sceneArgs) => {
+        seen = sceneArgs.signal;
+        return verifyScene3d(sceneArgs);
+      },
+    });
+    expect("error" in report).toBe(false);
+    if ("error" in report) return;
+    expect(seen).toBe(controller.signal);
+    // The legacy score stays a score; only the 3D gate reports the cancel.
+    expect(report.verdict).toMatch(/pass|warn|fail/);
+    expect(report.scene3d?.status).toBe("inconclusive");
+    expect(report.scene3d?.limitations.join(" ")).toContain("cancelled by the client");
   });
 });

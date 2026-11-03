@@ -227,6 +227,7 @@ export type SceneRequest = z.infer<typeof sceneRequestSchema>;
 export async function runSceneRequest(
   handlers: Handlers,
   request: SceneRequest,
+  signal?: AbortSignal,
 ): Promise<ToolResponse> {
   if (request.op === "capture") {
     return handlers.capture_scene_3d({
@@ -238,6 +239,7 @@ export async function runSceneRequest(
       assetOrigins: request.assetOrigins,
       ...(request.adapters !== undefined ? { adapters: request.adapters } : {}),
       includeViewportShots: request.includeViewportShots,
+      ...(signal ? { signal } : {}),
     });
   }
   return handlers.download_scene_assets({
@@ -245,6 +247,7 @@ export async function runSceneRequest(
     assetIds: request.assetIds,
     rights: request.rights,
     allowUnknown: request.allowUnknown,
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -254,6 +257,7 @@ export function registerCaptureScene3d(ctx: ToolContext): void {
     "Scene evidence in two strict operations. request.op:\"capture\" records a passive evidence pack for a WebGL/canvas page: at each checkpoint it scrolls the selected root, optionally moves the pointer, and saves a viewport screenshot plus a clipped canvas screenshot, with requested/actual scroll, canvas CSS rect/backing size/DPR and elapsed time. It also records a redacted inventory of the page's own responses (URL, MIME, size when declared, resource type, texture/model/HDR/shader/script/font/image guess, and an assetId per row) and passive framework hints (THREE.REVISION, BABYLON.Engine.Version, pc.version, matching script URLs, canvas count) without calling getContext or installing hooks. request.op:\"download_assets\" downloads up to 32 inventory assets from one capture: downloading is a licensing decision, so rights.basis (owned|licensed|permission) and rights.evidence are mandatory, are recorded with a timestamp in scene-captures/<captureId>/provenance.json, and are not verified by the server - do not download assets you may not use. It only fetches observed inventory URLs that carry no query string, fragment or credentials; there is no crawling, no guessed model or source-map URL and no credential use. Original bytes are written under scene-captures/<captureId>/assets with SHA-256 and an extension validated from MIME/magic (glb, gltf, bin, png, jpg, webp, ktx2, hdr, exr); unknown types are skipped unless allowUnknown saves them as .bin. Caps: 16 MiB per file, 64 MiB per run, 5 manual redirects, 1 request/second, one request at a time, 15s body deadline, 120s overall; every hop is DNS-validated and loopback/private/metadata/reserved addresses are refused. Honest scope: without the opt-in adapters no scene graph, camera, controls, shader source or geometry is recovered - frames show rendered output only. adapters are experimental and opt-in (at most two entries, each once): \"three\" reads objects reachable from window.THREE, window.scene/camera/renderer and window.app/experience/viewer/world after load (no heap crawl, no hooks, no network) and adds a bounded evidence.three summary (max 500 nodes, depth 20, 8 cameras, 8 lights, 32 materials, 200 texture URLs); \"spector\" needs the optional spectorjs package, installs its bundle as an init script before load and captures one WebGL frame into a bounded evidence.spector summary (command names/counts, context attributes, analyses, max 8 programs, 16 shaders, 64 KiB per shader source and 256 KiB of shader source total; command arguments, state, results, stack traces and memory are never transferred, and shader source is untrusted page text that is never executed). scene/camera/controls/geometry are marked available only for what three actually returned, shaders only when spector captured at least one source, and neither adapter promises scene recovery. Evidence is written to scene-captures/<captureId>/evidence.json plus PNG frames; responses are compact JSON with assetIds and downloadability, paths, hashes, counts, coverage and limitations, never inline image or asset bodies. The capture op requires the optional playwright dependency; download_assets does not.",
     { request: sceneRequestSchema.describe("Exactly one scene operation: choose op and its fields") },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args: { request: SceneRequest }) => asMcpResult(runSceneRequest(ctx.handlers, args.request)),
+    (args: { request: SceneRequest }, sdkCtx?: { mcpReq?: { signal?: AbortSignal } }) =>
+      asMcpResult(runSceneRequest(ctx.handlers, args.request, sdkCtx?.mcpReq?.signal)),
   );
 }

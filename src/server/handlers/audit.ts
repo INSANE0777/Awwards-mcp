@@ -137,6 +137,7 @@ export async function verify_build(ctx: HandlerContext, args: {
   domDiff?: boolean;
   scene3d?: Scene3dVerifyOptions;
   compact?: boolean;
+  signal?: AbortSignal;
 }): Promise<ToolResponse> {
   try {
     // Lazy default: playwright is only touched when the tool actually runs.
@@ -151,6 +152,7 @@ export async function verify_build(ctx: HandlerContext, args: {
         scene3d?: Scene3dVerifyOptions;
         sceneDir?: string;
         sceneFn?: VerifySceneFn;
+        signal?: AbortSignal;
       }) => import("../../verify-build.js").then((m) => m.verifyBuild(verifyArgs)));
     // scene3d reaches the orchestrator only when requested, so the default
     // payload of every other verify_build call is unchanged.
@@ -168,6 +170,7 @@ export async function verify_build(ctx: HandlerContext, args: {
       viewport: args.viewport,
       domDiff: args.domDiff,
       ...sceneArgs,
+      ...(args.signal ? { signal: args.signal } : {}),
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
     // compact=true: verdict + scores only; evidence lines and band names drop.

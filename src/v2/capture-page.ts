@@ -208,6 +208,7 @@ export const capturePageInputSchema = z
 export async function runCapturePage(
   handlers: Handlers,
   request: CapturePageRequest,
+  signal?: AbortSignal,
 ): Promise<ToolResponse> {
   switch (request.kind) {
     case "screenshot":
@@ -250,6 +251,7 @@ export async function runCapturePage(
           ...(request.includeViewportShots !== undefined
             ? { includeViewportShots: request.includeViewportShots }
             : {}),
+          ...(signal ? { signal } : {}),
         });
       }
       return handlers.download_scene_assets({
@@ -257,6 +259,7 @@ export async function runCapturePage(
         assetIds: request.assetIds!,
         rights: request.rights!,
         ...(request.allowUnknown !== undefined ? { allowUnknown: request.allowUnknown } : {}),
+        ...(signal ? { signal } : {}),
       });
     case "recording":
       return handlers.record_site_motion({
@@ -278,7 +281,7 @@ export function registerCapturePage(ctx: ToolContext): void {
     "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), scene (two strict ops: op:\"capture\" records passive scene evidence - checkpoint frames, canvas geometry and a redacted response inventory, with no scene graph, camera, shader or geometry recovery unless the experimental adapters opt in: \"three\" adds a bounded evidence.three summary from reachable window objects (no heap crawl), and \"spector\" installs the optional spectorjs bundle before load and adds a bounded evidence.spector summary of one WebGL frame (command names/counts, context attributes, analyses and capped shader source; no command arguments, state or memory); op:\"download_assets\" downloads up to 32 inventory assetIds and requires rights.basis (owned|licensed|permission) plus rights.evidence because downloading is a licensing decision, recorded in provenance.json; caps are 16 MiB/file, 64 MiB/run, 5 redirects, 1 req/s, 15s body and 120s overall, and only observed URLs without query, fragment or credentials are fetched), or recording (motion filmstrip video of preloader, scroll and hover). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all five need the optional Playwright dependency, except scene op:\"download_assets\" which uses plain Node http(s); recording also needs ffmpeg-static. This tool is not read-only: the recording branch can click interactive elements and submit their forms to expose hover/click motion, and scene op:\"download_assets\" writes asset files.",
     capturePageInputSchema,
     { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-    (args: { request: CapturePageRequest }) =>
-      asMcpResult(runCapturePage(ctx.handlers, args.request)),
+    (args: { request: CapturePageRequest }, sdkCtx?: { mcpReq?: { signal?: AbortSignal } }) =>
+      asMcpResult(runCapturePage(ctx.handlers, args.request, sdkCtx?.mcpReq?.signal)),
   );
 }
