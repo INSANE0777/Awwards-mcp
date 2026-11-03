@@ -187,7 +187,7 @@ export async function new_winners(ctx: HandlerContext, args: { award?: "sotd" | 
       for (const site of res.newWinners) {
         try {
           const html = await ctx.client.getHtml(site.detailPath);
-          records.push(...recordsFromSiteHtml(html, site, Math.floor(ctx.nowMs() / 1000)));
+          records.push(...recordsFromSiteHtml(html, site, ctx.nowMs()));
           backfilled++;
         } catch {
           /* site page 404/blocked — the detail remains fetchable on demand */

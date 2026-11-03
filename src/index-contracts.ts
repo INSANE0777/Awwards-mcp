@@ -21,6 +21,21 @@ const sampleShape = {
   hint: z.string().optional(),
 };
 
+// Optional so pre-1.18 stats payloads (and injected indexStatsFn fixtures)
+// keep validating; the current implementation always emits it.
+const elementCorpusSchema = z.object({
+  total: z.number().int().nonnegative(),
+  gallery: z.number().int().nonnegative(),
+  site: z.number().int().nonnegative(),
+  categorized: z.number().int().nonnegative(),
+  uncategorized: z.number().int().nonnegative(),
+  builtWithKnown: z.number().int().nonnegative(),
+  fetchedOldestAt: z.number().int().nonnegative().nullable(),
+  fetchedNewestAt: z.number().int().nonnegative().nullable(),
+  fetchedAtUnit: z.literal("unix-ms"),
+  note: z.literal("locally cached subset"),
+});
+
 export const indexStatusOutputSchema = z.object({
   sitesCount: z.number().int().nonnegative(),
   progress: z.object({
@@ -54,6 +69,7 @@ export const indexStatsOutputSchema = z.object({
   }),
   elements: z.object({
     total: z.number().int().nonnegative(),
+    corpus: elementCorpusSchema.optional(),
     coverage: coverageSchema,
   }),
   technologies: z.object({

@@ -2221,6 +2221,90 @@ describe("search_elements handler", () => {
     expect(JSON.parse((res.content[0] as any).text).results).toHaveLength(0);
   });
 
+  it("applies category filters across the whole corpus before the limit", async () => {
+    const { client, fetchFn } = fakeClient();
+    const cache = new Cache(tmpDir());
+    // 205 recent short matches push the only footer row past the old 100-row
+    // FTS window and past the old 200-row recent window.
+    const rows: ElementRecord[] = Array.from({ length: 205 }, (_, i) => ({
+      ...elementFixture,
+      slug: `gallery-${i}`,
+      title: "Showcase",
+      cid: "hero",
+      category: "Hero",
+      fetchedAt: 1_000 + i,
+    }));
+    rows.push({
+      ...elementFixture,
+      slug: "deep-footer",
+      title: "Showcase of an Editorial Footer With a Long Descriptive Title That Ranks Last",
+      cid: "footers",
+      category: "Footers",
+      fetchedAt: 1,
+    });
+    cache.upsertElements(rows);
+
+    const ranked = cache.searchElements("showcase", 300);
+    expect(ranked.findIndex((r) => r.slug === "deep-footer")).toBeGreaterThanOrEqual(100);
+    expect(cache.listElements(200).some((r) => r.slug === "deep-footer")).toBe(false);
+
+    const h = createHandlers({ client, cache });
+    const byQuery = await h.search_elements({ query: "showcase", category: "footers", limit: 1 });
+    expect(JSON.parse((byQuery.content[0] as any).text).results.map((r: any) => r.slug))
+      .toEqual(["deep-footer"]);
+
+    const byRecent = await h.search_elements({ category: "footers", limit: 1 });
+    expect(JSON.parse((byRecent.content[0] as any).text).results.map((r: any) => r.slug))
+      .toEqual(["deep-footer"]);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("combines category with multiple stack terms as AND and treats LIKE wildcards literally", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const stacked = (slug: string, builtWith: string[]): ElementRecord => ({
+      ...elementFixture,
+      slug,
+      builtWith,
+      fetchedAt: 1,
+    });
+    cache.upsertElements([
+      stacked("full-stack", ["GSAP", "Lenis"]),
+      stacked("gsap-only", ["GSAP"]),
+      stacked("lenis-only", ["Lenis"]),
+      stacked("percent", ["100% GSAP"]),
+      stacked("underscore", ["GSAP_Plus"]),
+      stacked("plain-x", ["GSAPXPlus"]),
+      stacked("backslash", ["C\\Tool"]),
+      { ...stacked("other-category", ["GSAP", "Lenis"]), cid: "hero", category: "Hero" },
+    ]);
+    const h = createHandlers({ client, cache });
+    const slugs = async (args: Record<string, unknown>) => {
+      const res = await h.search_elements(args);
+      return JSON.parse((res.content[0] as any).text).results.map((r: any) => r.slug);
+    };
+
+    expect(await slugs({ query: "footer", category: "footers", stack: ["GSAP", "LENIS"], limit: 10 }))
+      .toEqual(["full-stack"]);
+    expect(await slugs({ query: "footer", category: "footers", stack: ["gsap", "webgl"], limit: 10 }))
+      .toEqual([]);
+
+    // These terms matched literally in the pre-SQL JS filter; escaping keeps
+    // the SQL LIKE patterns literal too.
+    expect(await slugs({ stack: ["%"], limit: 10 })).toEqual(["percent"]);
+    expect(await slugs({ stack: ["_"], limit: 10 })).toEqual(["underscore"]);
+    expect(await slugs({ stack: ["\\"], limit: 10 })).toEqual(["backslash"]);
+    // Decoded names, not JSON syntax: escaped quotes/backslashes and the
+    // space-joined array must still match, while a JSON bracket must not.
+    expect(await slugs({ stack: ["C\\Tool"], limit: 10 })).toEqual(["backslash"]);
+    expect(await slugs({ stack: ["gsap lenis"], limit: 10 }))
+      .toEqual(["full-stack", "other-category"]);
+    expect(await slugs({ stack: ["["], limit: 10 })).toEqual([]);
+    // Empty term preserves the old "everything includes ''" behavior,
+    // including rows with an empty builtWith array.
+    expect(await slugs({ stack: [""], limit: 10 })).toHaveLength(8);
+  });
+
   it("serves an empty corpus without a query via listElements (no FTS call)", async () => {
     const { client } = fakeClient();
     const cache = new Cache(tmpDir());
@@ -2705,6 +2789,9 @@ describe("new_winners + watch_site", () => {
     // Backfilled record is searchable.
     const els = JSON.parse(asJson(await h.search_elements({ query: "Hero loop" })));
     expect(els.results.some((r: any) => r.title === "Hero loop" && r.source === "site")).toBe(true);
+    // Backfill uses the injected millisecond clock (not seconds).
+    const backfilled = cache.listElements(50).find((r) => r.title === "Hero loop");
+    expect(backfilled?.fetchedAt).toBe(now.ms);
 
     // Same-day re-poll (clock still Sep 29): nothing new.
     const third = await h.new_winners({ award: "sotd" });

@@ -59,7 +59,22 @@ const statsFixture: IndexStatsResult = {
   top: 10,
   sites: { total: 3, coverage },
   details: { cached: 2, coverage: windowedCoverage },
-  elements: { total: 1, coverage },
+  elements: {
+    total: 1,
+    corpus: {
+      total: 4,
+      gallery: 1,
+      site: 3,
+      categorized: 1,
+      uncategorized: 3,
+      builtWithKnown: 1,
+      fetchedOldestAt: 1_700_000_000_000,
+      fetchedNewestAt: 1_700_000_100_000,
+      fetchedAtUnit: "unix-ms",
+      note: "locally cached subset",
+    },
+    coverage,
+  },
   technologies: {
     items: [{ tag: "webgl", count: 2 }],
     distinct: 1,
@@ -169,6 +184,19 @@ describe("index output contracts", () => {
     expect(indexStatsOutputSchema.safeParse(res.structuredContent).success).toBe(true);
     expect(res.structuredContent).toMatchObject({
       sites: { total: 0 },
+      elements: {
+        total: 0,
+        corpus: {
+          total: 0,
+          gallery: 0,
+          site: 0,
+          categorized: 0,
+          uncategorized: 0,
+          builtWithKnown: 0,
+          fetchedOldestAt: null,
+          fetchedNewestAt: null,
+        },
+      },
       colors: { items: [], sample: 0, insufficient: true },
       scores: { n: 0, avg: null, median: null, insufficient: true },
       motionLibs: { items: [], rows: 0, insufficient: true },
@@ -184,6 +212,22 @@ describe("index output contracts", () => {
     expect(res.content).toEqual([{ type: "text", text: JSON.stringify(statsFixture, null, 1) }]);
     expect(res.structuredContent).toEqual(statsFixture);
     expect(indexStatsOutputSchema.safeParse(res.structuredContent).success).toBe(true);
+  });
+
+  it("types the element corpus block and keeps pre-corpus stats shapes valid", () => {
+    expect(indexStatsOutputSchema.safeParse(statsFixture).success).toBe(true);
+
+    const { corpus, ...legacyElements } = statsFixture.elements;
+    expect(indexStatsOutputSchema.safeParse({ ...statsFixture, elements: legacyElements }).success).toBe(true);
+
+    const badNote = { ...statsFixture, elements: { ...statsFixture.elements, corpus: { ...corpus, note: "all rows" } } };
+    expect(indexStatsOutputSchema.safeParse(badNote).success).toBe(false);
+    const badCount = { ...statsFixture, elements: { ...statsFixture.elements, corpus: { ...corpus, builtWithKnown: -1 } } };
+    expect(indexStatsOutputSchema.safeParse(badCount).success).toBe(false);
+    const badDate = { ...statsFixture, elements: { ...statsFixture.elements, corpus: { ...corpus, fetchedOldestAt: 1.5 } } };
+    expect(indexStatsOutputSchema.safeParse(badDate).success).toBe(false);
+
+    expect(indexGetOutputSchema.safeParse(statsFixture).success).toBe(true);
   });
 
   it("validates both v2 get_index branches against the merged object contract", async () => {

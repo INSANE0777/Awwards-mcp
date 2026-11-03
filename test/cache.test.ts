@@ -515,6 +515,16 @@ describe("elements cache", () => {
       .toEqual(["hero-with-number-countup"]);
   });
 
+  it("listElements normalizes second- and millisecond-based fetchedAt", () => {
+    const cache = new Cache(tmpDir(), () => 1_700_000_000_000);
+    cache.upsertElements([
+      elementRecord({ slug: "legacy-seconds", fetchedAt: 1_700_000_000 }),
+      elementRecord({ slug: "millis-earlier", fetchedAt: 1_699_999_999_000 }),
+    ]);
+    expect(cache.listElements(10).map((r) => r.slug))
+      .toEqual(["legacy-seconds", "millis-earlier"]);
+  });
+
   it("listElements returns rows newest-fetched first", () => {
     let t = 1_000_000;
     const cache = new Cache(tmpDir(), () => t);
