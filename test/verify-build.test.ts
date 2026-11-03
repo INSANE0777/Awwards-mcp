@@ -132,6 +132,176 @@ describe("compareBands", () => {
     expect(r.refOnly).toEqual(["footer"]);
     expect(r.buildOnly).toEqual([]);
     expect(r.score).toBeGreaterThan(50);
+    // Golden: score and label arrays are unchanged by diagnostics.
+    expect({ score: r.score, matched: r.matched, refOnly: r.refOnly, buildOnly: r.buildOnly }).toEqual({
+      score: 80,
+      matched: ["hero", "Feature grid"],
+      refOnly: ["footer"],
+      buildOnly: [],
+    });
+    expect(r.diagnostics).toEqual([
+      {
+        referenceIndex: 0,
+        buildIndex: 0,
+        status: "matched",
+        matchReason: "label",
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: false,
+      },
+      {
+        referenceIndex: 1,
+        buildIndex: 1,
+        status: "matched",
+        matchReason: "background",
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: false,
+      },
+      {
+        referenceIndex: 2,
+        buildIndex: null,
+        status: "reference-only",
+        matchReason: null,
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: null,
+      },
+    ]);
+  });
+
+  it("emits matched diagnostics with the consumed build index and match reason", () => {
+    const r = compareBands(
+      [
+        { label: "body", bg: null, tag: "section", height: 900 },
+        { label: "body", bg: "#abcdef", tag: "section", height: 1600 },
+      ],
+      [
+        { label: "section", bg: "#abcdef", tag: "section", height: 1600 },
+        { label: "section", bg: null, tag: "section", height: 900 },
+      ]
+    );
+    // Same greedy result as before: heights pair row 0 with build 1, bg+tag
+    // pairs row 1 with build 0.
+    expect(r.matched).toEqual(["body", "body"]);
+    expect(r.score).toBe(100);
+    expect(r.diagnostics).toEqual([
+      {
+        referenceIndex: 0,
+        buildIndex: 1,
+        status: "matched",
+        matchReason: "height",
+        orderChanged: false,
+        heightDeltaRatio: 0,
+        backgroundChanged: null,
+      },
+      {
+        referenceIndex: 1,
+        buildIndex: 0,
+        status: "matched",
+        matchReason: "background",
+        orderChanged: true,
+        heightDeltaRatio: 0,
+        backgroundChanged: false,
+      },
+    ]);
+  });
+
+  it("flags relative order changes for matched bands", () => {
+    const r = compareBands(
+      [
+        { label: "hero", bg: null, tag: "section" },
+        { label: "pricing", bg: null, tag: "div" },
+      ],
+      [
+        { label: "pricing", bg: null, tag: "div" },
+        { label: "hero", bg: null, tag: "section" },
+      ]
+    );
+    expect(r.score).toBe(100);
+    expect(r.matched).toEqual(["hero", "pricing"]);
+    expect(r.diagnostics.map((d) => [d.buildIndex, d.orderChanged, d.matchReason])).toEqual([
+      [1, false, "label"],
+      [0, true, "label"],
+    ]);
+  });
+
+  it("reports height/background deltas even when the label matched", () => {
+    const r = compareBands(
+      [{ label: "hero", bg: "#ABCDEF", tag: "section", height: 1000 }],
+      [{ label: "hero", bg: "#abcdef", tag: "section", height: 800 }]
+    );
+    expect(r.matched).toEqual(["hero"]);
+    expect(r.diagnostics[0]).toMatchObject({
+      referenceIndex: 0,
+      buildIndex: 0,
+      status: "matched",
+      matchReason: "label",
+      orderChanged: false,
+      heightDeltaRatio: 0.2,
+      backgroundChanged: false,
+    });
+    const changed = compareBands(
+      [{ label: "hero", bg: "#111111", tag: "section", height: 1000 }],
+      [{ label: "hero", bg: "#222222", tag: "section", height: 1000 }]
+    );
+    expect(changed.diagnostics[0]?.backgroundChanged).toBe(true);
+    expect(changed.diagnostics[0]?.heightDeltaRatio).toBe(0);
+  });
+
+  it("emits reference-only rows before build-only rows, with null sides", () => {
+    const r = compareBands(
+      [
+        { label: "hero", bg: null, tag: "header" },
+        { label: "footer", bg: null, tag: "footer" },
+      ],
+      [
+        { label: "hero", bg: null, tag: "header" },
+        { label: "pricing", bg: null, tag: "section" },
+      ]
+    );
+    expect(r.score).toBe(50);
+    expect(r.matched).toEqual(["hero"]);
+    expect(r.refOnly).toEqual(["footer"]);
+    expect(r.buildOnly).toEqual(["pricing"]);
+    expect(r.diagnostics).toEqual([
+      {
+        referenceIndex: 0,
+        buildIndex: 0,
+        status: "matched",
+        matchReason: "label",
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: null,
+      },
+      {
+        referenceIndex: 1,
+        buildIndex: null,
+        status: "reference-only",
+        matchReason: null,
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: null,
+      },
+      {
+        referenceIndex: null,
+        buildIndex: 1,
+        status: "build-only",
+        matchReason: null,
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: null,
+      },
+    ]);
+  });
+
+  it("leaves unmeasured heights and absent backgrounds null", () => {
+    const missing = compareBands(
+      [{ label: "hero", bg: null, tag: "section", height: 0 }],
+      [{ label: "hero", bg: null, tag: "section" }]
+    );
+    expect(missing.diagnostics[0]?.heightDeltaRatio).toBeNull();
+    expect(missing.diagnostics[0]?.backgroundChanged).toBeNull();
   });
 
   it("falls back to bg+tag match when labels differ", () => {

@@ -172,7 +172,10 @@ export async function verify_build(ctx: HandlerContext, args: {
     if ("error" in result) return { content: [text(result.error)], isError: true };
     // compact=true: verdict + scores only; evidence lines and band names drop.
     const payload = args.compact ? compactVerifyReport(result) : result;
-    return { content: [text(JSON.stringify(payload, null, 1))] };
+    return {
+      content: [text(JSON.stringify(payload, null, 1))],
+      structuredContent: payload as unknown as Record<string, unknown>,
+    };
   } catch (err) {
     return errorResponse(err);
   }

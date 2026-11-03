@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { verifyFlowArgsSchema } from "../verify-flow.js";
 import { scene3dVerifySchema } from "../tools/scene.js";
+import { verifyBuildOutputSchema } from "../verify-contracts.js";
 import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } from "../tools/shared.js";
 
 // Retained 1.x tools with v2-native descriptions. Their input contracts and
@@ -71,6 +72,7 @@ export function registerVerifyBuildV2(ctx: ToolContext): void {
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.verify_build(args)),
+    verifyBuildOutputSchema,
   );
 }
 

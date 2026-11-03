@@ -6,7 +6,15 @@ import type { RunVerifyCliIo } from "../src/verify-cli.js";
 const report = (verdict: VerifyReport["verdict"]): VerifyReport => ({
   buildUrl: "https://build.test",
   referenceUrl: "https://ref.test",
-  bands: { score: 90, matched: ["hero"], refOnly: [], buildOnly: [] },
+  bands: {
+    score: 90,
+    matched: ["hero"],
+    refOnly: [],
+    buildOnly: [],
+    diagnostics: [
+      { referenceIndex: 0, buildIndex: 0, status: "matched", matchReason: "label", orderChanged: false, heightDeltaRatio: null, backgroundChanged: null },
+    ],
+  },
   motion: { score: 90, refFingerprint: "k1|tr:g1|nat:0|sc:0|pin:0|e:", buildFingerprint: "k1|tr:g1|nat:0|sc:0|pin:0|e:" },
   overall: 90,
   verdict,

@@ -3595,7 +3595,17 @@ describe("audit_url and verify_build compact payloads", () => {
   const verifyReport = () => ({
     buildUrl: "https://b.test/",
     referenceUrl: "https://r.test/",
-    bands: { score: 82, matched: ["hero", "main"], refOnly: ["footer"], buildOnly: [] },
+    bands: {
+      score: 82,
+      matched: ["hero", "main"],
+      refOnly: ["footer"],
+      buildOnly: [],
+      diagnostics: [
+        { referenceIndex: 0, buildIndex: 0, status: "matched", matchReason: "label", orderChanged: false, heightDeltaRatio: null, backgroundChanged: null },
+        { referenceIndex: 1, buildIndex: 1, status: "matched", matchReason: "label", orderChanged: false, heightDeltaRatio: null, backgroundChanged: null },
+        { referenceIndex: 2, buildIndex: null, status: "reference-only", matchReason: null, orderChanged: false, heightDeltaRatio: null, backgroundChanged: null },
+      ],
+    },
     motion: { score: 64, refFingerprint: "ref-fp", buildFingerprint: "build-fp" },
     overall: 75,
     verdict: "warn",

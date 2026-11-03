@@ -40,10 +40,37 @@ export interface BandRow {
   height?: number;
 }
 
+/**
+ * Explainable row for one band comparison. Matched rows pair a reference band
+ * with the build band greedily consumed for it; reference-only and build-only
+ * rows carry the null side. Measurements are evidence only: none of these
+ * fields feed the score.
+ */
+export interface BandDiagnostic {
+  /** Index into the reference bands array; null for build-only rows. */
+  referenceIndex: number | null;
+  /** Index into the build bands array; null for reference-only rows. */
+  buildIndex: number | null;
+  status: "matched" | "reference-only" | "build-only";
+  matchReason: "label" | "background" | "height" | null;
+  /** True when this match's build order reversed relative to the previous match. */
+  orderChanged: boolean;
+  /** Symmetric |ref-build|/max gap; null when either height is missing or 0. */
+  heightDeltaRatio: number | null;
+  /** ref background !== build background (normalized); null unless both are non-empty. */
+  backgroundChanged: boolean | null;
+}
+
 export interface VerifyReport {
   buildUrl: string;
   referenceUrl: string;
-  bands: { score: number; matched: string[]; refOnly: string[]; buildOnly: string[] };
+  bands: {
+    score: number;
+    matched: string[];
+    refOnly: string[];
+    buildOnly: string[];
+    diagnostics: BandDiagnostic[];
+  };
   motion: {
     score: number;
     refFingerprint: string;
@@ -156,8 +183,15 @@ const heightGap = (a: number, b: number): number => {
 export function compareBands(
   ref: BandRow[],
   build: BandRow[]
-): { score: number; matched: string[]; refOnly: string[]; buildOnly: string[] } {
-  const pool = build.map((b) => ({
+): {
+  score: number;
+  matched: string[];
+  refOnly: string[];
+  buildOnly: string[];
+  diagnostics: BandDiagnostic[];
+} {
+  const pool = build.map((b, index) => ({
+    index,
     label: normLabel(b.label),
     display: b.label.trim(),
     bg: normBg(b.bg),
@@ -171,17 +205,24 @@ export function compareBands(
   }
   const matched: string[] = [];
   const refOnly: string[] = [];
+  const diagnostics: BandDiagnostic[] = [];
+  let previousBuildIndex: number | null = null;
+  const labelMatch = (b: (typeof pool)[number], rl: string): boolean =>
+    b.label === rl &&
+    !GENERIC_LABELS.has(rl) &&
+    (buildLabelCounts.get(rl) ?? 0) === 1;
   // Greedy first match, consuming the build pool so one build band can't
   // absorb several ref bands.
-  for (const r of ref) {
+  for (const [referenceIndex, r] of ref.entries()) {
     const rl = normLabel(r.label);
     const rb = normBg(r.bg);
     let hit = pool.find(
       (b) =>
         !b.used &&
-        (((b.label === rl && !GENERIC_LABELS.has(rl) && (buildLabelCounts.get(rl) ?? 0) === 1)) ||
+        (labelMatch(b, rl) ||
           (b.bg !== "" && b.bg === rb && b.tag === r.tag))
     );
+    let reason: BandDiagnostic["matchReason"] = null;
     // A rebuild with anonymous wrappers (empty/body labels, or duplicates) has
     // no label identity; fall back to same-tag + closest height. A named build
     // band never matches an unrelated generic ref band by height alone.
@@ -201,19 +242,56 @@ export function compareBands(
             hit = b;
           }
         }
+        if (hit) reason = "height";
       }
     }
     if (hit) {
       hit.used = true;
       matched.push(r.label.trim());
+      const rh = heightOf(r);
+      const bh = hit.height;
+      diagnostics.push({
+        referenceIndex,
+        buildIndex: hit.index,
+        status: "matched",
+        matchReason: reason ?? (labelMatch(hit, rl) ? "label" : "background"),
+        orderChanged: previousBuildIndex !== null && hit.index <= previousBuildIndex,
+        heightDeltaRatio:
+          rh !== null && bh !== null && rh !== 0 && bh !== 0
+            ? Math.abs(rh - bh) / Math.max(Math.abs(rh), Math.abs(bh))
+            : null,
+        backgroundChanged: rb !== "" && hit.bg !== "" ? rb !== hit.bg : null,
+      });
+      previousBuildIndex = hit.index;
     } else {
       refOnly.push(r.label.trim() || "(unlabeled)");
+      diagnostics.push({
+        referenceIndex,
+        buildIndex: null,
+        status: "reference-only",
+        matchReason: null,
+        orderChanged: false,
+        heightDeltaRatio: null,
+        backgroundChanged: null,
+      });
     }
   }
   const buildOnly = pool.filter((b) => !b.used).map((b) => b.display);
+  for (const b of pool) {
+    if (b.used) continue;
+    diagnostics.push({
+      referenceIndex: null,
+      buildIndex: b.index,
+      status: "build-only",
+      matchReason: null,
+      orderChanged: false,
+      heightDeltaRatio: null,
+      backgroundChanged: null,
+    });
+  }
   const total = ref.length + build.length;
   const score = total === 0 ? 100 : Math.round((2 * matched.length) / (total) * 100);
-  return { score, matched, refOnly, buildOnly };
+  return { score, matched, refOnly, buildOnly, diagnostics };
 }
 
 export function verdictFrom(bandScore: number, motionScore: number) {
@@ -430,7 +508,7 @@ function sceneGuardUnavailableReport(
   return {
     buildUrl: args.buildUrl,
     referenceUrl: args.referenceUrl,
-    bands: { score: 0, matched: [], refOnly: [], buildOnly: [] },
+    bands: { score: 0, matched: [], refOnly: [], buildOnly: [], diagnostics: [] },
     motion: { score: 0, refFingerprint: "k1", buildFingerprint: "k1" },
     overall: 0,
     verdict: "fail",
