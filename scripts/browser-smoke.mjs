@@ -208,7 +208,7 @@ try {
 
     const listed = await rpc("tools/list", {}, 30_000);
     const tools = listed.tools ?? [];
-    if (tools.length !== 39) fail(`expected 39 tools in the default profile, got ${tools.length}`);
+    if (tools.length !== 41) fail(`expected 41 tools in the default profile, got ${tools.length}`);
     console.log(`browser-smoke: connected to ${init.serverInfo.name}, ${tools.length} tools`);
 
     const structureResult = await callTool("analyze_page_structure", { url: fixtureUrl });

@@ -3,6 +3,21 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.17.1 - 2026-11-03
+
+### Skills now install separately
+
+- The bundled `skills/` tree, its `_memory` registry and `scripts/skill-memory.mjs` have moved to **https://github.com/INSANE0777/awwwards-skills**. They are no longer part of this repository or its npm tarball.
+- The old `node_modules/awwwards-mcp/skills` copy workflow is gone. Install with:
+  ```bash
+  npx skills add INSANE0777/awwwards-skills
+  ```
+- MCP surfaces are unchanged: **41 full / 13 core / 15 v2**; tools, schemas, executable names and dependencies are unchanged.
+
+### Tooling
+
+- Fixed the packaged browser smoke to expect the current 41-tool default surface.
+
 ## v1.17.0 - 2026-11-03
 
 ### Index output contracts
