@@ -101,7 +101,7 @@ export function registerGetIndexStatus(ctx: ToolContext): void {
 export function registerGetIndexStats(ctx: ToolContext): void {
   ctx.tool(
     "get_index_stats",
-    "Aggregate metrics over the LOCAL cache only (zero network). ALL-TIME: site count, element count and technology/tag frequency. WINDOWED by windowDays (default 90, 1-3650): cached details, palette colour frequency and jury score stats from at most the 500 most recently fetched detail rows, plus Motion DNA library frequency. Each metric carries coverage labelled 'locally cached subset'; windowDays/detailsCached/detailParseCap appear only on windowed metrics (sites/elements/technologies are explicitly all-time). top caps each frequency list (default 10, 1-50). Aggregates only - no site slugs or titles. Personal, non-commercial use.",
+    "Aggregate metrics over the LOCAL cache only (zero network). ALL-TIME: site count, gallery element count and technology/tag frequency; elements.corpus discloses the whole locally cached element set (total, gallery, site, categorized/uncategorized, builtWithKnown, fetched date range) while elements.total stays gallery-only. WINDOWED by windowDays (default 90, 1-3650): cached details, palette colour frequency and jury score stats from at most the 500 most recently fetched detail rows, plus Motion DNA library frequency. Each metric carries coverage labelled 'locally cached subset'; windowDays/detailsCached/detailParseCap appear only on windowed metrics (sites/elements/technologies are explicitly all-time). top caps each frequency list (default 10, 1-50). Aggregates only - no site slugs or titles. Personal, non-commercial use.",
     {
       windowDays: z
         .number()
@@ -143,7 +143,7 @@ export function registerSearchElements(ctx: ToolContext): void {
   ctx.tool(
     "search_elements",
     "Search Awwwards UI components — award-grade footers, menus, loaders, transitions, micro-interactions… — across cached gallery records plus source:\"site\" records derived from new SOTD winners' own Elements sections. It does not crawl the /elements/* gallery (robots.txt disallows it). " +
-      "Usage: pass query text; category and stack combine as AND when both are provided; each result carries its element slug, source and parent project identifiers.",
+      "Usage: pass query text; category and stack combine as AND when both are provided and are applied across the whole cached corpus before the result limit; each result carries its element slug, source and parent project identifiers.",
     {
       query: z.string().describe("Free text: what the component is or does").optional(),
       category: z

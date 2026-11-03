@@ -606,20 +606,15 @@ export async function search_elements(ctx: HandlerContext, args: {
     const ftsQuery = args.query
       ? tokenizeQuery(args.query).map((t) => `"${t}"*`).join(" ")
       : null;
+    // Category and stack are SQL filters applied before LIMIT, so a match
+    // ranked outside the old 100/200-row windows is still returned.
+    const limit = Math.min(args.limit ?? 8, 20);
+    const filter = { category: args.category, stack: args.stack };
     const rows = ftsQuery
-      ? ctx.cache.searchElements(ftsQuery, 100)
-      : ctx.cache.listElements(200);
+      ? ctx.cache.searchElements(ftsQuery, limit, filter)
+      : ctx.cache.listElements(limit, filter);
 
-    const stackWords = (args.stack ?? []).map((s) => s.toLowerCase());
-    const hits = rows
-      .filter((r) => (args.category ? r.cid === args.category : true))
-      .filter((r) => {
-        if (stackWords.length === 0) return true;
-        const hay = r.builtWith.map((b) => b.toLowerCase()).join(" ");
-        return stackWords.every((w) => hay.includes(w));
-      })
-      .slice(0, args.limit ?? 8)
-      .map((r) => compactElement(ctx, r));
+    const hits = rows.map((r) => compactElement(ctx, r));
     return { content: [text(JSON.stringify({ count: hits.length, results: hits }, null, 1))] };
   } catch (err) {
     return errorResponse(err);

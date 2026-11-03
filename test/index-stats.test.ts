@@ -54,7 +54,11 @@ const dna = (url: string, libs: string[], capturedAt: number): MotionDna => ({
   capturedAt,
 });
 
-const element = (slug: string, fetchedAt: number): ElementRecord => ({
+const element = (
+  slug: string,
+  fetchedAt: number,
+  overrides: Partial<ElementRecord> = {},
+): ElementRecord => ({
   slug,
   title: "Element",
   cid: "hero",
@@ -68,6 +72,7 @@ const element = (slug: string, fetchedAt: number): ElementRecord => ({
   projectId: null,
   siteSlug: null,
   fetchedAt,
+  ...overrides,
 });
 
 const BASE_COVERAGE = {
@@ -299,6 +304,18 @@ describe("getIndexStats", () => {
     expect(stats.sites.total).toBe(0);
     expect(stats.details.cached).toBe(0);
     expect(stats.elements.total).toBe(0);
+    expect(stats.elements.corpus).toEqual({
+      total: 0,
+      gallery: 0,
+      site: 0,
+      categorized: 0,
+      uncategorized: 0,
+      builtWithKnown: 0,
+      fetchedOldestAt: null,
+      fetchedNewestAt: null,
+      fetchedAtUnit: "unix-ms",
+      note: "locally cached subset",
+    });
     expect(stats.technologies).toMatchObject({ items: [], distinct: 0 });
     expect(stats.colors).toMatchObject({ items: [], detailsParsed: 0 });
     expect(stats.scores).toMatchObject({ n: 0, avg: null, median: null });
@@ -370,6 +387,103 @@ describe("getIndexStats", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("element corpus disclosure", () => {
+  it("counts a gallery-only corpus and keeps elements.total gallery-only", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    cache.upsertElements([
+      element("gallery-hero", NOW - 30, { builtWith: ["GSAP"] }),
+      element("gallery-uncategorized", NOW - 10, { cid: "uncategorized" }),
+      element("gallery-empty-cid", NOW, { cid: "", builtWith: ["Lenis"] }),
+    ]);
+
+    const { elements } = getIndexStats({}, { cache, now: () => NOW });
+    expect(elements.total).toBe(3);
+    expect(elements.corpus).toEqual({
+      total: 3,
+      gallery: 3,
+      site: 0,
+      categorized: 1,
+      uncategorized: 2,
+      builtWithKnown: 2,
+      fetchedOldestAt: NOW - 30,
+      fetchedNewestAt: NOW,
+      fetchedAtUnit: "unix-ms",
+      note: "locally cached subset",
+    });
+  });
+
+  it("normalizes legacy second-based fetchedAt in corpus extrema", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    const oldSec = Math.floor((NOW - 100_000) / 1000);
+    cache.upsertElements([
+      element("legacy-seconds", oldSec),
+      element("current-ms", NOW),
+    ]);
+    const { elements } = getIndexStats({}, { cache, now: () => NOW });
+    expect(elements.corpus.fetchedOldestAt).toBe(NOW - 100_000);
+    expect(elements.corpus.fetchedNewestAt).toBe(NOW);
+    expect(elements.corpus.fetchedAtUnit).toBe("unix-ms");
+  });
+
+  it("counts a site-only corpus while elements.total stays 0", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    cache.upsertElements([
+      element("site-hero", NOW, {
+        source: "site",
+        cid: "uncategorized",
+        category: "uncategorized",
+        siteSlug: "example",
+      }),
+    ]);
+
+    const { elements } = getIndexStats({}, { cache, now: () => NOW });
+    expect(elements.total).toBe(0);
+    expect(elements.corpus).toMatchObject({
+      total: 1,
+      gallery: 0,
+      site: 1,
+      categorized: 0,
+      uncategorized: 1,
+      builtWithKnown: 0,
+      fetchedOldestAt: NOW,
+      fetchedNewestAt: NOW,
+    });
+  });
+
+  it("counts a mixed corpus, missing builtWith and legacy NULL cid without leaking rows", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    cache.upsertElements([
+      element("gallery-hero", NOW - 5, { builtWith: ["GSAP", "Lenis"] }),
+      element("site-hero", NOW, { source: "site", cid: "uncategorized", siteSlug: "example" }),
+    ]);
+    cache.withDbForTest((db) => {
+      db.prepare(
+        `INSERT INTO elements (slug, title, cid, category, author, builtWith, related, mediaPath, mediaType, source, projectId, siteSlug, fetchedAt)
+         VALUES ('legacy-null-cid', 'Legacy Title', NULL, NULL, 'Studio', '[]', '[]', NULL, NULL, 'gallery', NULL, NULL, ?)`,
+      ).run(NOW - 1);
+    });
+
+    const stats = getIndexStats({}, { cache, now: () => NOW });
+    expect(stats.elements.total).toBe(2);
+    expect(stats.elements.corpus).toEqual({
+      total: 3,
+      gallery: 2,
+      site: 1,
+      categorized: 1,
+      uncategorized: 2,
+      builtWithKnown: 1,
+      fetchedOldestAt: NOW - 5,
+      fetchedNewestAt: NOW,
+      fetchedAtUnit: "unix-ms",
+      note: "locally cached subset",
+    });
+    const json = JSON.stringify(stats);
+    for (const forbidden of ["gallery-hero", "site-hero", "legacy-null-cid", "Legacy Title"]) {
+      expect(json).not.toContain(forbidden);
     }
   });
 });

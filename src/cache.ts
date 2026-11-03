@@ -137,6 +137,37 @@ function rowToSite(r: SiteRow): SiteSummary {
   };
 }
 
+/** Pre-LIMIT element filters shared by the FTS and recent-list paths. */
+export interface ElementSearchFilter {
+  category?: string;
+  stack?: string[];
+}
+
+// SQL conditions (alias `e` = elements) for ElementSearchFilter. Stack keeps
+// the old handler semantics — case-insensitive substring over the builtWith
+// array — by matching the JSON text; "%"/"_"/"\" are escaped so they stay
+// literal. lower() folds ASCII only, which covers Awwwards stack tokens.
+function elementFilterConditions(filter?: ElementSearchFilter): {
+  conditions: string[];
+  params: string[];
+} {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (filter?.category) {
+    conditions.push("e.cid = ?");
+    params.push(filter.category);
+  }
+  for (const term of filter?.stack ?? []) {
+    // Decode the JSON array and rejoin with spaces, preserving the original
+    // "joined names" substring semantics without matching JSON syntax.
+    conditions.push(
+      "(CASE WHEN json_valid(e.builtWith) THEN COALESCE((SELECT lower(group_concat(value, ' ')) FROM json_each(e.builtWith)), '') ELSE '' END) LIKE ? ESCAPE '\\'",
+    );
+    params.push(`%${term.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  }
+  return { conditions, params };
+}
+
 interface ElementRow {
   slug: string;
   title: string;
@@ -659,17 +690,19 @@ export class Cache {
   // server layer owns sanitization/token shaping). Raw FTS match over ALL
   // rows — NO Tier A filter here: any source='gallery' gating is the caller's
   // job (Task 5). No TTL: element rows are reused across gallery pages,
-  // staleness is not a correctness gate.
-  searchElements(ftsQuery: string, limit: number): ElementRecord[] {
+  // staleness is not a correctness gate. `filter` runs in SQL before LIMIT so
+  // matches ranked outside the first N rows are not lost.
+  searchElements(ftsQuery: string, limit: number, filter?: ElementSearchFilter): ElementRecord[] {
+    const { conditions, params } = elementFilterConditions(filter);
     return this.withDb((db) => {
       if (!this.ftsAvailable) return [];
       const rows = db.prepare(
         `SELECT e.* FROM elements_fts
          JOIN elements e ON e.slug = elements_fts.slug
-         WHERE elements_fts MATCH ?
+         WHERE elements_fts MATCH ?${conditions.map((c) => ` AND ${c}`).join("")}
          ORDER BY bm25(elements_fts) ASC
          LIMIT ?`,
-      ).all(ftsQuery, limit) as unknown as ElementRow[];
+      ).all(ftsQuery, ...params, limit) as unknown as ElementRow[];
       return rows.map(rowToElement);
     });
   }
@@ -680,11 +713,14 @@ export class Cache {
     );
   }
 
-  listElements(limit: number): ElementRecord[] {
+  // `filter` runs before LIMIT, like searchElements. With no filter this is
+  // the same recent-list query as before.
+  listElements(limit: number, filter?: ElementSearchFilter): ElementRecord[] {
+    const { conditions, params } = elementFilterConditions(filter);
     return this.withDb((db) => {
       const rows = db.prepare(
-        "SELECT * FROM elements ORDER BY fetchedAt DESC LIMIT ?",
-      ).all(limit) as unknown as ElementRow[];
+        `SELECT e.* FROM elements e${conditions.length ? ` WHERE ${conditions.join(" AND ")}` : ""} ORDER BY CASE WHEN e.fetchedAt < 100000000000 THEN e.fetchedAt * 1000 ELSE e.fetchedAt END DESC LIMIT ?`,
+      ).all(...params, limit) as unknown as ElementRow[];
       return rows.map(rowToElement);
     });
   }

@@ -4,7 +4,10 @@
  * Every metric carries a coverage block labelled "locally cached subset" so
  * an agent can never mistake these numbers for the whole Awwwards catalogue.
  * Sites, elements and technology/tag frequency are ALL-TIME counts over the
- * cache. The window (default 90 days) applies only to detail-derived metrics:
+ * cache. `elements.total` stays gallery-only; `elements.corpus` discloses the
+ * whole cached element split (gallery/site, categorized/uncategorized,
+ * builtWithKnown, fetch range) with its own "locally cached subset" note. The
+ * window (default 90 days) applies only to detail-derived metrics:
  * cached details, palette colours, jury scores and Motion DNA. Output is
  * aggregates only: no site slugs or titles ever appear.
  *
@@ -46,12 +49,26 @@ export interface MetricSample {
   hint?: string;
 }
 
+/** Bounded disclosure of the local element corpus. */
+export interface ElementCorpus {
+  total: number;
+  gallery: number;
+  site: number;
+  categorized: number;
+  uncategorized: number;
+  builtWithKnown: number;
+  fetchedOldestAt: number | null;
+  fetchedNewestAt: number | null;
+  fetchedAtUnit: "unix-ms";
+  note: "locally cached subset";
+}
+
 export interface IndexStatsResult {
   windowDays: number;
   top: number;
   sites: { total: number; coverage: IndexCoverage };
   details: { cached: number; coverage: WindowedCoverage };
-  elements: { total: number; coverage: IndexCoverage };
+  elements: { total: number; corpus: ElementCorpus; coverage: IndexCoverage };
   technologies: {
     items: Array<{ tag: string; count: number }>;
     distinct: number;
@@ -142,7 +159,21 @@ export function getIndexStats(
       "SELECT COUNT(*) AS n FROM meta WHERE key LIKE 'detail:%' AND fetchedAt >= ?",
       cutoff,
     );
-    const elementsTotal = count("SELECT COUNT(*) AS n FROM elements");
+    // One aggregate for the element corpus. elements.total keeps its
+    // gallery-only meaning (Cache.countElements); corpus discloses the whole
+    // searchable set without element titles or slugs.
+    const corpus = db.prepare(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(source = 'gallery'), 0) AS gallery,
+              COALESCE(SUM(source = 'site'), 0) AS site,
+              COALESCE(SUM(cid IS NOT NULL AND cid <> '' AND cid <> 'uncategorized'), 0) AS categorized,
+              COALESCE(SUM(cid IS NULL OR cid = '' OR cid = 'uncategorized'), 0) AS uncategorized,
+              COALESCE(SUM(CASE WHEN json_valid(builtWith) THEN json_array_length(builtWith) > 0 ELSE 0 END), 0) AS builtWithKnown,
+              MIN(CASE WHEN fetchedAt < 100000000000 THEN fetchedAt * 1000 ELSE fetchedAt END) AS fetchedOldestAt,
+              MAX(CASE WHEN fetchedAt < 100000000000 THEN fetchedAt * 1000 ELSE fetchedAt END) AS fetchedNewestAt
+       FROM elements`,
+    ).get() as Omit<ElementCorpus, "note" | "fetchedAtUnit">;
+    const elementCorpus: ElementCorpus = { ...corpus, fetchedAtUnit: "unix-ms", note: "locally cached subset" };
 
     const coverage: IndexCoverage = {
       sitesTotal,
@@ -258,7 +289,7 @@ export function getIndexStats(
       top,
       sites: { total: sitesTotal, coverage },
       details: { cached: detailsCached, coverage: windowCoverage },
-      elements: { total: elementsTotal, coverage },
+      elements: { total: elementCorpus.gallery, corpus: elementCorpus, coverage },
       technologies: { items: techTop, distinct: tech.size, coverage },
       colors: {
         items: colorsSample.insufficient ? [] : colorTop,
