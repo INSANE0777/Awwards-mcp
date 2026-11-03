@@ -1,0 +1,1458 @@
+{
+  "generatedAt": "2026-11-03T21:41:19.769Z",
+  "platform": "win32",
+  "node": "v24.18.0",
+  "cpu": "Intel64 Family 6 Model 151 Stepping 2, GenuineIntel",
+  "cli": "dist/cli.js",
+  "config": {
+    "runs": 3,
+    "sites": 10000,
+    "callsPerCase": 7
+  },
+  "fixture": {
+    "buildMs": 544.2,
+    "dbBytes": 4493312,
+    "matches": {
+      "broad": 10000,
+      "filtered": 3000
+    },
+    "thumbnails": {
+      "bytesPerPreview": 32768,
+      "files": 6,
+      "previewByCase": {
+        "search_no_query": [
+          "site-00000",
+          "site-00001"
+        ],
+        "search_query_broad": [
+          "site-00001",
+          "site-00002"
+        ],
+        "search_query_filtered": [
+          "site-00002",
+          "site-00007"
+        ],
+        "search_score_sort": [
+          "site-00030",
+          "site-00131"
+        ]
+      }
+    }
+  },
+  "startup": {
+    "cold": {
+      "n": 3,
+      "min": 397.73,
+      "median": 404.59,
+      "p90": 444.33,
+      "max": 444.33
+    },
+    "warm": {
+      "n": 3,
+      "min": 413.21,
+      "median": 422.97,
+      "p90": 458.52,
+      "max": 458.52
+    },
+    "coldInit": {
+      "n": 3,
+      "min": 376.18,
+      "median": 384.61,
+      "p90": 425.42,
+      "max": 425.42
+    },
+    "warmInit": {
+      "n": 3,
+      "min": 389.74,
+      "median": 400.86,
+      "p90": 438.94,
+      "max": 438.94
+    },
+    "coldRuns": [
+      {
+        "label": "cold-1",
+        "initMs": 425.42,
+        "listMs": 444.33,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 90935296,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0
+      },
+      {
+        "label": "cold-2",
+        "initMs": 376.18,
+        "listMs": 397.73,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91619328,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0
+      },
+      {
+        "label": "cold-3",
+        "initMs": 384.61,
+        "listMs": 404.59,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91807744,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0
+      }
+    ],
+    "warmRuns": [
+      {
+        "label": "warm-1",
+        "initMs": 389.74,
+        "listMs": 413.21,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91680768,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "processesWhileSearching": 1,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0,
+        "searches": {
+          "search_no_query": {
+            "n": 7,
+            "min": 37.93,
+            "median": 48.55,
+            "p90": 63.54,
+            "max": 63.54,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              45.45,
+              52.11,
+              37.93,
+              40.08,
+              63.54,
+              53.57,
+              48.55
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_broad": {
+            "n": 7,
+            "min": 51.37,
+            "median": 53.21,
+            "p90": 63.56,
+            "max": 63.56,
+            "bytesMedian": 89020,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              51.37,
+              52.1,
+              56.88,
+              53.21,
+              54.47,
+              63.56,
+              53.2
+            ],
+            "bytes": [
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_filtered": {
+            "n": 7,
+            "min": 19.11,
+            "median": 20.56,
+            "p90": 30.1,
+            "max": 30.1,
+            "bytesMedian": 89035,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              19.65,
+              20.56,
+              19.6,
+              21.02,
+              19.11,
+              30.1,
+              21
+            ],
+            "bytes": [
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_score_sort": {
+            "n": 7,
+            "min": 70.51,
+            "median": 89.72,
+            "p90": 118.34,
+            "max": 118.34,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              82.45,
+              70.51,
+              89.72,
+              92.87,
+              100.1,
+              118.34,
+              80.9
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "rssAfterSearch": 329076736
+        }
+      },
+      {
+        "label": "warm-2",
+        "initMs": 400.86,
+        "listMs": 422.97,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91811840,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "processesWhileSearching": 1,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0,
+        "searches": {
+          "search_no_query": {
+            "n": 7,
+            "min": 37.25,
+            "median": 46.18,
+            "p90": 55.05,
+            "max": 55.05,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              46.18,
+              55.05,
+              37.25,
+              42.5,
+              38.43,
+              50.26,
+              50.92
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_broad": {
+            "n": 7,
+            "min": 47.19,
+            "median": 51.3,
+            "p90": 65.19,
+            "max": 65.19,
+            "bytesMedian": 89020,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              49.29,
+              47.19,
+              54.2,
+              52.08,
+              51.3,
+              65.19,
+              49.41
+            ],
+            "bytes": [
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_filtered": {
+            "n": 7,
+            "min": 19.43,
+            "median": 22.73,
+            "p90": 30.42,
+            "max": 30.42,
+            "bytesMedian": 89035,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              22.73,
+              22.72,
+              19.43,
+              22.13,
+              22.99,
+              30.42,
+              26.3
+            ],
+            "bytes": [
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_score_sort": {
+            "n": 7,
+            "min": 78.72,
+            "median": 92.24,
+            "p90": 150.56,
+            "max": 150.56,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              78.72,
+              81.79,
+              87.53,
+              150.56,
+              96.85,
+              102.24,
+              92.24
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "rssAfterSearch": 323813376
+        }
+      },
+      {
+        "label": "warm-3",
+        "initMs": 438.94,
+        "listMs": 458.52,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91693056,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "processesWhileSearching": 1,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0,
+        "searches": {
+          "search_no_query": {
+            "n": 7,
+            "min": 36.29,
+            "median": 41.86,
+            "p90": 68.06,
+            "max": 68.06,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              41.22,
+              68.06,
+              36.29,
+              38.44,
+              41.86,
+              42.54,
+              47.45
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_broad": {
+            "n": 7,
+            "min": 47.48,
+            "median": 59.25,
+            "p90": 82.43,
+            "max": 82.43,
+            "bytesMedian": 89020,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              64.65,
+              82.43,
+              71.53,
+              58.53,
+              54.46,
+              59.25,
+              47.48
+            ],
+            "bytes": [
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_filtered": {
+            "n": 7,
+            "min": 18.92,
+            "median": 19.04,
+            "p90": 25.85,
+            "max": 25.85,
+            "bytesMedian": 89035,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              19.04,
+              18.97,
+              18.92,
+              25.78,
+              22.8,
+              25.85,
+              18.95
+            ],
+            "bytes": [
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_score_sort": {
+            "n": 7,
+            "min": 73.52,
+            "median": 86.2,
+            "p90": 95.27,
+            "max": 95.27,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              89.55,
+              86.2,
+              95.27,
+              73.52,
+              73.64,
+              86.85,
+              79.41
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "rssAfterSearch": 324247552
+        }
+      }
+    ]
+  },
+  "search": {
+    "search_no_query": {
+      "n": 21,
+      "min": 36.29,
+      "median": 45.45,
+      "p90": 55.05,
+      "max": 68.06,
+      "bytesMedian": 89111,
+      "previewCountMedian": 2,
+      "previewBytesMedian": 65536
+    },
+    "search_query_broad": {
+      "n": 21,
+      "min": 47.19,
+      "median": 54.2,
+      "p90": 65.19,
+      "max": 82.43,
+      "bytesMedian": 89020,
+      "previewCountMedian": 2,
+      "previewBytesMedian": 65536
+    },
+    "search_query_filtered": {
+      "n": 21,
+      "min": 18.92,
+      "median": 21.02,
+      "p90": 26.3,
+      "max": 30.42,
+      "bytesMedian": 89035,
+      "previewCountMedian": 2,
+      "previewBytesMedian": 65536
+    },
+    "search_score_sort": {
+      "n": 21,
+      "min": 70.51,
+      "median": 87.53,
+      "p90": 102.24,
+      "max": 150.56,
+      "bytesMedian": 89111,
+      "previewCountMedian": 2,
+      "previewBytesMedian": 65536
+    }
+  },
+  "rss": {
+    "afterStartup": {
+      "n": 3,
+      "min": 91680768,
+      "median": 91693056,
+      "p90": 91811840,
+      "max": 91811840
+    },
+    "afterSearch": {
+      "n": 3,
+      "min": 323813376,
+      "median": 324247552,
+      "p90": 329076736,
+      "max": 329076736
+    },
+    "afterStartupBytes": [
+      91680768,
+      91811840,
+      91693056
+    ],
+    "afterSearchBytes": [
+      329076736,
+      323813376,
+      324247552
+    ]
+  },
+  "cleanup": {
+    "tempRemoved": true,
+    "leftoverProcesses": 0,
+    "unexpectedAlive": 0,
+    "unknownProcessCounts": 0,
+    "blockedEgress": 0
+  },
+  "runs": [
+    {
+      "run": 1,
+      "cold": {
+        "label": "cold-1",
+        "initMs": 425.42,
+        "listMs": 444.33,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 90935296,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0
+      },
+      "warm": {
+        "label": "warm-1",
+        "initMs": 389.74,
+        "listMs": 413.21,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91680768,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "processesWhileSearching": 1,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0,
+        "searches": {
+          "search_no_query": {
+            "n": 7,
+            "min": 37.93,
+            "median": 48.55,
+            "p90": 63.54,
+            "max": 63.54,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              45.45,
+              52.11,
+              37.93,
+              40.08,
+              63.54,
+              53.57,
+              48.55
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_broad": {
+            "n": 7,
+            "min": 51.37,
+            "median": 53.21,
+            "p90": 63.56,
+            "max": 63.56,
+            "bytesMedian": 89020,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              51.37,
+              52.1,
+              56.88,
+              53.21,
+              54.47,
+              63.56,
+              53.2
+            ],
+            "bytes": [
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_filtered": {
+            "n": 7,
+            "min": 19.11,
+            "median": 20.56,
+            "p90": 30.1,
+            "max": 30.1,
+            "bytesMedian": 89035,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              19.65,
+              20.56,
+              19.6,
+              21.02,
+              19.11,
+              30.1,
+              21
+            ],
+            "bytes": [
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_score_sort": {
+            "n": 7,
+            "min": 70.51,
+            "median": 89.72,
+            "p90": 118.34,
+            "max": 118.34,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              82.45,
+              70.51,
+              89.72,
+              92.87,
+              100.1,
+              118.34,
+              80.9
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "rssAfterSearch": 329076736
+        }
+      }
+    },
+    {
+      "run": 2,
+      "cold": {
+        "label": "cold-2",
+        "initMs": 376.18,
+        "listMs": 397.73,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91619328,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0
+      },
+      "warm": {
+        "label": "warm-2",
+        "initMs": 400.86,
+        "listMs": 422.97,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91811840,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "processesWhileSearching": 1,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0,
+        "searches": {
+          "search_no_query": {
+            "n": 7,
+            "min": 37.25,
+            "median": 46.18,
+            "p90": 55.05,
+            "max": 55.05,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              46.18,
+              55.05,
+              37.25,
+              42.5,
+              38.43,
+              50.26,
+              50.92
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_broad": {
+            "n": 7,
+            "min": 47.19,
+            "median": 51.3,
+            "p90": 65.19,
+            "max": 65.19,
+            "bytesMedian": 89020,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              49.29,
+              47.19,
+              54.2,
+              52.08,
+              51.3,
+              65.19,
+              49.41
+            ],
+            "bytes": [
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_filtered": {
+            "n": 7,
+            "min": 19.43,
+            "median": 22.73,
+            "p90": 30.42,
+            "max": 30.42,
+            "bytesMedian": 89035,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              22.73,
+              22.72,
+              19.43,
+              22.13,
+              22.99,
+              30.42,
+              26.3
+            ],
+            "bytes": [
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_score_sort": {
+            "n": 7,
+            "min": 78.72,
+            "median": 92.24,
+            "p90": 150.56,
+            "max": 150.56,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              78.72,
+              81.79,
+              87.53,
+              150.56,
+              96.85,
+              102.24,
+              92.24
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "rssAfterSearch": 323813376
+        }
+      }
+    },
+    {
+      "run": 3,
+      "cold": {
+        "label": "cold-3",
+        "initMs": 384.61,
+        "listMs": 404.59,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91807744,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0
+      },
+      "warm": {
+        "label": "warm-3",
+        "initMs": 438.94,
+        "listMs": 458.52,
+        "tools": 41,
+        "schemaBytes": 71853,
+        "instructionsBytes": 1980,
+        "rssAfterStartup": 91693056,
+        "processesWhileRunning": 1,
+        "guardBlocks": 0,
+        "processesWhileSearching": 1,
+        "exitCode": 0,
+        "killFallback": false,
+        "processesAfterClose": 0,
+        "searches": {
+          "search_no_query": {
+            "n": 7,
+            "min": 36.29,
+            "median": 41.86,
+            "p90": 68.06,
+            "max": 68.06,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              41.22,
+              68.06,
+              36.29,
+              38.44,
+              41.86,
+              42.54,
+              47.45
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_broad": {
+            "n": 7,
+            "min": 47.48,
+            "median": 59.25,
+            "p90": 82.43,
+            "max": 82.43,
+            "bytesMedian": 89020,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              64.65,
+              82.43,
+              71.53,
+              58.53,
+              54.46,
+              59.25,
+              47.48
+            ],
+            "bytes": [
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020,
+              89020
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_query_filtered": {
+            "n": 7,
+            "min": 18.92,
+            "median": 19.04,
+            "p90": 25.85,
+            "max": 25.85,
+            "bytesMedian": 89035,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              19.04,
+              18.97,
+              18.92,
+              25.78,
+              22.8,
+              25.85,
+              18.95
+            ],
+            "bytes": [
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035,
+              89035
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "search_score_sort": {
+            "n": 7,
+            "min": 73.52,
+            "median": 86.2,
+            "p90": 95.27,
+            "max": 95.27,
+            "bytesMedian": 89111,
+            "previewCountMedian": 2,
+            "previewBytesMedian": 65536,
+            "latencies": [
+              89.55,
+              86.2,
+              95.27,
+              73.52,
+              73.64,
+              86.85,
+              79.41
+            ],
+            "bytes": [
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111,
+              89111
+            ],
+            "previewCounts": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "previewBytes": [
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536,
+              65536
+            ]
+          },
+          "rssAfterSearch": 324247552
+        }
+      }
+    }
+  ]
+}
