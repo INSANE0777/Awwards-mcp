@@ -532,7 +532,7 @@ All optional and read at startup:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 41; `v2` (beta) replaces the list with the 15-tool consolidated surface. The old → new v2 mapping is in [skills/v2-routing.md](skills/v2-routing.md). |
+| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 41; `v2` (beta) replaces the list with the 15-tool consolidated surface. The old → new v2 mapping is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). |
 | `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Full serialized tool-result bytes (text, inline images and `structuredContent`). Larger responses replace `content` with a `{truncated:true, tool, bytes, limit, note}` JSON block; a truncated structured payload is dropped and reported as `isError: true`. |
 | `AWWWARDS_MCP_DEBUG_MEMORY` | unset | `1` logs one JSON line per tool call (duration, rss, heap) to stderr - never stdout. |
 | `AWWWARDS_MCP_IMAGE_RETENTION_DAYS` | `0` (off) | A positive N prunes cached `images/` files older than N days once at startup. |
@@ -540,7 +540,7 @@ All optional and read at startup:
 
 The v1.14.0 `AWARDS_MCP_*` spellings (one fewer W) are still accepted as a one-release fallback; the `AWWWARDS_MCP_*` name wins when both are set.
 
-`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools, never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup — `full` = 41, `core` = 13, `v2` = 15 — so changing the value requires a server restart. The complete 1.x → v2 mapping for all 36 replaced names is in [skills/v2-routing.md](skills/v2-routing.md).
+`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools, never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup — `full` = 41, `core` = 13, `v2` = 15 — so changing the value requires a server restart. The complete 1.x → v2 mapping for all 36 replaced names is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills).
 
 `capture_live_site` also accepts `inline: false` to skip the base64 preview and `maxInlineBytes` to change the budget; captures whose base64 would exceed the budget (default 2.5 MB) are saved without an inline image, decided from the raw PNG size before conversion. Inline images from `capture_pose_3d` and `capture_component` count toward the same `AWWWARDS_MCP_MAX_RESPONSE_BYTES` budget. `analyze_network_capture` reads HAR files up to 20 MB (re-checked after reading) and 2000 entries. The `analyze_bundle` import graph supports import/reexport declarations up to 8 KB each.
 
@@ -580,14 +580,24 @@ server), and pass `cdpEndpoint: "http://127.0.0.1:9222"` — or
 
 ## Skills
 
-This package ships seven agent skills. Any agent that follows the
-[Agent Skills standard](https://agentskills.io) can load them; copy them into
-your agent's skills directory:
+The seven agent skills live in the separate
+[awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills),
+which is their source of truth. This package does not ship them.
+
+Install them with the [`skills` CLI](https://skills.sh):
 
 ```bash
-npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate node_modules/awwwards-mcp/skills/motion-authoring node_modules/awwwards-mcp/skills/_memory node_modules/awwwards-mcp/skills/v2-routing.md ~/.agents/skills/
+npx skills add INSANE0777/awwwards-skills
 ```
+
+The CLI detects your agents and lets you choose a project or user-level
+install, then links each skill into that agent's skills directory. Useful
+flags: `--skill <name>` for one skill, `-a <agent>` to target specific
+agents, `-g` for a user-level install, `--copy` to copy files instead of
+symlinking, and `-l` to list what the repository contains without
+installing. Any agent that reads the
+[Agent Skills standard](https://agentskills.io) layout can also use the
+`skills/<name>/` directories from that repository directly.
 
 | Skill | What it teaches |
 |-------|-----------------|
@@ -606,14 +616,10 @@ mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-ins
 | ZCode | `~/.zcode/skills/` |
 | Agent Skills-standard agents | `~/.agents/skills/` |
 
-Windows: run the block above from Git Bash. To copy manually, copy the skill
-directories you need from `node_modules\awwwards-mcp\skills\` (all seven ship:
-`awwwards-setup`, `awwwards-inspiration`, `awwwards-motion-study`,
-`awwwards-doctor`, `awwwards-section-loop`, `recreate`, `motion-authoring`)
-and copy `node_modules\awwwards-mcp\skills\v2-routing.md` and the
-`_memory` directory beside them - the
-skills link to the routing file at `../v2-routing.md`, so it must sit beside
-the skill directories.
+Each installed skill is self-contained: it carries its own `v2-routing.md`
+reference and, where needed, the `_memory/techniques.json` registry. Edit and
+test skills in the awwwards-skills repository; this MCP repository does not
+carry skill copies.
 
 ## Indexing (recommended)
 
@@ -691,7 +697,7 @@ diff, not a grade.
 **`v2` is opt-in, not the default and not a 2.0 release.**
 `AWWWARDS_MCP_PROFILE=v2` replaces the default 41-tool surface with the
 15-tool consolidated surface described in
-[skills/v2-routing.md](skills/v2-routing.md). The default stays `full`; there
+[awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). The default stays `full`; there
 are no aliases between the surfaces, and switching requires a server restart.
 
 **Third-party MCP directories are refreshed by their operators.** A listing
@@ -765,7 +771,7 @@ verifying with band maps + motion recording. If your client doesn't render
 the player, [watch the file directly](assets/demo-loop.mp4).*
 
 **1. [Ridge](showcase/ridge/index.html)**
-([source](showcase/ridge/)) — a Swiss-minimal single-page showcase for a fictional engineering-talent studio, direction **Aspen Search** (SOTD + Developer Award, jury 7.48): monochrome `#FAFAF8`/`#1A1A1A` + mint, giant grotesque section markers, halftone grain, asymmetric panel grid, dark discipline panels in an interior **horizontal pin passage**, count-up stats, client rows, theme toggle, cursor-follower. Built with the v1.4.0 toolkit: FTS5-ranked direction search, **both-viewports** reference captures and QA (desktop 7,849px + mobile 390×844), overflow audit (0px both), pin-center shots, film verification — and the skill-memory flywheel recorded the findings. QA evidence: `showcase/ridge/_qa/`.
+([source](showcase/ridge/)) — a Swiss-minimal single-page showcase for a fictional engineering-talent studio, direction **Aspen Search** (SOTD + Developer Award, jury 7.48): monochrome `#FAFAF8`/`#1A1A1A` + mint, giant grotesque section markers, halftone grain, asymmetric panel grid, dark discipline panels in an interior **horizontal pin passage**, count-up stats, client rows, theme toggle, cursor-follower. Built with the v1.4.0 toolkit: FTS5-ranked direction search, **both-viewports** reference captures and QA (desktop 7,849px + mobile 390×844), overflow audit (0px both), pin-center shots, film verification — and the findings fed back into the skills. QA evidence: `showcase/ridge/_qa/`.
 
 **The grain-panel hover**, studied from aspensearch.com's recording and rebuilt as a canvas dither-dissolve — dots flip to mint around the mouse, the trail elongates, the boundary dissolves:
 
@@ -866,14 +872,14 @@ open `index.html` directly, no server or build step needed.
 
 | Skill | Role in the builds |
 |---|---|
-| `awwwards-inspiration` | The 8-step loop itself (ships with this package): search → judge from screenshots → design DNA → capture/motion study → state direction → build → band-map verify. |
+| `awwwards-inspiration` | The 8-step loop itself (from the [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills)): search → judge from screenshots → design DNA → capture/motion study → state direction → build → band-map verify. |
 | `gsap-scrolltrigger` | The horizontal pin + `containerAnimation` pattern (ease `"none"`, one-shot entrances) driving both Fallow Press horizontal pages. |
 | `gsap-core` / `gsap-timeline` | Tween composition and sequenced hero entrances (torn-paper drop, panel copy rises). |
 | `frontend-design` | Typography, palette and layout judgment applied when translating reference DNA into original pages. |
 | `lenis` (library, via skill guidance) | smooth scrolling synced to ScrollTrigger on the Fallow Press home page. |
 | `tailwindcss` / plain CSS | All builds are plain hand-rolled CSS — flat 2D, no frameworks needed. |
 
-**The skills self-improve in a repository checkout:** every loop pass records what verification caught (`scripts/skill-memory.mjs record`; the npm package does not ship this dev script), and a deterministic distiller folds rules seen 2+ times into your installed skill copy - while the shipped copies only change via human PR. A techniques registry (`skills/_memory/techniques.json`) catalogs researched how-tos per domain (video understanding, motion detection, UI structure, micro-interactions, images).
+**The skills live in the [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills):** that repository is their source of truth, including the `_memory/techniques.json` registry of researched how-tos per domain (video understanding, motion detection, UI structure, micro-interactions, images). Skill changes land there; this MCP repository does not carry skill copies.
 
 Reduced-motion, JS-less visits, and capture tools all get graceful fallbacks
 (vertical stacks; progressive-enhancement reveals).

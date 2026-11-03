@@ -56,9 +56,13 @@ src/
   cli.ts        stdio server entry + startup wiring
   index-cli.ts  awwwards-index bin (cache priming crawler)
 test/           vitest, offline, committed fixtures
-skills/         awwwards-inspiration agent skill (ships in the npm package)
 docs/           design specs and plans
 ```
+
+Agent skills live in the separate
+[awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills),
+not in this repo: edit, test, and review them there. This repository no longer
+carries a `skills/` directory and the npm package does not ship one.
 
 Hard constraints the codebase enforces (keep them in new code):
 

@@ -15,20 +15,16 @@ import { searchReferencesRequestSchema } from "../src/v2/search-references.js";
 import { CORE_TOOL_NAMES } from "../src/tool-profile.js";
 import { registerAllTools } from "../src/tools/index.js";
 
-// Documentation guard: the shipped skills tell agents to use 1.x names, so the
-// shared routing doc must map every replaced name to a real v2 envelope with a
-// branch literal that the registered schema actually accepts. One file read
+// Documentation guard: the routing doc shipped with the skills must map every
+// replaced name to a real v2 envelope with a branch literal that the registered
+// schema actually accepts. The canonical copy lives in the awwwards-skills repo;
+// this fixture tracks it so the MCP repo can still validate it. One file read
 // plus the request schemas; no server boot and no network.
 const ROUTING_DOC = readFileSync(
-  new URL("../skills/v2-routing.md", import.meta.url),
-  "utf8",
-);
-const SETUP_DOC = readFileSync(
-  new URL("../skills/awwwards-setup/SKILL.md", import.meta.url),
+  new URL("./fixtures/v2-routing.md", import.meta.url),
   "utf8",
 );
 const README_DOC = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-const SETUP_TEXT = SETUP_DOC.replace(/\s+/g, " ");
 const README_TEXT = README_DOC.replace(/\s+/g, " ");
 
 // The 10 consolidated tools, each with the schema that defines its branches.
@@ -231,7 +227,7 @@ function tableRows(heading: string): Array<{ from: string; to: string }> {
     });
 }
 
-describe("skills/v2-routing.md", () => {
+describe("v2-routing.md", () => {
   it("maps every replaced 1.x tool exactly once", () => {
     const rows = tableRows("## Replaced operations");
     expect(rows).toHaveLength(DERIVED_REPLACED.length);
@@ -325,46 +321,11 @@ describe("skills/v2-routing.md", () => {
   });
 });
 
-describe("profile-aware install and setup docs", () => {
-  it("detects profile-aware connections without requiring 1.x-only tools", () => {
-    expect(SETUP_TEXT).toContain(
-      "the server is unregistered only when no awwwards tools at all are available",
-    );
-    expect(SETUP_TEXT).toContain(
-      "A connected `v2` session intentionally has no `search_sites` or `list_categories`",
-    );
-    expect(SETUP_TEXT).toContain(
-      "recognize it by `search_references` and/or `get_index`",
-    );
-    expect(SETUP_TEXT).toContain(
-      "A connected `core` session registers 13 tools and does not include `list_categories`",
-    );
-    expect(SETUP_TEXT).toContain("claude mcp add awwwards -- npx -y awwwards-mcp");
-    expect(SETUP_TEXT).toContain("the agent restart is needed");
-  });
-
-  it("copies the shared routing doc beside the installed skills", () => {
-    expect(README_DOC).toContain("node_modules/awwwards-mcp/skills/v2-routing.md");
-    expect(README_DOC).toContain(
-      "node_modules\\awwwards-mcp\\skills\\v2-routing.md",
-    );
-    expect(README_TEXT).toContain("must sit beside the skill directories");
-
-    for (const skill of [
-      "awwwards-doctor",
-      "awwwards-inspiration",
-      "awwwards-motion-study",
-      "awwwards-section-loop",
-      "awwwards-setup",
-      "motion-authoring",
-      "recreate",
-    ]) {
-      expect(README_DOC.replaceAll("\\", "/")).toContain(`skills/${skill}`);
-      const text = readFileSync(
-        new URL(`../skills/${skill}/SKILL.md`, import.meta.url),
-        "utf8",
-      );
-      expect(text, skill).toContain("[v2-routing.md](../v2-routing.md)");
-    }
+describe("skills install docs", () => {
+  it("installs the skills from the awwwards-skills repository", () => {
+    expect(README_TEXT).toContain("npx skills add INSANE0777/awwwards-skills");
+    expect(README_DOC).toContain("https://github.com/INSANE0777/awwwards-skills");
+    expect(README_DOC).not.toContain("node_modules/awwwards-mcp/skills");
+    expect(README_DOC).not.toContain("node_modules\\awwwards-mcp\\skills");
   });
 });
