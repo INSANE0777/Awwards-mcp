@@ -76,6 +76,7 @@ jobs:
         if: matrix.browser
         run: npm run test:browser
       - run: npm run build
+      - run: npm run registry:gate
       - run: npm run protocol:smoke
       - run: npm pack --dry-run
       # pack:smoke installs the tarball into a throwaway --prefix (no global

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.insane0777/awwwards-mcp",
+  "description": "Awwwards design inspiration, screenshots, motion and scene evidence for AI agents.",
+  "repository": {
+    "url": "https://github.com/INSANE0777/Awwwards-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/INSANE0777/Awwwards-mcp#readme",
+  "version": "1.17.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "awwwards-mcp",
+      "version": "1.17.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
