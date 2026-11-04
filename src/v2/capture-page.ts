@@ -51,6 +51,7 @@ export const capturePageRequestSchema = z.discriminatedUnion("kind", [
         .describe(
           'inner-scroller pages: "auto"/"anchors" saves 6 ordered viewport screenshots; "viewport" saves one; document-scrolling pages keep the single full-page capture',
         ),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route the browser through the pinned public-address guard"),
     })
     .strict(),
   z
@@ -69,6 +70,7 @@ export const capturePageRequestSchema = z.discriminatedUnion("kind", [
         .boolean()
         .optional()
         .describe("token-diet summary: node styles/text/svg/anims and typography/paletteSummary are dropped"),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route the browser through the pinned public-address guard"),
     })
     .strict(),
   z
@@ -220,6 +222,7 @@ export async function runCapturePage(
         ...(request.maxInlineBytes !== undefined ? { maxInlineBytes: request.maxInlineBytes } : {}),
         waitForOverlay: request.waitForOverlay,
         scrollCapture: request.scrollCapture,
+        ...(request.publicOnly !== undefined ? { publicOnly: request.publicOnly } : {}),
       });
     case "component":
       return handlers.capture_component({
@@ -229,6 +232,7 @@ export async function runCapturePage(
         maxDepth: 12,
         viewport: request.viewport,
         ...(request.compact !== undefined ? { compact: request.compact } : {}),
+        ...(request.publicOnly !== undefined ? { publicOnly: request.publicOnly } : {}),
       });
     case "pose":
       return handlers.capture_pose_3d({

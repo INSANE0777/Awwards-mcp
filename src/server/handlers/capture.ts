@@ -14,6 +14,7 @@ import type { ViewportName } from "../../viewport.js";
 import type { HandlerContext } from "../context.js";
 import { compactComponentPack, errorResponse, text } from "../types.js";
 import type { ToolResponse } from "../types.js";
+import { startPublicNetworkGuard, captureProvenance, type PublicNetworkGuard } from "../../public-net.js";
 
 export async function capture_live_site(ctx: HandlerContext, args: {
   url: string;
@@ -23,7 +24,10 @@ export async function capture_live_site(ctx: HandlerContext, args: {
   maxInlineBytes?: number;
   waitForOverlay?: boolean;
   scrollCapture?: "auto" | "anchors" | "viewport";
+  publicOnly?: boolean;
 }): Promise<ToolResponse> {
+  const guard = args.publicOnly ? await startPublicNetworkGuard(args.url) : null;
+  if (guard && "error" in guard) return { content: [text(guard.error)], isError: true };
   try {
     // Lazy default: playwright is only touched when the tool actually runs.
     // The default is wrapped because captureLiveSite's third positional is
@@ -41,8 +45,10 @@ export async function capture_live_site(ctx: HandlerContext, args: {
       maxInlineBytes: args.maxInlineBytes,
       waitForOverlay: args.waitForOverlay,
       scrollCapture: args.scrollCapture,
+      ...(guard ? { proxyServer: guard.proxyUrl } : {}),
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
+    if (guard?.blocked()) return blockedByGuard(guard);
     // Anchors are six files, so a single "saved to <file>" line would lie:
     // the payload is text JSON only, with no image block.
     if ("mode" in result && result.mode === "anchors") {
@@ -73,7 +79,20 @@ export async function capture_live_site(ctx: HandlerContext, args: {
     };
   } catch (err) {
     return errorResponse(err);
+  } finally {
+    await guard?.close().catch(() => undefined);
   }
+}
+
+function blockedByGuard(guard: PublicNetworkGuard): ToolResponse {
+  return {
+    content: [
+      text(
+        `publicOnly blocked ${guard.blocked()} request(s) that resolved to a private, loopback, metadata or reserved destination. Refusing to return evidence from a page that did not load fully.`,
+      ),
+    ],
+    isError: true,
+  };
 }
 
 // One-line suffix explaining why an inline preview was omitted. Empty when
@@ -97,12 +116,20 @@ export async function analyze_page_structure(ctx: HandlerContext, args: {
   viewport?: ViewportName;
   compare?: "mobile";
   cdpEndpoint?: string;
+  publicOnly?: boolean;
 }): Promise<ToolResponse> {
+  const guard = args.publicOnly ? await startPublicNetworkGuard(args.url) : null;
+  if (guard && "error" in guard) return { content: [text(guard.error)], isError: true };
   try {
+    if (args.publicOnly && args.cdpEndpoint !== undefined) {
+      return {
+        content: [text("publicOnly cannot attach to cdpEndpoint: the attached browser is outside the public network guard.")],
+        isError: true,
+      };
+    }
     // Attach scans one open page; the compare pass opens its own
     // mobile capture, so the two contracts cannot be mixed.
-    if (args.cdpEndpoint !== undefined && args.compare !== undefined) {
-      return {
+    if (args.cdpEndpoint !== undefined && args.compare !== undefined) {      return {
         content: [
           text(
             'cdpEndpoint (attach) cannot be combined with compare:"mobile": the compare pass opens its own mobile capture. Remove compare or cdpEndpoint.',
@@ -126,14 +153,17 @@ export async function analyze_page_structure(ctx: HandlerContext, args: {
       waitStrategy: args.waitStrategy,
       viewport,
       ...(args.cdpEndpoint !== undefined ? { cdpEndpoint: args.cdpEndpoint } : {}),
+      ...(guard ? { proxyServer: guard.proxyUrl } : {}),
     };
     // Only the mobile capture scans elements; a mobile primary IS that capture.
     if (wantsResponsive && viewport === "mobile") primaryOpts.responsive = true;
     const structure = await analyze(args.url, args.maxBands, primaryOpts);
     if ("error" in structure) return { content: [text(structure.error)], isError: true };
+    if (guard?.blocked()) return blockedByGuard(guard);
+    const { finalUrl: landedUrl, ...structurePayload } = structure;
     // Desktop default is byte-identical: no new keys unless compare is set.
     if (args.compare !== "mobile") {
-      return { content: [text(JSON.stringify(structure, null, 1))] };
+      return { content: [text(JSON.stringify({ ...structurePayload, provenance: captureProvenance(args.url, landedUrl ?? structure.url, viewport, `structure:${args.waitStrategy ?? "load"}`) }, null, 1))] };
     }
     // compare:"mobile" adds a second capture at 390×844 (a phone capture is
     // already the mobile side, so it is reused). A failed second capture is
@@ -145,19 +175,23 @@ export async function analyze_page_structure(ctx: HandlerContext, args: {
             waitStrategy: args.waitStrategy,
             viewport: "mobile",
             responsive: true,
+            ...(guard ? { proxyServer: guard.proxyUrl } : {}),
           });
     if ("error" in mobile) {
+      if (guard?.blocked()) return blockedByGuard(guard);
       // Keep the valid desktop result; degrade the compare half explicitly.
       return {
         content: [
-          text(JSON.stringify({ ...structure, mobileError: mobile.error }, null, 1)),
+          text(JSON.stringify({ ...structurePayload, mobileError: mobile.error, provenance: captureProvenance(args.url, landedUrl ?? structure.url, viewport, `structure:${args.waitStrategy ?? "load"}`) }, null, 1)),
         ],
       };
     }
+    if (guard?.blocked()) return blockedByGuard(guard);
     const payload: Record<string, unknown> = {
-      ...structure,
+      ...structurePayload,
       mobileBands: mobile.bands,
       diff: diffBands(structure, mobile),
+      provenance: captureProvenance(args.url, landedUrl ?? structure.url, viewport, `structure:${args.waitStrategy ?? "load"}`),
     };
     if (mobile.responsive) payload.responsive = mobile.responsive;
     return {
@@ -165,6 +199,8 @@ export async function analyze_page_structure(ctx: HandlerContext, args: {
     };
   } catch (err) {
     return errorResponse(err);
+  } finally {
+    await guard?.close().catch(() => undefined);
   }
 }
 
@@ -286,7 +322,10 @@ export async function capture_component(ctx: HandlerContext, args: {
   maxNodes?: number;
   maxDepth?: number;
   compact?: boolean;
+  publicOnly?: boolean;
 }): Promise<ToolResponse> {
+  const guard = args.publicOnly ? await startPublicNetworkGuard(args.url) : null;
+  if (guard && "error" in guard) return { content: [text(guard.error)], isError: true };
   try {
     // Lazy default: playwright is only touched when the tool actually runs.
     const capture =
@@ -298,20 +337,26 @@ export async function capture_component(ctx: HandlerContext, args: {
       viewport: args.viewport ?? "desktop",
       maxNodes: args.maxNodes,
       ...(args.maxDepth !== undefined ? { maxDepth: args.maxDepth } : {}),
+      ...(guard ? { proxyServer: guard.proxyUrl } : {}),
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
+    if (guard?.blocked()) return blockedByGuard(guard);
+    const { finalUrl: landedUrl, ...component } = result;
     // C3: compact=true strips per-node styles/text/svg/anims; the tree's
     // tag/classes/rect skeleton + fonts/colors stay (summaries omitted).
     const payload = args.compact
-      ? compactComponentPack(result)
+      ? { ...compactComponentPack(component), provenance: captureProvenance(args.url, landedUrl ?? result.url, args.viewport ?? "desktop", "load+3s+preScroll+500ms") }
       : {
-          ...result,
+          ...component,
           typography: summarizeTypography(result),
           paletteSummary: summarizePalette(result),
+          provenance: captureProvenance(args.url, landedUrl ?? result.url, args.viewport ?? "desktop", "load+3s+preScroll+500ms"),
         };
     return { content: [text(JSON.stringify(payload, null, 1))] };
   } catch (err) {
     return errorResponse(err);
+  } finally {
+    await guard?.close().catch(() => undefined);
   }
 }
 
@@ -321,7 +366,10 @@ export async function export_design_tokens(ctx: HandlerContext, args: {
   viewport?: ViewportName;
   maxNodes?: number;
   include?: TokenCategory[];
+  publicOnly?: boolean;
 }): Promise<ToolResponse> {
+  const guard = args.publicOnly ? await startPublicNetworkGuard(args.url) : null;
+  if (guard && "error" in guard) return { content: [text(guard.error)], isError: true };
   try {
     // Lazy default: playwright is only touched when the tool actually runs.
     const capture =
@@ -332,16 +380,20 @@ export async function export_design_tokens(ctx: HandlerContext, args: {
     const selector = args.selector ?? "body";
     const viewport = args.viewport ?? "desktop";
     const maxNodes = args.maxNodes ?? 800;
-    const pack = await capture(args.url, { selector, viewport, maxNodes });
+    const pack = await capture(args.url, { selector, viewport, maxNodes, ...(guard ? { proxyServer: guard.proxyUrl } : {}) });
     if ("error" in pack) return { content: [text(pack.error)], isError: true };
+    if (guard?.blocked()) return blockedByGuard(guard);
+    const { finalUrl: landedUrl } = pack;
     const tokens = exportDesignTokens(pack, { maxNodes, include: args.include });
     return {
       content: [
-        text(JSON.stringify({ url: pack.url, selector: pack.selector, viewport, ...tokens }, null, 1)),
+        text(JSON.stringify({ url: pack.url, selector: pack.selector, viewport, ...tokens, provenance: captureProvenance(args.url, landedUrl ?? pack.url, viewport, "load+3s+preScroll+500ms") }, null, 1)),
       ],
     };
   } catch (err) {
     return errorResponse(err);
+  } finally {
+    await guard?.close().catch(() => undefined);
   }
 }
 

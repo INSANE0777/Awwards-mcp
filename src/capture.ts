@@ -237,7 +237,14 @@ export async function captureLiveSite(
   }
   let browser: any;
   try {
-    browser = await chromium.launch();
+    browser = await chromium.launch(
+      opts?.proxyServer
+        ? {
+            proxy: { server: opts.proxyServer, bypass: "<-loopback>" },
+            args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+          }
+        : {},
+    );
   } catch {
     return { error: CAPTURE_INSTALL_HINT };
   }

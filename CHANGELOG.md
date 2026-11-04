@@ -3,6 +3,14 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased
+
+### DESIGN.md skill and guarded public capture
+
+- Added `publicOnly` to `capture_live_site`, `capture_component`, `export_design_tokens` and `analyze_page_structure` (and their v2 branches). It refuses private/loopback/metadata destinations before launch and routes every browser request through the existing pinned public-address proxy.
+- Token, structure and component outputs now include bounded capture provenance: requested-URL hash, redacted final URL, capture time, viewport, settle policy and extractor version.
+- New `awwwards-design-md` skill in **https://github.com/INSANE0777/awwwards-skills** builds a cited DESIGN.md plus `design-evidence.json` for one public URL. It composes existing tools; it is not a new MCP tool and does not claim official brand systems or recovered source tokens.
+
 ## v1.17.1 - 2026-11-03
 
 ### Skills now install separately

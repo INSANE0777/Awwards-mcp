@@ -25,6 +25,7 @@ export const inspectPageRequestSchema = z.discriminatedUnion("kind", [
         .describe(
           "Attach to a browser YOU started (requires AWWWARDS_MCP_ATTACH=1): loopback CDP endpoint. Selects an already-open matching page and never navigates, scrolls, clicks or creates tabs",
         ),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route the browser through the pinned public-address guard; cannot be combined with cdpEndpoint"),
     })
     .strict(),
   z
@@ -43,6 +44,7 @@ export const inspectPageRequestSchema = z.discriminatedUnion("kind", [
         .array(z.enum(["colors", "typography", "spacing", "radii", "shadows", "borders"]))
         .optional()
         .describe("Token categories to emit (default all)"),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route the browser through the pinned public-address guard"),
     })
     .strict(),
   z
@@ -78,6 +80,7 @@ export async function runInspectPage(
         viewport: request.viewport,
         ...(request.compare !== undefined ? { compare: request.compare } : {}),
         ...(request.cdpEndpoint !== undefined ? { cdpEndpoint: request.cdpEndpoint } : {}),
+        ...(request.publicOnly !== undefined ? { publicOnly: request.publicOnly } : {}),
       });
     case "tokens":
       return handlers.export_design_tokens({
@@ -86,6 +89,7 @@ export async function runInspectPage(
         viewport: request.viewport,
         ...(request.maxNodes !== undefined ? { maxNodes: request.maxNodes } : {}),
         ...(request.include !== undefined ? { include: request.include } : {}),
+        ...(request.publicOnly !== undefined ? { publicOnly: request.publicOnly } : {}),
       });
     case "stack":
       return handlers.analyze_stack({

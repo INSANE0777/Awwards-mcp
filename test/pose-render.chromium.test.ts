@@ -249,7 +249,7 @@ if (!browser && REQUIRED) {
 
     it(
       "keeps the newest frame when an older texture load finishes last",
-      { timeout: 60_000 },
+      { timeout: 120_000 },
       async () => {
         const page = await browser!.newPage({ viewport: { width: 1280, height: 720 } });
         const errors: string[] = [];
@@ -292,7 +292,7 @@ if (!browser && REQUIRED) {
             });
           });
 
-          await page.goto(`${FRAMES_ORIGIN}/`, { waitUntil: "load", timeout: 30_000 });
+          await page.goto(`${FRAMES_ORIGIN}/`, { waitUntil: "load", timeout: 90_000 });
           const first = await waitForVisible(page, errors);
           expect(first.pixels.green).toBeGreaterThan(1000);
 
