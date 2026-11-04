@@ -590,9 +590,9 @@ Install them with the [`skills` CLI](https://skills.sh):
 npx skills add INSANE0777/awwwards-skills
 ```
 
-Tested pairing: **`awwwards-mcp@1.17.1` + `skills-v2026.11.06`**. The v1.18
-candidate keeps the same **41 / 13 / 15** tool surface, but rerun the
-compatibility check before a release changes either side.
+Tested pairing: **`awwwards-mcp@1.18.0` + `skills-v2026.11.07`**. The 1.18
+release keeps the same **41 / 13 / 15** tool surface, but rerun the
+compatibility check before a later release changes either side.
 
 The CLI detects your agents and lets you choose a project or user-level
 install, then links each skill into that agent's skills directory. Useful
