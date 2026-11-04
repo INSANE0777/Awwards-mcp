@@ -3,13 +3,38 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## Unreleased
+## v1.18.0 - 2026-11-04
 
 ### DESIGN.md skill and guarded public capture
 
-- Added `publicOnly` to `capture_live_site`, `capture_component`, `export_design_tokens` and `analyze_page_structure` (and their v2 branches). It refuses private/loopback/metadata destinations before launch and routes every browser request through the existing pinned public-address proxy.
-- Token, structure and component outputs now include bounded capture provenance: requested-URL hash, redacted final URL, capture time, viewport, settle policy and extractor version.
+- Added `publicOnly` to `capture_live_site`, `capture_component`, `export_design_tokens` and `analyze_page_structure` (and their v2 branches). It refuses private/loopback/metadata/reserved IPv4 and IPv6 destinations before launch and routes every browser request through the existing pinned public-address proxy.
+- `publicOnly` also refuses CDP attachment and blocks non-proxied WebRTC UDP; a blocked redirect or subresource fails the call instead of returning evidence from a half-loaded page.
+- Token, structure and component outputs now include bounded capture provenance: requested-URL hash, redacted actual final URL, capture time, viewport, settle policy and extractor version. Existing result fields stay compatible.
 - New `awwwards-design-md` skill in **https://github.com/INSANE0777/awwwards-skills** builds a cited DESIGN.md plus `design-evidence.json` for one public URL. It composes existing tools; it is not a new MCP tool and does not claim official brand systems or recovered source tokens.
+
+### Element search and corpus disclosure
+
+- `search_elements` applies category and stack filters **before** the limit in both FTS and recent paths, so matches beyond the old 100/200 candidate windows are returned.
+- Stack filters match decoded `builtWith` names (not JSON text), preserve BM25 ordering, treat `%`, `_` and `\` literally, and keep an empty term matching-all.
+- `get_index_status`/`get_index_stats` expose `elements.corpus`: gallery vs site records, categorized/uncategorized, stack evidence, oldest/newest capture times and a local-subset note.
+- Element timestamps are normalized to milliseconds; new site-derived records write milliseconds.
+
+### Verification diagnostics and typed outputs
+
+- `verify_build` reports `bands.diagnostics`: matched pairs, reference-only, build-only, match reason, indices, order changes, height delta and background changes. Score, weights, verdict and existing label arrays are unchanged.
+- Full and compact `verify_build` output schemas; successful calls return the unchanged JSON text plus `structuredContent`. Errors and truncation carry no structured success.
+- `create_design_brief` gained a strict output schema, byte-identical Markdown text and matching `structuredContent`.
+
+### Scene cancellation
+
+- MCP cancellation now reaches scene capture, asset download and scene verification on 1.x and v2.
+- Cancelled captures remove late published packs, restore previously saved assets, close browser/proxy resources, abort queued downloads and stop verification replay from resuming after disposal.
+
+### Distribution and release evidence
+
+- Added `server.json` and `mcpName` for the official MCP registry, with a release gate for name, version, package and schema URL.
+- Added a protocol smoke covering legacy `2025-06-18` and modern `2026-07-28` initialization on every CI platform.
+- Added a provisional 10k-site benchmark baseline and a documented p90 comparison rule.
 
 ## v1.17.1 - 2026-11-03
 
