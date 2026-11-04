@@ -23,6 +23,7 @@ export interface PageBand {
 
 export interface PageStructure {
   url: string;
+  finalUrl?: string;
   title: string;
   totalHeight: number;
   bands: PageBand[];
@@ -868,7 +869,10 @@ export async function analyzePageStructure(
   try {
     browser = await chromium.launch(
       opts?.proxyServer
-        ? { proxy: { server: opts.proxyServer, bypass: "<-loopback>" } }
+        ? {
+            proxy: { server: opts.proxyServer, bypass: "<-loopback>" },
+            args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+          }
         : {},
     );
   } catch {
@@ -897,6 +901,7 @@ export async function analyzePageStructure(
     })) as ScanResult;
     const structure: PageStructure = {
       url,
+      finalUrl: typeof page.url === "function" ? page.url() : url,
       title: raw.title,
       totalHeight: raw.totalHeight,
       bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),

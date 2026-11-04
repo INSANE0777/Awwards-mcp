@@ -507,6 +507,7 @@ export interface Handlers {
     maxInlineBytes?: number;
     waitForOverlay?: boolean;
     scrollCapture?: "auto" | "anchors" | "viewport";
+    publicOnly?: boolean;
   }): Promise<ToolResponse>;
   analyze_page_structure(args: {
     url: string;
@@ -515,6 +516,7 @@ export interface Handlers {
     viewport?: ViewportName;
     compare?: "mobile";
     cdpEndpoint?: string;
+    publicOnly?: boolean;
   }): Promise<ToolResponse>;
   record_site_motion(args: {
     url: string;
@@ -556,6 +558,7 @@ export interface Handlers {
     maxNodes?: number;
     maxDepth?: number;
     compact?: boolean;
+    publicOnly?: boolean;
   }): Promise<ToolResponse>;
   export_design_tokens(args: {
     url: string;
@@ -563,6 +566,7 @@ export interface Handlers {
     viewport?: ViewportName;
     maxNodes?: number;
     include?: TokenCategory[];
+    publicOnly?: boolean;
   }): Promise<ToolResponse>;
   analyze_images(args: {
     url: string;

@@ -35,6 +35,7 @@ export function registerCaptureLiveSite(ctx: ToolContext): void {
         .describe(
           'Inner-scroller pages (body pinned, one div scrolls): "auto"/"anchors" saves 6 ordered viewport screenshots down the scroller and returns JSON anchors; "viewport" saves one viewport screenshot. Document-scrolling pages always keep the single full-page capture',
         ),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route every browser connection through the pinned public-address guard"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.capture_live_site(args)),
@@ -57,7 +58,8 @@ export function registerAnalyzePageStructure(ctx: ToolContext): void {
       cdpEndpoint: z
         .string()
         .optional()
-        .describe("Attach to a browser YOU started (requires AWWWARDS_MCP_ATTACH=1): loopback CDP endpoint (http://127.0.0.1:9222, http://[::1]:9222, or ws://127.0.0.1:9222/devtools/browser/<id>; an http endpoint is resolved via /json/version and its ws URL re-validated before connecting). Selects an already-open page whose URL matches exactly — never navigates, scrolls, clicks or creates tabs — and disconnects without closing it. Not available with compare or a non-desktop viewport"),
+        .describe("Attach to a browser YOU started (requires AWWWARDS_MCP_ATTACH=1): loopback CDP endpoint (http://127.0.0.1:9222, http://[::1]:9222, or ws://127.0.0.1:9222/devtools/browser/<id>; an http endpoint is resolved via /json/version and its ws URL re-validated before connecting). Selects an already-open page whose URL matches exactly - never navigates, scrolls, clicks or creates tabs - and disconnects without closing it. Not available with compare or a non-desktop viewport"),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route browser captures through the pinned public-address guard; cannot be combined with cdpEndpoint"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.analyze_page_structure(args)),
@@ -124,6 +126,7 @@ export function registerCaptureComponent(ctx: ToolContext): void {
       viewport: viewportSchema,
       compact: z.boolean().optional()
         .describe("token-diet summary: node styles/text/svg/anims and the typography/paletteSummary blocks are dropped; the {tag, classes, rect} tree, fonts and colors stay"),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route the browser through the pinned public-address guard"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.capture_component(args)),
@@ -148,6 +151,7 @@ export function registerExportDesignTokens(ctx: ToolContext): void {
         .array(z.enum(["colors", "typography", "spacing", "radii", "shadows", "borders"]))
         .optional()
         .describe("Token categories to emit (default all)"),
+      publicOnly: z.boolean().optional().describe("Refuse private/loopback/metadata destinations and route the browser through the pinned public-address guard"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.export_design_tokens(args)),

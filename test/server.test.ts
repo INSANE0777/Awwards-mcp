@@ -1916,7 +1916,14 @@ describe("analyze_page_structure", () => {
     const res = await h.analyze_page_structure({ url: "https://example.com" });
     const parsed = JSON.parse((res.content[0] as any).text);
     expect("responsive" in parsed).toBe(false);
-    expect(parsed).toEqual(desktop);
+    expect(parsed).toMatchObject(desktop);
+    expect(parsed.provenance).toMatchObject({
+      schemaVersion: "awwwards-capture-provenance-v1",
+      viewport: "desktop",
+      extractorVersion: 1,
+      finalUrl: "https://example.com/",
+    });
+    expect(typeof parsed.provenance.requestedUrlHash).toBe("string");
   });
 
   it("viewport mobile + compare:mobile makes one responsive capture", async () => {

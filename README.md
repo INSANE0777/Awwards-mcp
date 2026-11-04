@@ -4,7 +4,7 @@ Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
 sourced from the web's best award-winning websites.
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme) [![mcp.market](https://mcp.market/badge/insane0777-awwwards-mcp.svg)](https://mcp.market/server/insane0777-awwwards-mcp)
 
 <p align="center">
   <picture>
@@ -883,6 +883,7 @@ open `index.html` directly, no server or build step needed.
 | Skill | Role in the builds |
 |---|---|
 | `awwwards-inspiration` | The 8-step loop itself (from the [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills)): search → judge from screenshots → design DNA → capture/motion study → state direction → build → band-map verify. |
+| `awwwards-design-md` | Builds a cited DESIGN.md plus evidence sidecar for one public URL from tokens, structure, screenshot and up to three components. |
 | `gsap-scrolltrigger` | The horizontal pin + `containerAnimation` pattern (ease `"none"`, one-shot entrances) driving both Fallow Press horizontal pages. |
 | `gsap-core` / `gsap-timeline` | Tween composition and sequenced hero entrances (torn-paper drop, panel copy rises). |
 | `frontend-design` | Typography, palette and layout judgment applied when translating reference DNA into original pages. |

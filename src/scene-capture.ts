@@ -466,12 +466,24 @@ export function isPrivateAddress(address: string): boolean {
   }
   if ((g0! & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
   if ((g0! & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((g0! & 0xffc0) === 0xfec0) return true; // fec0::/10 deprecated site-local
   if ((g0! & 0xff00) === 0xff00) return true; // ff00::/8 multicast
-  if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
   if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff) {
     return isPrivateIpv4(embeddedIpv4(groups)); // ::ffff:a.b.c.d
   }
-  if (g0 === 0x0064 && g1 === 0xff9b) return isPrivateIpv4(embeddedIpv4(groups)); // NAT64
+  if (g0 === 0x0064 && g1 === 0xff9b && g2 === 0x0001) return true; // 64:ff9b:1::/48 local NAT64
+  if (g0 === 0x0064 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
+    return isPrivateIpv4(embeddedIpv4(groups)); // 64:ff9b::/96 NAT64 only
+  }
+  if ((g0! & 0xe000) !== 0x2000) return true; // outside 2000::/3 global unicast
+  if (g0 === 0x0100 && g1 === 0 && g2 === 0 && g3 === 0) return true; // 100::/64 discard-only
+  if (g0 === 0x2001 && g1 <= 0x01ff) return true; // 2001::/23 IETF special-purpose
+  if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
+  if ((g0! & 0xfff0) === 0x3ff0) return true; // 3fff::/20 documentation
+  if (g0 === 0x5f00) return true; // 5f00::/16 segment routing
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
+    return true; // ::, ::1 and deprecated IPv4-compatible
+  }
   if (g0 === 0x2002) {
     return isPrivateIpv4([g1! >> 8, g1! & 0xff, g2! >> 8, g2! & 0xff]); // 6to4
   }

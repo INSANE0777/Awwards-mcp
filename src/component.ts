@@ -26,6 +26,7 @@ export interface ComponentNode {
 export interface ComponentPack {
   id: "component-pack-v1";
   url: string;
+  finalUrl?: string;
   selector: string;
   capturedAt: number;
   viewport: { width: number; height: number };
@@ -553,7 +554,10 @@ export async function captureComponent(
     ({ chromium: chrome } = await loader());
     const browser = await chrome.launch(
       opts?.proxyServer
-        ? { proxy: { server: opts.proxyServer, bypass: "<-loopback>" } }
+        ? {
+            proxy: { server: opts.proxyServer, bypass: "<-loopback>" },
+            args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+          }
         : {},
     );
     try {
@@ -582,10 +586,13 @@ export async function captureComponent(
         ...(opts?.maxDepth !== undefined ? { maxDepth: opts.maxDepth } : {}),
       };
       const scan = (await page.evaluate(COMPONENT_SNIPPET, arg)) as RawComponentScan;
-      return reduceComponent(
+      const pack = reduceComponent(
         { url: url, capturedAt: Date.now(), selector: arg.selector, viewport: { width: width, height: height }, scan: scan },
         arg.maxNodes,
       );
+      return "error" in pack
+        ? pack
+        : { ...pack, finalUrl: typeof page.url === "function" ? page.url() : url };
     } finally {
       try {
         await browser.close();
