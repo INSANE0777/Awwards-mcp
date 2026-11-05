@@ -62,7 +62,7 @@ describe("atlas artifacts", () => {
     expect(isAbsolute(written.storagePath)).toBe(false);
     expect(written.storagePath).toBe(join("atlas", "artifacts", `${written.sha256}.json`));
     expect(resolveArtifactPath(root, written.storagePath)).toBe(
-      resolve(realpathSync.native(root), written.storagePath),
+      resolve(realpathSync(root), written.storagePath),
     );
 
     const text = readFileSync(resolveArtifactPath(root, written.storagePath), "utf8");
@@ -197,7 +197,7 @@ describe("atlas artifacts", () => {
     await Promise.all([first, second]);
     expect(events).toEqual(["a-write", "a-delete", "b-enter", "b-write"]);
     expect(resolveArtifactPath(root, storagePath)).toEqual(
-      resolve(realpathSync.native(root), storagePath),
+      resolve(realpathSync(root), storagePath),
     );
   });
 
@@ -217,7 +217,7 @@ describe("atlas artifacts", () => {
     const root = tmpDir();
     mkdirSync(join(root, "atlas", "artifacts"), { recursive: true });
     expect(resolveArtifactPath(root, "atlas/artifacts/abc.json")).toBe(
-      resolve(realpathSync.native(root), "atlas", "artifacts", "abc.json"),
+      resolve(realpathSync(root), "atlas", "artifacts", "abc.json"),
     );
   });
 });
