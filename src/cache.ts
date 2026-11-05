@@ -12,6 +12,11 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalizeTechnology } from "./awwwards.js";
+import { migrateAtlas } from "./atlas/schema.js";
+import { validatePreparedSitePage } from "./atlas/contracts.js";
+import { writeLegacyProjection } from "./atlas/legacy.js";
+import { AtlasStore } from "./atlas/store.js";
+import type { PreparedSitePage, SitePageCommitResult } from "./atlas/types.js";
 import type { ElementRecord, MotionDna, SiteSummary } from "./types.js";
 
 // Freshness window applied by getSite() when the caller does not pass one.
@@ -25,6 +30,12 @@ const BUSY_TIMEOUT_MS = 5_000;
 // Keys per IN (...) statement. Keeps the bound-variable count well under
 // SQLite's default 999 limit on older builds/builds configured low.
 const META_KEY_CHUNK = 500;
+
+export function atlasEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.AWWWARDS_MCP_ATLAS === "1";
+}
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS sites (
@@ -205,6 +216,7 @@ function rowToElement(r: ElementRow): ElementRecord {
 export class Cache {
   private readonly dbPath: string;
   private readonly now: () => number;
+  readonly atlas: boolean;
   readonly rootDir: string;
   readonly imagesDir: string;
   // In-flight image writes keyed by target file. Parallel previews of the same
@@ -217,8 +229,14 @@ export class Cache {
   // server layer and tests can branch on it.
   ftsAvailable: boolean | null = null;
 
-  constructor(rootDir: string, now: () => number = Date.now) {
+  constructor(
+    rootDir: string,
+    now: () => number = Date.now,
+    options: { atlas?: boolean; fts?: boolean } = {},
+  ) {
     this.now = now;
+    this.atlas = options.atlas ?? atlasEnabled();
+    if (options.fts === false) this.ftsAvailable = false;
     // 0700/0600 keep the cache (tokens, page text) private to the OS user.
     // Windows ignores POSIX modes, so passing them must not fail there.
     mkdirSync(rootDir, { recursive: true, mode: 0o700 });
@@ -283,7 +301,7 @@ export class Cache {
   // close(); on Windows an open handle makes the file and its directory
   // undeletable, which broke temp-dir cleanup in tests. Per-operation
   // open/close keeps the same public API with no lingering handles.
-  private withDb<T>(fn: (db: DatabaseSync) => T): T {
+  private openDb(): DatabaseSync {
     const db = new DatabaseSync(this.dbPath);
     try {
       // Wait (instead of failing SQLITE_BUSY) when another process holds the
@@ -394,7 +412,31 @@ export class Cache {
           }
         }
       }
+      if (this.atlas) {
+        migrateAtlas(db, this.now(), this.ftsAvailable === true);
+      }
+      return db;
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+  }
+
+  private withDb<T>(fn: (db: DatabaseSync) => T): T {
+    const db = this.openDb();
+    try {
       return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  /** Async Atlas seam for multi-step commits that also write artifact files. */
+  async withAtlasDbAsync<T>(fn: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
+    const db = this.openDb();
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      return await fn(db);
     } finally {
       db.close();
     }
@@ -411,6 +453,52 @@ export class Cache {
    */
   withReadDb<T>(fn: (db: DatabaseSync) => T): T {
     return this.withDb(fn);
+  }
+
+  /**
+   * Atlas-only connection seam. Enables foreign keys for Atlas tables and
+   * never exposes a long-lived handle.
+   */
+  withAtlasDb<T>(fn: (db: DatabaseSync) => T): T {
+    return this.withDb((db) => {
+      db.exec("PRAGMA foreign_keys = ON");
+      return fn(db);
+    });
+  }
+
+  /**
+   * Shared item-page commit. Legacy metadata/elements always update in one
+   * transaction; Atlas rows are added when this cache has Atlas enabled.
+   */
+  async commitSitePage(
+    prepared: PreparedSitePage,
+    options: { atlasEnabled?: boolean } = {},
+  ): Promise<SitePageCommitResult> {
+    validatePreparedSitePage(prepared);
+    if (this.atlas && (options.atlasEnabled ?? true)) {
+      return new AtlasStore(this, { now: this.now }).commitSitePage(prepared, options);
+    }
+    return this.withDb((db) => {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        writeLegacyProjection(db, prepared, this.now());
+        db.exec("COMMIT");
+        return {
+          pageId: "",
+          captureId: "",
+          highlightCount: prepared.highlights.length,
+          highlightParse: prepared.highlightParse.status,
+          published: false,
+        };
+      } catch (error) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* already rolled back */
+        }
+        throw error;
+      }
+    });
   }
 
   upsertSites(sites: SiteSummary[]): void {

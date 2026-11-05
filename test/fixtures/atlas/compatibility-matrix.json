@@ -1,0 +1,43 @@
+{
+  "matrixVersion": "atlas-compat-v1",
+  "runtime": {
+    "nodeMajor": 22,
+    "sqliteMin": "3.44.0",
+    "fts5": true,
+    "json1": true
+  },
+  "migrations": [
+    { "from": 0, "to": 1, "additive": true },
+    { "from": 1, "to": 2, "additive": true },
+    { "from": 2, "to": 3, "additive": true },
+    { "from": 3, "to": 4, "additive": true },
+    { "from": 4, "to": 5, "additive": true },
+    { "from": 5, "to": 6, "additive": true }
+  ],
+  "legacyFields": [
+    {
+      "legacyField": "treatment.surface",
+      "atlasField": "appearance.surface",
+      "values": { "dark": "dark", "light": "light" },
+      "compatible": true
+    },
+    {
+      "legacyField": "treatment.layout",
+      "atlasField": "layout.pattern",
+      "values": {
+        "grid": "grid",
+        "split": "split",
+        "stacked": "stack",
+        "full_bleed": "full_bleed"
+      },
+      "compatible": true
+    }
+  ],
+  "cli": [
+    { "form": "--atlas import", "action": "import", "supported": true },
+    { "form": "--atlas=import", "action": "import", "supported": true },
+    { "form": "--atlas", "action": "unsupported", "supported": false },
+    { "form": "--atlas export", "action": "unsupported", "supported": false },
+    { "form": "--atlas=", "action": "unsupported", "supported": false }
+  ]
+}

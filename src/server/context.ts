@@ -1,7 +1,7 @@
 import { AWARD_FILTERS, BlockedError } from "../awwwards.js";
 import type { AwardFilter } from "../awwwards.js";
-import type { SiteSummary, SiteDetails, ElementMedia } from "../types.js";
-import { parseDetail, parseElements } from "../parsers.js";
+import type { SiteSummary, SiteDetails } from "../types.js";
+import { isAllEmptyDetail, prepareSitePage } from "../atlas/ingest.js";
 import {
   AWARD_FILTER_LABELS,
   SITE_TTL_MS,
@@ -43,15 +43,7 @@ export interface HandlerContext {
 // was not found): neither tool may cache such a parse, so the mismatch can
 // still be surfaced. A Nominee submission carries no palette, technology,
 // award or description section at all, so its empty parse is real content.
-export function isAllEmptyDetail(d: SiteDetails): boolean {
-  return (
-    d.palette.length === 0 &&
-    d.technologies.length === 0 &&
-    d.elements.length === 0 &&
-    d.awards.length === 0 &&
-    !d.description
-  );
-}
+export { isAllEmptyDetail };
 
 // Annual "Winners — ..." categories: listing cards carry no award marker, so
 // only the fetched filter page proves membership (unlike sotd/sotm/soty and
@@ -203,18 +195,18 @@ export function createHandlerContext(deps: CreateHandlersDeps): HandlerContext {
     let d = cache.getMeta<SiteDetails>(metaKey, SITE_TTL_MS);
     if (!d) {
       const html = await client.getHtml(`/sites/${slug}`);
-      d = parseDetail(html, slug);
+      const prepared = prepareSitePage({
+        slug,
+        html,
+        fetchedAt: nowMs(),
+        sourceUrl: `https://www.awwwards.com/sites/${slug}`,
+        summary: cache.getSite(slug, Number.POSITIVE_INFINITY),
+      });
+      d = prepared.detail;
       // Nominees legitimately parse empty; only an awarded page that parses
       // empty is parser drift, and only drift stays uncached.
       if (isAllEmptyDetail(d) && !d.nominee) return null;
-      cache.setMeta(metaKey, d);
-      // No Elements section is a legitimate empty; a zero-blob section is
-      // left uncached so get_site_elements can report parser drift.
-      if (cache.getMeta<ElementMedia[]>(`elements:${slug}`, SITE_TTL_MS) === null) {
-        const els = parseElements(html);
-        if (els === null) cache.setMeta(`elements:${slug}`, []);
-        else if (els.length > 0) cache.setMeta(`elements:${slug}`, els);
-      }
+      await cache.commitSitePage(prepared);
     }
     return d;
   }
