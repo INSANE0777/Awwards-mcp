@@ -2,11 +2,12 @@ import { AWARD_FILTERS, buildFilterUrl, elementPosterPath, elementUrl } from "..
 import type { AwardFilter } from "../../awwwards.js";
 import { createDesignBrief, renderDesignBrief } from "../../design-brief.js";
 import type { DesignBriefInput, DesignBriefSource } from "../../design-brief.js";
-import { parseCategories, parseDetail, parseElements, parseListing } from "../../parsers.js";
+import { parseCategories, parseListing } from "../../parsers.js";
+import { prepareSitePage } from "../../atlas/ingest.js";
 import type { WaitOpts } from "../../structure.js";
 import type { Categories, ElementMedia, ElementRecord, SiteDetails, SiteSummary } from "../../types.js";
 import type { ViewportName } from "../../viewport.js";
-import { isAllEmptyDetail, urlFilterNeedsPageMembership } from "../context.js";
+import { urlFilterNeedsPageMembership } from "../context.js";
 import type { HandlerContext } from "../context.js";
 import {
   AWARD_FILTER_LABELS,
@@ -484,11 +485,17 @@ export async function get_site_elements(ctx: HandlerContext, args: { slug: strin
     let elements = ctx.cache.getMeta<ElementMedia[]>(elementsKey, SITE_TTL_MS);
     if (elements === null) {
       const html = await ctx.client.getHtml(`/sites/${args.slug}`);
-      const parsed = parseElements(html);
-      if (parsed === null) {
-        elements = [];
-        ctx.cache.setMeta(elementsKey, elements);
-      } else if (parsed.length === 0) {
+      const prepared = prepareSitePage({
+        slug: args.slug,
+        html,
+        fetchedAt: ctx.nowMs(),
+        sourceUrl: `https://www.awwwards.com/sites/${args.slug}`,
+        summary: ctx.cache.getSite(args.slug, Number.POSITIVE_INFINITY),
+      });
+      // The shared commit records the detail metadata and the Atlas attempt;
+      // a drift parse still must not replace the searchable element projection.
+      await ctx.cache.commitSitePage(prepared);
+      if (prepared.highlightParse.status === "drift") {
         return {
           content: [
             text(
@@ -498,16 +505,14 @@ export async function get_site_elements(ctx: HandlerContext, args: { slug: strin
           ],
           isError: true,
         };
-      } else {
-        elements = parsed;
-        ctx.cache.setMeta(elementsKey, elements);
       }
-      // One fetch feeds both caches: seed the detail cache from the same
-      // HTML unless it is an all-empty parse (never cached, per contract).
-      if (ctx.cache.getMeta<SiteDetails>(`detail:${args.slug}`, SITE_TTL_MS) === null) {
-        const d = parseDetail(html, args.slug);
-        if (!isAllEmptyDetail(d) || d.nominee) ctx.cache.setMeta(`detail:${args.slug}`, d);
-      }
+      const legacyTitleByMedia = new Map(
+        prepared.legacyElements.map((element) => [element.mediaPath, element.title]),
+      );
+      elements = prepared.highlights.map(({ title, mediaPath }) => ({
+        title: legacyTitleByMedia.get(mediaPath) ?? title,
+        mediaPath,
+      }));
     }
     const cachedSite = ctx.cache.getSite(args.slug, SITE_TTL_MS);
     const title =

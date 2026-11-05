@@ -1,7 +1,9 @@
 import { AwwwardsClient, buildFilterUrl } from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import type { ElementRecord, SiteSummary } from "./types.js";
-import { parseListing, parseElements } from "./parsers.js";
+import { parseListing } from "./parsers.js";
+import { prepareSitePage } from "./atlas/ingest.js";
+import { toLegacyElementRecord } from "./atlas/legacy.js";
 
 // Longitudinal monitoring over the allowed SOTD listing — the RSS feed at
 // /sites-of-the-day/feed/ is robots-disallowed (/feed → Disallow for "*"),
@@ -130,31 +132,22 @@ export function checkWatches(
   return results;
 }
 
-// Winner → component backfill: for each new winner, fetch the site page once
-// and index its "Elements" section as source="site" component records, so the
-// fresh winner is immediately searchable in search_elements. The gallery
-// element slugs come from real /inspiration/<slug> URLs; site sections give
-// only media cards, so records get a `site-<siteslug>-<title>` slug in a
-// namespace disjoint from gallery slugs — upsert can never merge the two.
+// Winner → component backfill helper retained for callers that need records
+// without a cache handle. The live handler commits through prepareSitePage so
+// legacy rows and Atlas rows share one transaction.
 export function recordsFromSiteHtml(
   html: string,
   site: SiteSummary,
-  nowSec: number,
+  now: number,
 ): ElementRecord[] {
-  const media = parseElements(html) ?? [];
-  return media.map((el) => ({
-    slug: `site-${site.slug}-${el.title.toLowerCase().replace(/\W+/g, "-")}`,
-    title: el.title,
-    cid: "uncategorized", // site pages carry no facet taxonomy
-    category: "uncategorized",
-    author: site.studio ?? site.title,
-    builtWith: [], // technologies live on the site detail, not the element card
-    related: [],
-    mediaPath: el.mediaPath,
-    mediaType: el.mediaPath.endsWith(".mp4") ? "video" : el.mediaPath ? "image" : null,
-    source: "site" as const,
-    projectId: null,
-    siteSlug: site.slug,
-    fetchedAt: nowSec,
-  }));
+  const prepared = prepareSitePage({
+    slug: site.slug,
+    html,
+    fetchedAt: now,
+    sourceUrl: `https://www.awwwards.com${site.detailPath}`,
+    summary: site,
+  });
+  return prepared.legacyElements.map((element) =>
+    toLegacyElementRecord(element, element.fallbackSlug),
+  );
 }

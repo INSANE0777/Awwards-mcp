@@ -1,6 +1,7 @@
-import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "../../feed.js";
+import { fetchNewWinners, addWatch, listWatches, removeWatch, checkWatches, matchesWatch } from "../../feed.js";
+import { prepareSitePage } from "../../atlas/ingest.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../../indexer.js";
-import type { Categories, ElementRecord } from "../../types.js";
+import type { Categories } from "../../types.js";
 import type { HandlerContext } from "../context.js";
 import {
   AWARD_FILTER_LABELS,
@@ -183,17 +184,22 @@ export async function new_winners(ctx: HandlerContext, args: { award?: "sotd" | 
     // failures never abort the rest.
     let backfilled = 0;
     if (res.newWinners.length > 0) {
-      const records: ElementRecord[] = [];
       for (const site of res.newWinners) {
         try {
           const html = await ctx.client.getHtml(site.detailPath);
-          records.push(...recordsFromSiteHtml(html, site, ctx.nowMs()));
+          const prepared = prepareSitePage({
+            slug: site.slug,
+            html,
+            fetchedAt: ctx.nowMs(),
+            sourceUrl: `https://www.awwwards.com${site.detailPath}`,
+            summary: site,
+          });
+          await ctx.cache.commitSitePage(prepared);
           backfilled++;
         } catch {
           /* site page 404/blocked — the detail remains fetchable on demand */
         }
       }
-      if (records.length > 0) ctx.cache.upsertElements(records);
     }
     const body = res.isNewArrivals
       ? `First poll for ${res.day} — no baseline yet, so there is no delta. ` +

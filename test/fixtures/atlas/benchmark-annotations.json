@@ -1,0 +1,66 @@
+{
+  "annotationVersion": "atlas-benchmark-v1",
+  "dataset": {
+    "regions": 100000,
+    "claims": 1000000,
+    "sites": 1000,
+    "views": ["desktop", "mobile"],
+    "features": [
+      "same-background layouts",
+      "nested scrolling",
+      "pinned content",
+      "custom controls",
+      "missing content",
+      "unsupported requests"
+    ]
+  },
+  "annotations": [
+    {
+      "annotationVersion": "atlas-benchmark-v1",
+      "annotationId": "realevate-hero-dark-grid",
+      "siteSlug": "realevate",
+      "pageUrl": "https://www.awwwards.com/sites/realevate",
+      "regionKey": "hero",
+      "viewport": "desktop",
+      "split": "calibration",
+      "labels": [
+        { "field": "section.purpose", "value": "hero", "decision": "accepted", "basis": "geometry" },
+        { "field": "appearance.surface", "value": "dark", "decision": "accepted", "basis": "computed_style" },
+        { "field": "layout.pattern", "value": "grid", "decision": "candidate", "basis": "geometry" }
+      ],
+      "notes": ["Reviewed against the live page at 1440px."],
+      "reviewedAt": 1790000000000
+    },
+    {
+      "annotationVersion": "atlas-benchmark-v1",
+      "annotationId": "toyfight-footer-light-stack",
+      "siteSlug": "toyfight",
+      "pageUrl": "https://www.awwwards.com/sites/toyfight",
+      "regionKey": "footer",
+      "viewport": "mobile",
+      "split": "calibration",
+      "labels": [
+        { "field": "section.purpose", "value": "footer", "decision": "accepted", "basis": "native_semantics" },
+        { "field": "appearance.surface", "value": "light", "decision": "accepted", "basis": "computed_style" },
+        { "field": "layout.pattern", "value": "stack", "decision": "accepted", "basis": "geometry" }
+      ],
+      "notes": ["Hard negative: decorative background image does not change surface."],
+      "reviewedAt": 1790000000000
+    },
+    {
+      "annotationVersion": "atlas-benchmark-v1",
+      "annotationId": "lisa-pricing-split",
+      "siteSlug": "l-i-s-a",
+      "pageUrl": "https://www.awwwards.com/sites/l-i-s-a",
+      "regionKey": "pricing",
+      "viewport": "desktop",
+      "split": "held_out",
+      "labels": [
+        { "field": "section.purpose", "value": "pricing", "decision": "candidate", "basis": "source_metadata" },
+        { "field": "layout.pattern", "value": "split", "decision": "accepted", "basis": "geometry" }
+      ],
+      "notes": ["Held out from calibration; no tuning against this page."],
+      "reviewedAt": null
+    }
+  ]
+}

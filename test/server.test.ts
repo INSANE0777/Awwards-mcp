@@ -1089,6 +1089,30 @@ describe("get_site_elements", () => {
     expect(pageCalls.length).toBe(1); // second call served from meta cache
   });
 
+  it("keeps long legacy element titles in fresh and cached responses", async () => {
+    const title = `${"x".repeat(300)} zeppelin`;
+    const html =
+      `<html><head><meta property="og:title" content="Long"></head><body>` +
+      `<h2 class="text-default">Elements</h2>` +
+      `<div data-collectable-model-value="${JSON.stringify({
+        collectableTitle: title,
+        collectableImage: "element/2026/08/long-server.jpg",
+      })
+        .replace(/"/g, "&quot;")}"></div>` +
+      `<h2>Color Palette</h2></body></html>`;
+    for (const atlas of [true, false]) {
+      const cache = new Cache(tmpDir(), () => Date.UTC(2026, 8, 28, 12), { atlas });
+      const client = new AwwwardsClient({
+        fetchFn: (async () => new Response(html, { status: 200 })) as unknown as typeof fetch,
+      });
+      const h = createHandlers({ client, cache });
+      const fresh = await h.get_site_elements({ slug: "long-elements" });
+      expect((fresh.content[0] as any).text).toContain("zeppelin");
+      const cached = await h.get_site_elements({ slug: "long-elements" });
+      expect((cached.content[0] as any).text).toContain("zeppelin");
+    }
+  });
+
   it("shares one page fetch with get_site_details", async () => {
     const cache = new Cache(tmpDir());
     const { client, fetchFn } = fakeClient();
