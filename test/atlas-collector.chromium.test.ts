@@ -919,7 +919,9 @@ suite("Atlas collector with real Chromium", () => {
     expect(otherRequests).toBe(0);
   }, 60_000);
 
-  it("uses the pinned guarded address for fixture resources", async () => {
+  // macOS runners cannot reliably bind/route the alternate loopback address
+  // used to prove pinning; Linux and Windows cover this path.
+  it.skipIf(process.platform === "darwin")("uses the pinned guarded address for fixture resources", async () => {
     let assetRequests = 0;
     const server = createServer((req, res) => {
       const path = req.url ?? "/";
