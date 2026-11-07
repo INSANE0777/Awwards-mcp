@@ -728,9 +728,11 @@ describe("inner scroll root", () => {
       expect(src).toContain('String(s.overflowY) !== "auto" && String(s.overflowY) !== "scroll"');
       expect(src).toContain("css.escape"); // id/class escaped for a valid selector
     }
-    expect(scan).toContain("de.scrollHeight > de.clientHeight + 100"); // document scroll wins
+    expect(scan).toContain("Math.max(Number(de.scrollHeight || 0), bodyHeight) > viewportHeight + 100"); // document scroll wins
     expect(scan).toContain("r.top - scrollerTop + scrollerScrollTop");
     expect(scan).toContain("out.scrollRoot = scrollRootLabel(scroller)");
+    expect(scroll).toContain("Math.max(Number(de.scrollHeight || 0), bodyHeight) > viewportHeight + 100");
+    expect(scroll).toContain('behavior: "instant"');
     expect(scroll).toContain("scroller.scrollTop = y");
     expect(scroll).toContain("scroller.scrollTop = 0");
   });
@@ -775,7 +777,9 @@ describe("preScroll caps", () => {
       querySelectorAll: () => [],
     };
     const win = {
-      scrollTo: (_x: number, y: number) => {
+      scrollTo: (...args: any[]) => {
+        const position = args[0];
+        const y = typeof position === "object" ? Number(position.top) : Number(args[1]);
         scrolled.push(y);
         height += 4500; // would never terminate without the cap
       },

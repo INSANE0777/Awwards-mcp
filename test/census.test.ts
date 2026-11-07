@@ -469,7 +469,7 @@ function probeHarness(
       }
       // preScroll's settle loop also says scrollTo — mark it separately so
       // probe assertions can filter the always-present census-phase calls.
-      if (src.includes("scrollTo(0, 0)")) {
+      if (src.includes('behavior: "instant"')) {
         calls.push("prescroll");
         return undefined;
       }

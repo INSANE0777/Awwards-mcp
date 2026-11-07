@@ -8,6 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -19,6 +20,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { inflateSync } from "node:zlib";
 
 const ARTIFACT_DIR = join("atlas", "artifacts");
 const ARTIFACT_COMPONENTS = ["atlas", ARTIFACT_DIR] as const;
@@ -106,6 +108,44 @@ export function localArtifactLockCount(): number {
   return localLocks.size;
 }
 
+export interface StoredArtifactBytes {
+  storagePath: string;
+  sha256: string;
+  bytes: number;
+  /** True when this call created the final content-addressed file. */
+  created: boolean;
+}
+
+/** Content-addressed binary artifact (screenshots, packs) used by live capture. */
+export function writeArtifactBytesSync(
+  cacheRoot: string,
+  data: Buffer,
+  extension = ".bin",
+): StoredArtifactBytes {
+  ensureArtifactDirSync(cacheRoot);
+  const sha256 = createHash("sha256").update(data).digest("hex");
+  const ext = /^\.[a-z0-9]+$/i.test(extension) ? extension.toLowerCase() : ".bin";
+  const storagePath = join(ARTIFACT_DIR, `${sha256}${ext}`);
+  const target = resolveArtifactPath(cacheRoot, storagePath);
+  if (existsSync(target)) return { storagePath, sha256, bytes: data.length, created: false };
+  const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  let created = false;
+  writeFileSync(temp, data, { mode: 0o600, flag: "wx" });
+  try {
+    renameSync(temp, target);
+    created = true;
+  } catch (error) {
+    if (!existsSync(target)) throw error;
+  } finally {
+    try {
+      rmSync(temp, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+  return { storagePath, sha256, bytes: data.length, created };
+}
+
 /** Synchronous variant for callers already holding the SQLite write lock. */
 export function writeJsonArtifactSync(cacheRoot: string, value: unknown): WrittenArtifact {
   const identity = artifactIdentity(value);
@@ -175,6 +215,171 @@ export function readStoredArtifactJson(
 ): unknown {
   const target = resolveArtifactPath(cacheRoot, artifact.storagePath);
   return JSON.parse(readFileSync(target, "utf8"));
+}
+
+export function isValidPngBuffer(buffer: Buffer): boolean {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (buffer.length < 8 + 25) return false;
+  for (let i = 0; i < 8; i += 1) if (buffer[i] !== signature[i]) return false;
+  let offset = 8;
+  let sawHeader = false;
+  let sawData = false;
+  let idatClosed = false;
+  let sawEnd = false;
+  let imageWidth = 0;
+  let imageHeight = 0;
+  let imageBitDepth = 8;
+  let imageColorType = 0;
+  let imageInterlace = 0;
+  let sawPalette = false;
+  const idat: Buffer[] = [];
+  let index = 0;
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.subarray(offset + 4, offset + 8).toString("ascii");
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (length > buffer.length || dataEnd + 4 > buffer.length) return false;
+    const expectedCrc = buffer.readUInt32BE(dataEnd);
+    if (crc32(buffer.subarray(offset + 4, dataEnd)) !== expectedCrc) return false;
+    if (index === 0) {
+      if (type !== "IHDR" || length !== 13) return false;
+      const width = buffer.readUInt32BE(dataStart);
+      const height = buffer.readUInt32BE(dataStart + 4);
+      const bitDepth = buffer[dataStart + 8];
+      const colorType = buffer[dataStart + 9];
+      const compression = buffer[dataStart + 10];
+      const filter = buffer[dataStart + 11];
+      const interlace = buffer[dataStart + 12];
+      if (width === 0 || height === 0) return false;
+      if (![1, 2, 4, 8, 16].includes(bitDepth ?? -1)) return false;
+      if (![0, 2, 3, 4, 6].includes(colorType ?? -1)) return false;
+      const allowedDepths =
+        colorType === 0
+          ? [1, 2, 4, 8, 16]
+          : colorType === 2 || colorType === 4 || colorType === 6
+            ? [8, 16]
+            : [1, 2, 4, 8];
+      if (!allowedDepths.includes(bitDepth ?? -1)) return false;
+      if (compression !== 0 || filter !== 0 || ![0, 1].includes(interlace ?? -1)) return false;
+      imageWidth = width;
+      imageHeight = height;
+      imageBitDepth = bitDepth!;
+      imageColorType = colorType!;
+      imageInterlace = interlace!;
+      sawHeader = true;
+    } else if (type === "IHDR") {
+      return false;
+    } else if (type === "IDAT") {
+      if (!sawHeader || sawEnd || idatClosed) return false;
+      if (imageColorType === 3 && !sawPalette) return false;
+      sawData = true;
+      idat.push(buffer.subarray(dataStart, dataEnd));
+    } else if (type === "PLTE") {
+      if (!sawHeader || sawData || sawEnd || sawPalette) return false;
+      if (imageColorType === 0 || imageColorType === 4) return false;
+      if (length === 0 || length % 3 !== 0 || length > 768) return false;
+      if (length / 3 > 2 ** imageBitDepth) return false;
+      sawPalette = true;
+    } else if (type === "IEND") {
+      if (!sawData || length !== 0) return false;
+      sawEnd = true;
+    } else if (/^[A-Z]/.test(type)) {
+      return false;
+    } else if (sawData) {
+      idatClosed = true;
+    }
+    offset = dataEnd + 4;
+    index += 1;
+    if (sawEnd) break;
+  }
+  if (offset !== buffer.length) return false;
+  if (!sawHeader || !sawData || !sawEnd) return false;
+  try {
+    const decoded = inflateSync(Buffer.concat(idat), {
+      maxOutputLength: 64 * 1024 * 1024,
+    });
+    if (decoded.length === 0) return false;
+    if (imageInterlace !== 0) return false;
+    const channels =
+      imageColorType === 0
+        ? 1
+        : imageColorType === 2
+          ? 3
+          : imageColorType === 3
+            ? 1
+            : imageColorType === 4
+              ? 2
+              : 4;
+    const rowBytes = Math.ceil((imageWidth * channels * imageBitDepth) / 8);
+    const expected = imageHeight * (1 + rowBytes);
+    if (decoded.length !== expected) return false;
+    for (let row = 0; row < imageHeight; row += 1) {
+      if (decoded[row * (1 + rowBytes)]! > 4) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buffer) crc = CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+export function isPngStoredArtifact(cacheRoot: string, artifact: StoredArtifactRef): boolean {
+  try {
+    const target = resolveArtifactPath(cacheRoot, artifact.storagePath);
+    return isValidPngBuffer(readFileSync(target));
+  } catch {
+    return false;
+  }
+}
+
+export function artifactPointerResolves(  cacheRoot: string,
+  artifact: StoredArtifactRef,
+  pointer: string,
+): boolean {
+  if (pointer !== "" && !pointer.startsWith("/")) return false;
+  let node: unknown;
+  try {
+    node = readStoredArtifactJson(cacheRoot, artifact);
+  } catch {
+    return false;
+  }
+  if (pointer === "") return true;
+  for (const raw of pointer.slice(1).split("/")) {
+    let token = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+    try {
+      token = decodeURIComponent(token);
+    } catch {
+      return false;
+    }
+    if (Array.isArray(node)) {
+      if (!/^\d+$/.test(token)) return false;
+      const index = Number(token);
+      if (index >= node.length) return false;
+      node = node[index];
+    } else if (node && typeof node === "object") {
+      if (!Object.prototype.hasOwnProperty.call(node, token)) return false;
+      node = (node as Record<string, unknown>)[token];
+    } else {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function removeArtifactFileSync(cacheRoot: string, storagePath: string): void {  const target = resolveArtifactPath(cacheRoot, storagePath);

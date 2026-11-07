@@ -18,6 +18,7 @@ import {
   removeArtifactFile,
   resolveArtifactPath,
   withArtifactLock,
+  writeArtifactBytesSync,
   writeJsonArtifact,
 } from "../src/atlas/artifacts.js";
 
@@ -69,6 +70,16 @@ describe("atlas artifacts", () => {
     expect(text).toBe(JSON.stringify(value));
     expect(createHash("sha256").update(text, "utf8").digest("hex")).toBe(written.sha256);
     expect(written.bytes).toBe(Buffer.byteLength(text, "utf8"));
+  });
+
+  it("reports whether a binary write created its content-addressed file", () => {
+    const root = tmpDir();
+    const first = writeArtifactBytesSync(root, Buffer.from("checkpoint"), ".png");
+    const second = writeArtifactBytesSync(root, Buffer.from("checkpoint"), ".png");
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.storagePath).toBe(first.storagePath);
   });
 
   it("rejects non-artifact, absolute, traversal, nested and empty paths", () => {
