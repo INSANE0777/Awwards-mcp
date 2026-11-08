@@ -57,11 +57,15 @@ jobs:
       - name: Assert arm64 (Apple Silicon)
         if: matrix.os == 'macos-15'
         run: test "$(uname -m)" = arm64
-      - name: npm ci (retry transient CDN failures)
+      # ffmpeg-static downloads a ~80 MB binary from GitHub release assets at
+      # install time; that CDN intermittently returns 504 in CI. Every test
+      # injects its own ffmpeg stub or path, so CI can skip install scripts and
+      # keep the suite independent of that download.
+      - name: npm ci (skip native downloads)
         shell: bash
         run: |
           for attempt in 1 2 3; do
-            if npm ci; then
+            if npm ci --ignore-scripts; then
               exit 0
             fi
             echo "npm ci failed on attempt ${attempt}; retrying in $((attempt * 20))s"
