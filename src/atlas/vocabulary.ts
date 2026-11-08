@@ -322,3 +322,29 @@ export function isSearchableVocabulary(field: string, value: string): boolean {
 
 export const SECTION_PURPOSES = sectionValues;
 export const COMPONENT_TYPES = componentValues;
+
+/**
+ * Scanner landmarks are canonical (`header`, `footer`, `navigation`, `main`).
+ * Older rows and ARIA callers may say banner/contentinfo/complementary, so
+ * read and query paths funnel through the same mapping.
+ */
+export const LANDMARK_ALIASES: Readonly<Record<string, string>> = {
+  banner: "header",
+  contentinfo: "footer",
+  complementary: "aside",
+};
+
+export const CANONICAL_LANDMARKS: readonly string[] = [
+  "aside",
+  "footer",
+  "header",
+  "main",
+  "navigation",
+];
+
+export function canonicalLandmark(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return LANDMARK_ALIASES[normalized] ?? normalized;
+}

@@ -51,6 +51,7 @@
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",
     "perf:bench": "node scripts/perf-bench.mjs",
+    "atlas:search:bench": "tsx scripts/atlas-search-bench.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

@@ -6,7 +6,12 @@ import { primaryPurpose } from "./classification.js";
 import { regionStableKey } from "./segmentation.js";
 import { checkAtlasRedirect } from "./policy.js";
 import { removeHead } from "./heads.js";
-import { ATLAS_VOCABULARY_VERSION } from "./vocabulary.js";
+import {
+  bumpAtlasRevision,
+  bumpAtlasRevisionInPlace,
+  refreshCaptureProjectionFreshness,
+} from "./search-projections.js";
+import { ATLAS_VOCABULARY_VERSION, canonicalLandmark } from "./vocabulary.js";
 import type {
   AtlasCaptureAttempt,
   AtlasClaim,
@@ -18,6 +23,18 @@ import type {
 const EXTRACTOR_VERSION = "atlas-extractor-2";
 const CLASSIFIER_VERSION = "atlas-classifier-1";
 const SOURCE_KIND = "live_page";
+/** Must match the search freshness window: 30 days. */
+const FRESH_WINDOW_MS = 30 * 86_400_000;
+
+function isBusyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const errcode = (error as { errcode?: number } | null)?.errcode;
+  return (
+    errcode === 5 ||
+    errcode === 6 ||
+    /SQLITE_BUSY|database is locked|database table is locked/i.test(message)
+  );
+}
 
 function claimKey(region: string, claim: AtlasClaim): string {
   return stableHash(
@@ -111,7 +128,13 @@ function refreshExistingCapture(
   capture: string,
   page: string,
   now: number,
-): { regions: number; claims: number } {
+): { regions: number; claims: number; freshnessChanged: boolean; freshnessAdvanced: boolean } {
+  const prior = db
+    .prepare(
+      `SELECT status, COALESCE(last_confirmed_at, observed_at) AS fresh
+       FROM atlas_captures WHERE id = ?`,
+    )
+    .get(capture) as { status: string; fresh: number | null } | undefined;
   const ftsVersion = (
     db.prepare("SELECT fts_version FROM atlas_state WHERE singleton = 1").get() as {
       fts_version: number;
@@ -173,7 +196,25 @@ function refreshExistingCapture(
     now,
     capture,
   );
-  return existingCaptureCounts(db, capture);
+  // An identical recapture only changes what search can see when it was
+  // already outside the freshness window, or when its status changed. A
+  // same-day confirmation keeps the revision (and skips the rebuild).
+  const wasFresh =
+    prior !== undefined &&
+    prior.fresh !== null &&
+    now - prior.fresh <= FRESH_WINDOW_MS;
+  const freshnessChanged =
+    prior === undefined || prior.status !== viewport.status || !wasFresh;
+  // A later-day confirmation of unchanged evidence only moves the freshness
+  // columns. Refresh them in place (summary, region projections and the site's
+  // facet rows) and bump the revision without rebuilding the whole corpus.
+  const freshnessAdvanced =
+    !freshnessChanged && refreshCaptureProjectionFreshness(db, capture, now);
+  return {
+    ...existingCaptureCounts(db, capture),
+    freshnessChanged,
+    freshnessAdvanced,
+  };
 }
 
 function storeViewport(
@@ -252,7 +293,7 @@ function storeViewport(
       capture,
       parent,
       region.ordinal,
-      JSON.stringify({ selector: region.selector, rect: region.rect }),
+      JSON.stringify({ selector: region.selector, tag: region.tag, rect: region.rect }),
       sha256Text(`${region.selector}|${region.heading ?? ""}|${region.text.slice(0, 80)}`),
       region.heading ? region.heading.slice(0, 300) : "",
       region.text.slice(0, 4_000),
@@ -261,7 +302,7 @@ function storeViewport(
       JSON.stringify({
         selector: region.selector,
         role: region.role,
-        landmark: region.landmark,
+        landmark: canonicalLandmark(region.landmark),
         rect: region.rect,
         viewport: region.viewport,
         depth: region.depth,
@@ -355,68 +396,91 @@ function storeViewport(
   return viewport.regions.length;
 }
 
+type WithdrawalResult = { ok: true } | { ok: false; code: "PUBLICATION_BUSY" };
+
 function withdrawInvalidArtifactHeads(
   cache: Cache,
   attempt: AtlasCaptureAttempt,
   storagePath: string,
-): void {
-  cache.withAtlasDb((db) => {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const refs = db
-        .prepare(
-          `SELECT DISTINCT h.page_id, h.profile_key, p.site_slug,
-                  a.storage_path, a.sha256, a.bytes
-           FROM atlas_heads h
-           JOIN atlas_artifacts a ON a.capture_id = h.capture_id
-           JOIN atlas_pages p ON p.id = h.page_id
-           WHERE a.storage_path = ?`,
-        )
-        .all(storagePath) as Array<{
-        page_id: string;
-        profile_key: string;
-        site_slug: string;
-        storage_path: string;
-        sha256: string | null;
-        bytes: number | null;
-      }>;
-      const invalid = new Map<string, { page: string; profile: string; siteSlug: string }>();
-      for (const ref of refs) {
-        if (
-          ref.sha256 === null ||
-          ref.bytes === null ||
-          validateStoredArtifact(cache.rootDir, {
-            storagePath: ref.storage_path,
-            sha256: ref.sha256,
-            bytes: ref.bytes,
-          }) !== null
-        ) {
-          invalid.set(`${ref.page_id}\u0000${ref.profile_key}`, {
-            page: ref.page_id,
-            profile: ref.profile_key,
-            siteSlug: ref.site_slug,
-          });
-        }
-      }
-      for (const head of invalid.values()) {
-        removeHead(
-          db,
-          head.page,
-          head.profile,
-          attempt.finishedAt,
-          head.siteSlug,
-        );
-      }
-      db.exec("COMMIT");
-    } catch (error) {
+): WithdrawalResult {
+  const busy = { ok: false, code: "PUBLICATION_BUSY" } as const;
+  try {
+    return cache.withAtlasDb((db) => {
+      let inTransaction = false;
       try {
-        db.exec("ROLLBACK");
-      } catch {
-        /* already rolled back */
+        db.exec("BEGIN IMMEDIATE");
+        inTransaction = true;
+        const refs = db
+          .prepare(
+            `SELECT DISTINCT h.page_id, h.profile_key, p.site_slug,
+                    a.storage_path, a.sha256, a.bytes
+             FROM atlas_heads h
+             JOIN atlas_artifacts a ON a.capture_id = h.capture_id
+             JOIN atlas_pages p ON p.id = h.page_id
+             WHERE a.storage_path = ?`,
+          )
+          .all(storagePath) as Array<{
+          page_id: string;
+          profile_key: string;
+          site_slug: string;
+          storage_path: string;
+          sha256: string | null;
+          bytes: number | null;
+        }>;
+        const invalid = new Map<string, { page: string; profile: string; siteSlug: string }>();
+        for (const ref of refs) {
+          if (
+            ref.sha256 === null ||
+            ref.bytes === null ||
+            validateStoredArtifact(cache.rootDir, {
+              storagePath: ref.storage_path,
+              sha256: ref.sha256,
+              bytes: ref.bytes,
+            }) !== null
+          ) {
+            invalid.set(`${ref.page_id}\u0000${ref.profile_key}`, {
+              page: ref.page_id,
+              profile: ref.profile_key,
+              siteSlug: ref.site_slug,
+            });
+          }
+        }
+        let removed = false;
+        for (const head of invalid.values()) {
+          if (
+            removeHead(
+              db,
+              head.page,
+              head.profile,
+              attempt.finishedAt,
+              head.siteSlug,
+              false,
+            )
+          ) {
+            removed = true;
+          }
+        }
+        // One projection rebuild for the whole batch, not one per head.
+        if (removed) bumpAtlasRevision(db, attempt.finishedAt);
+        db.exec("COMMIT");
+        inTransaction = false;
+        return { ok: true };
+      } catch (error) {
+        if (inTransaction) {
+          try {
+            db.exec("ROLLBACK");
+          } catch {
+            /* already rolled back */
+          }
+        }
+        if (isBusyError(error)) return busy;
+        throw error;
       }
-      throw error;
-    }
-  });
+    });
+  } catch (error) {
+    if (isBusyError(error)) return busy;
+    throw error;
+  }
 }
 
 export async function publishCapture(
@@ -539,10 +603,10 @@ export async function publishCapture(
           bytes: artifact.bytes,
         }) !== null
       ) {
-        withdrawInvalidArtifactHeads(cache, attempt, artifact.storagePath);
+        const withdrawn = withdrawInvalidArtifactHeads(cache, attempt, artifact.storagePath);
         return {
           published: false,
-          code: "ARTIFACT_INVALID",
+          code: withdrawn.ok ? "ARTIFACT_INVALID" : withdrawn.code,
           captureIds: [],
           pageId: pageIdValue,
           regionCount: 0,
@@ -557,10 +621,10 @@ export async function publishCapture(
           bytes: artifact.bytes,
         })
       ) {
-        withdrawInvalidArtifactHeads(cache, attempt, artifact.storagePath);
+        const withdrawn = withdrawInvalidArtifactHeads(cache, attempt, artifact.storagePath);
         return {
           published: false,
-          code: "ARTIFACT_INVALID",
+          code: withdrawn.ok ? "ARTIFACT_INVALID" : withdrawn.code,
           captureIds: [],
           pageId: pageIdValue,
           regionCount: 0,
@@ -596,10 +660,13 @@ export async function publishCapture(
     }
   }
 
-  return cache.withAtlasDb((db) => {
-    db.exec("BEGIN IMMEDIATE");
-      try {
-        for (const viewport of publishableViewports) {
+  try {
+    return cache.withAtlasDb((db) => {
+    let inTransaction = false;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      inTransaction = true;
+      for (const viewport of publishableViewports) {
           const head = db
             .prepare(
               `SELECT MAX(
@@ -614,6 +681,7 @@ export async function publishCapture(
             .get(pageIdValue, viewport.profileKey) as { observed_at: number | null } | undefined;
           if (head?.observed_at !== null && head?.observed_at !== undefined && attempt.finishedAt < head.observed_at) {
             db.exec("ROLLBACK");
+            inTransaction = false;
             return {
               published: false,
               code: "STALE_OBSERVATION",
@@ -643,6 +711,7 @@ export async function publishCapture(
         let regionCount = 0;
         let claimCount = 0;
         let revisionChanged = false;
+        let freshnessAdvanced = false;
         for (const viewport of publishableViewports) {
           const config = {
             schemaVersion: "awwwards-atlas-live-config-v1",
@@ -728,7 +797,11 @@ export async function publishCapture(
             );
             regionCount += counts.regions;
             claimCount += counts.claims;
-            if (priorHead?.capture_id !== capture) revisionChanged = true;
+            if (priorHead?.capture_id !== capture || counts.freshnessChanged) {
+              revisionChanged = true;
+            } else if (counts.freshnessAdvanced) {
+              freshnessAdvanced = true;
+            }
             continue;
           }
           revisionChanged = true;
@@ -774,32 +847,56 @@ export async function publishCapture(
           claimCount += viewport.claims.length;
         }
         if (revisionChanged) {
-          db.prepare(
-            "UPDATE atlas_state SET revision = revision + 1, updated_at = ? WHERE singleton = 1",
-          ).run(attempt.finishedAt);
+          // Projections are rebuilt inside this transaction so a committed
+          // revision always has a matching `feature_revision`; search is read-only.
+          bumpAtlasRevision(db, attempt.finishedAt);
+        } else if (freshnessAdvanced) {
+          // Same evidence on a later day: the in-place freshness update above
+          // is already complete, so only the revision needs to move.
+          bumpAtlasRevisionInPlace(db, attempt.finishedAt);
         }
-        db.exec("COMMIT");
-        return {
-          published: true,
-          captureIds,
-          pageId: pageIdValue,
-          regionCount,
-          claimCount,
-        };
-      } catch (error) {
+      db.exec("COMMIT");
+      inTransaction = false;
+      return {
+        published: true,
+        captureIds,
+        pageId: pageIdValue,
+        regionCount,
+        claimCount,
+      };
+    } catch (error) {
+      if (inTransaction) {
         try {
           db.exec("ROLLBACK");
         } catch {
           /* already rolled back */
         }
-        return {
-          published: false,
-          code: error instanceof Error ? error.message : "PUBLICATION_FAILED",
-          captureIds: [],
-          pageId: pageIdValue,
-          regionCount: 0,
-          claimCount: 0,
-        };
       }
+      return {
+        published: false,
+        code: isBusyError(error)
+          ? "PUBLICATION_BUSY"
+          : error instanceof Error
+            ? error.message
+            : "PUBLICATION_FAILED",
+        captureIds: [],
+        pageId: pageIdValue,
+        regionCount: 0,
+        claimCount: 0,
+      };
+    }
     });
+  } catch (error) {
+    if (isBusyError(error)) {
+      return {
+        published: false,
+        code: "PUBLICATION_BUSY",
+        captureIds: [],
+        pageId: pageIdValue,
+        regionCount: 0,
+        claimCount: 0,
+      };
+    }
+    throw error;
+  }
 }

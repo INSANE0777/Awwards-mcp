@@ -77,7 +77,7 @@ describe("Phase 0 benchmark and compatibility artifacts", () => {
   it("declares a contiguous additive migration chain ending at the current schema", () => {
     const matrix = compatibilityMatrixSchema.parse(compatibilityFixture);
     expect(matrix.migrations.map((migration) => migration.from)).toEqual(
-      [0, 1, 2, 3, 4, 5].slice(0, matrix.migrations.length),
+      matrix.migrations.map((_, index) => index),
     );
     for (const [index, migration] of matrix.migrations.entries()) {
       expect(migration.to).toBe(migration.from + 1);

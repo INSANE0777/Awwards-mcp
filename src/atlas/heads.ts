@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { bumpAtlasRevision } from "./search-projections.js";
 
 /** Restore gallery aliases only when no site highlight alias survived. */
 export function restoreGalleryAliases(db: DatabaseSync, siteSlug: string): void {
@@ -70,9 +71,7 @@ export function removeHead(
   db.prepare("DELETE FROM atlas_heads WHERE page_id = ? AND profile_key = ?").run(page, profile);
   if (!otherHead && siteSlug) restoreGalleryAliases(db, siteSlug);
   if (bumpRevision) {
-    db.prepare(
-      "UPDATE atlas_state SET revision = revision + 1, updated_at = ? WHERE singleton = 1",
-    ).run(now);
+    bumpAtlasRevision(db, now);
   }
   return true;
 }

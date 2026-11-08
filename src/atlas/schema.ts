@@ -1,8 +1,16 @@
 import type { DatabaseSync } from "node:sqlite";
 import { removeHead } from "./heads.js";
+import {
+  SEARCH_PROJECTION_SCHEMA,
+  atlasSupportIndexesCurrent,
+  ensureAtlasSupportIndexes,
+  ensureSearchProjectionShape,
+  rebuildAtlasSearchProjections,
+  searchProjectionShapeCurrent,
+} from "./search-projections.js";
 import { ATLAS_VOCABULARY_VERSION } from "./vocabulary.js";
 
-export const ATLAS_SCHEMA_VERSION = 6;
+export const ATLAS_SCHEMA_VERSION = 8;
 export const ATLAS_FTS_VERSION = 2;
 export const ATLAS_CLASSIFIER_VERSION = "atlas-classifier-0";
 
@@ -342,9 +350,23 @@ export function migrateAtlas(
       .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'atlas_state'")
       .get();
     if (!exists) return undefined;
+    const columns = db.prepare("PRAGMA table_info(atlas_state)").all() as Array<{ name: string }>;
+    const featureRevision = columns.some((column) => column.name === "feature_revision")
+      ? "feature_revision"
+      : "-1 AS feature_revision";
     return db
-      .prepare("SELECT schema_version, fts_version, revision FROM atlas_state WHERE singleton = 1")
-      .get() as { schema_version: number; fts_version: number; revision: number } | undefined;
+      .prepare(
+        `SELECT schema_version, fts_version, revision, ${featureRevision}
+         FROM atlas_state WHERE singleton = 1`,
+      )
+      .get() as
+      | {
+          schema_version: number;
+          fts_version: number;
+          revision: number;
+          feature_revision: number;
+        }
+      | undefined;
   };
 
   const existing = readState();
@@ -356,7 +378,10 @@ export function migrateAtlas(
   if (
     existing &&
     existing.schema_version === ATLAS_SCHEMA_VERSION &&
-    (existing.fts_version >= ATLAS_FTS_VERSION || !ftsAvailable)
+    (existing.fts_version >= ATLAS_FTS_VERSION || !ftsAvailable) &&
+    searchProjectionShapeCurrent(db) &&
+    atlasSupportIndexesCurrent(db) &&
+    existing.feature_revision === existing.revision
   ) {
     return {
       schemaVersion: existing.schema_version,
@@ -378,6 +403,7 @@ export function migrateAtlas(
     let version = state?.schema_version ?? 0;
     let ftsVersion = state?.fts_version ?? 0;
     let revision = state?.revision ?? 0;
+    let projectionsDirty = false;
 
     if (version < 1) {
       db.exec(BASE_SCHEMA);
@@ -400,7 +426,10 @@ export function migrateAtlas(
     if (version < 5) {
       // Re-apply invariants idempotently so v4 caches gain new root guards.
       db.exec(INVARIANTS_SCHEMA);
-      if (reconcileActiveProjection(db, ftsAvailable && ftsVersion > 0, now)) revision += 1;
+      if (reconcileActiveProjection(db, ftsAvailable && ftsVersion > 0, now)) {
+        revision += 1;
+        projectionsDirty = true;
+      }
       version = 5;
     }
     if (version < 6) {
@@ -415,17 +444,90 @@ export function migrateAtlas(
          SET last_confirmed_at = source_fetched_at
          WHERE last_confirmed_at IS NULL AND source_fetched_at IS NOT NULL`,
       );
-      if (reconcileActiveProjection(db, ftsAvailable && ftsVersion > 0, now)) revision += 1;
+      if (reconcileActiveProjection(db, ftsAvailable && ftsVersion > 0, now)) {
+        revision += 1;
+        projectionsDirty = true;
+      }
       version = 6;
     }
+
+    if (version < 7) {
+      // Covering projection for region-level facet counts. Search forces this
+      // index so purpose counts do not fall back to row-by-row claim fetches.
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_claims_facet_idx
+           ON atlas_claims(field, decision, classification, region_id, value)`,
+      );
+      // Region identity -> capture/site/ordinal without a table fetch.
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_regions_lookup_idx
+           ON atlas_regions(id, capture_id, kind, ordinal)`,
+      );
+      // Covering structural projection for a single region id.
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_regions_features_idx
+           ON atlas_regions(
+             id, kind,
+             lower(json_extract(locator_json, '$.tag')),
+             lower(json_extract(samples_json, '$.role')),
+             CASE lower(json_extract(samples_json, '$.landmark'))
+               WHEN 'banner' THEN 'header'
+               WHEN 'contentinfo' THEN 'footer'
+               WHEN 'complementary' THEN 'aside'
+               ELSE lower(json_extract(samples_json, '$.landmark'))
+             END
+           )`,
+      );
+      // Anchor ordering for page/site scope: capture -> section -> ordinal -> id.
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_regions_sort_idx
+           ON atlas_regions(capture_id, kind, ordinal, id)`,
+      );
+      // Legacy rows without a stored tag derive it from the last selector.
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_regions_tag_fallback_idx
+           ON atlas_regions(id)
+           WHERE locator_json IS NULL OR json_extract(locator_json, '$.tag') IS NULL`,
+      );
+      version = 7;
+    }
+    if (version < 8) {
+      const columns = db.prepare("PRAGMA table_info(atlas_state)").all() as Array<{
+        name: string;
+      }>;
+      if (!columns.some((column) => column.name === "feature_revision")) {
+        db.exec("ALTER TABLE atlas_state ADD COLUMN feature_revision INTEGER NOT NULL DEFAULT -1");
+      }
+      // Revision-keyed search cache. It is rebuilt in the same transaction as
+      // every revision bump; stale captures are filtered through the active
+      // head summary, so old rows never leak into results.
+      db.exec("DROP INDEX IF EXISTS atlas_regions_region_idx");
+      db.exec("DROP INDEX IF EXISTS atlas_claims_region_value_idx");
+      db.exec(SEARCH_PROJECTION_SCHEMA);
+      projectionsDirty = true;
+      version = 8;
+    } else if (ensureSearchProjectionShape(db)) {
+      // A v8 cache written before the site profile/freshness columns existed
+      // keeps schema version 8; only the derived tables are recreated.
+      projectionsDirty = true;
+    }
+    // Supporting indexes are separate from the derived table shapes: recreate
+    // any that a v8 database lost without paying a projection rebuild.
+    ensureAtlasSupportIndexes(db);
     if (ftsAvailable && ftsVersion > 0 && ftsVersion < ATLAS_FTS_VERSION) {
       // FTS2 rebuilds labels from accepted claims instead of raw titles.
-      if (reconcileActiveProjection(db, true, now)) revision += 1;
+      if (reconcileActiveProjection(db, true, now)) {
+        revision += 1;
+        projectionsDirty = true;
+      }
       ftsVersion = ATLAS_FTS_VERSION;
     }
     if (ftsAvailable && ftsVersion === 0) {
       db.exec(HEADS_AND_FTS_SCHEMA);
-      if (reconcileActiveProjection(db, true, now)) revision += 1;
+      if (reconcileActiveProjection(db, true, now)) {
+        revision += 1;
+        projectionsDirty = true;
+      }
       ftsVersion = ATLAS_FTS_VERSION;
     }
 
@@ -449,6 +551,12 @@ export function migrateAtlas(
         ATLAS_VOCABULARY_VERSION,
         ATLAS_CLASSIFIER_VERSION,
       );
+    }
+    // A committed revision must always have projections built from it;
+    // search itself never writes.
+    const settled = readState();
+    if (projectionsDirty || settled?.feature_revision !== revision) {
+      rebuildAtlasSearchProjections(db, revision);
     }
     db.exec("COMMIT");
     return { schemaVersion: version, ftsVersion, revision };
