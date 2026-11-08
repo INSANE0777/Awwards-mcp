@@ -1,12 +1,28 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium } from "playwright";
 import { Cache } from "../src/cache.js";
 import { collectAtlasPage } from "../src/atlas/collector.js";
 import { publishCapture } from "../src/atlas/publish.js";
 import type { SiteSummary } from "../src/types.js";
+
+const REQUIRED = process.env.AWWARDS_CHROMIUM_SMOKE === "1";
+let chromiumAvailable = false;
+try {
+  const executable = chromium.executablePath();
+  chromiumAvailable = Boolean(executable) && existsSync(executable);
+} catch {
+  chromiumAvailable = false;
+}
+if (!chromiumAvailable && REQUIRED) {
+  throw new Error(
+    "AWWARDS_CHROMIUM_SMOKE=1 but Playwright's Chromium is missing: npx playwright install chromium",
+  );
+}
+const suite = chromiumAvailable ? describe : describe.skip;
 
 const dirs: string[] = [];
 const servers: Array<{ close(cb?: () => void): void }> = [];
@@ -53,7 +69,7 @@ async function start(handler: (path: string, res: any) => void) {
   return `http://127.0.0.1:${address.port}`;
 }
 
-describe("Atlas collector with real Chromium", () => {
+suite("Atlas collector with real Chromium", () => {
   it("keeps the primary page alive while dismissing popups", async () => {
     const origin = await start((path, res) => {
       if (path === "/robots.txt") {
@@ -903,7 +919,9 @@ describe("Atlas collector with real Chromium", () => {
     expect(otherRequests).toBe(0);
   }, 60_000);
 
-  it("uses the pinned guarded address for fixture resources", async () => {
+  // macOS runners cannot reliably bind/route the alternate loopback address
+  // used to prove pinning; Linux and Windows cover this path.
+  it.skipIf(process.platform === "darwin")("uses the pinned guarded address for fixture resources", async () => {
     let assetRequests = 0;
     const server = createServer((req, res) => {
       const path = req.url ?? "/";
