@@ -44,7 +44,15 @@ const SQLITE_CANTOPEN = 14;
 function isCannotOpen(error: unknown): boolean {
   const errcode = (error as { errcode?: number } | null)?.errcode;
   const message = error instanceof Error ? error.message : String(error);
-  return errcode === SQLITE_CANTOPEN || /unable to open database file/i.test(message);
+  // A WAL database on read-only media may fail as CANTOPEN when SQLite
+  // cannot create -shm, or as READONLY when the deferred shm write is
+  // attempted by the first b-tree read. Both mean the main file is intact.
+  return (
+    errcode === SQLITE_CANTOPEN ||
+    errcode === 8 ||
+    errcode === 1544 ||
+    /unable to open database file|readonly database|read-only database/i.test(message)
+  );
 }
 
 /**
