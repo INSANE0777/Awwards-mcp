@@ -890,10 +890,21 @@ function firstHeader(
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
+function normalizeHopHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    result[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : value;
+  }
+  return result;
+}
+
 interface GuardedHop {
   status: number;
   location?: string;
   body?: string;
+  bodyBuffer?: Buffer;
+  headers?: Record<string, string>;
 }
 
 // One HTTP(S) request dialed at the gate-validated address (never a re-resolution),
@@ -957,7 +968,15 @@ function requestGuardedHop(
           }
           chunks.push(chunk);
         });
-        response.on("end", () => finish({ status, body: Buffer.concat(chunks).toString("utf8") }));
+        response.on("end", () => {
+          const payload = Buffer.concat(chunks);
+          finish({
+            status,
+            body: payload.toString("utf8"),
+            bodyBuffer: payload,
+            headers: normalizeHopHeaders(response.headers ?? {}),
+          });
+        });
         response.on("error", () => finish({ error: "the response stream failed" }));
       },
     );
@@ -985,11 +1004,24 @@ export const SCENE_GUARDED_HTML = {
  * including a redirect, passes the same URL gate and is dialed at the address
  * the gate validated. A blocked hop returns {error} and no request is made.
  */
-export async function fetchSceneHtml(
+export interface SceneHtmlResult {
+  status?: number;
+  body?: string;
+  finalUrl?: string;
+  reason?: "policy" | "network" | "redirect_limit";
+  error?: string;
+}
+
+async function fetchSceneHtmlResult(
   gate: SceneUrlGate,
   raw: string,
-  opts?: { timeoutMs?: number; maxBytes?: number },
-): Promise<string | { error: string }> {
+  opts?: {
+    timeoutMs?: number;
+    maxBytes?: number;
+    /** Called before each hop request; false refuses the hop. */
+    onHop?: (url: string, previousUrl: string | null) => Promise<boolean> | boolean;
+  },
+): Promise<SceneHtmlResult> {
   let current: URL;
   try {
     current = new URL(raw);
@@ -999,6 +1031,7 @@ export async function fetchSceneHtml(
   const deadline =
     Date.now() + Math.max(1, Math.round(opts?.timeoutMs ?? SCENE_GUARDED_HTML.timeoutMs));
   const maxBytes = Math.max(1, Math.round(opts?.maxBytes ?? SCENE_GUARDED_HTML.maxBytes));
+  let previousUrl: string | null = null;
   for (let redirects = 0; redirects <= SCENE_GUARDED_HTML.maxRedirects; redirects++) {
     if (!isHttpUrl(current.href)) {
       return { error: `${redactSceneUrl(current.href)} is not an http(s) URL` };
@@ -1011,10 +1044,14 @@ export async function fetchSceneHtml(
     }
     if (!allowed) {
       return {
+        reason: "policy",
         error:
           `refusing to fetch ${redactSceneUrl(current.href)}: the host resolves to a loopback, ` +
           "link-local, private, metadata or reserved address, or the URL is not http(s)",
       };
+    }
+    if (opts?.onHop && !(await opts.onHop(current.href, previousUrl))) {
+      return { reason: "policy", error: `policy refused ${redactSceneUrl(current.href)}` };
     }
     const secure = current.protocol === "https:";
     const address = await gate.connectAddress(
@@ -1030,20 +1067,121 @@ export async function fetchSceneHtml(
     const hop = await requestGuardedHop(current, address, remaining, maxBytes);
     if ("error" in hop) return hop;
     if (hop.status >= 300 && hop.status < 400) {
-      if (!hop.location) return { error: `HTTP ${hop.status} without a location header` };
+      if (!hop.location) return { status: hop.status, error: `HTTP ${hop.status} without a location header` };
+      previousUrl = current.href;
       try {
         current = new URL(hop.location, current);
       } catch {
-        return { error: "the redirect target is not a valid URL" };
+        return { status: hop.status, error: "the redirect target is not a valid URL" };
       }
       continue;
     }
     if (hop.body === undefined) {
-      return { error: `HTTP ${hop.status} fetching ${redactSceneUrl(current.href)}` };
+      return {
+        status: hop.status,
+        error: `HTTP ${hop.status} fetching ${redactSceneUrl(current.href)}`,
+      };
     }
-    return hop.body;
+    return { status: hop.status, body: hop.body, finalUrl: current.href };
   }
-  return { error: `more than ${SCENE_GUARDED_HTML.maxRedirects} redirects` };
+  return { reason: "redirect_limit", error: `more than ${SCENE_GUARDED_HTML.maxRedirects} redirects` };
+}
+
+export async function fetchSceneHtml(
+  gate: SceneUrlGate,
+  raw: string,
+  opts?: {
+    timeoutMs?: number;
+    maxBytes?: number;
+    onHop?: (url: string, previousUrl: string | null) => Promise<boolean> | boolean;
+  },
+): Promise<string | { error: string }> {
+  const result = await fetchSceneHtmlResult(gate, raw, opts);
+  return result.body ?? { error: result.error ?? "the HTML fetch failed" };
+}
+
+/** Structured status-bearing variant for robots.txt and policy checks. */
+export async function fetchSceneHtmlResponse(
+  gate: SceneUrlGate,
+  raw: string,
+  opts?: {
+    timeoutMs?: number;
+    maxBytes?: number;
+    onHop?: (url: string, previousUrl: string | null) => Promise<boolean> | boolean;
+  },
+): Promise<SceneHtmlResult> {
+  return fetchSceneHtmlResult(gate, raw, opts);
+}
+
+/** Binary, header-preserving variant for fixture resources. */
+export interface SceneBinaryResult {
+  status?: number;
+  body?: Buffer;
+  headers?: Record<string, string>;
+  reason?: "policy" | "network" | "redirect_limit";
+  error?: string;
+}
+
+export async function fetchSceneBinaryResponse(
+  gate: SceneUrlGate,
+  raw: string,
+  opts?: {
+    timeoutMs?: number;
+    maxBytes?: number;
+    onHop?: (url: string, previousUrl: string | null) => Promise<boolean> | boolean;
+  },
+): Promise<SceneBinaryResult> {
+  let current: URL;
+  try {
+    current = new URL(raw);
+  } catch {
+    return { error: `invalid URL ${redactSceneUrl(raw)}` };
+  }
+  const deadline =
+    Date.now() + Math.max(1, Math.round(opts?.timeoutMs ?? SCENE_GUARDED_HTML.timeoutMs));
+  const maxBytes = Math.max(1, Math.round(opts?.maxBytes ?? SCENE_GUARDED_HTML.maxBytes));
+  let previousUrl: string | null = null;
+  for (let redirects = 0; redirects <= SCENE_GUARDED_HTML.maxRedirects; redirects++) {
+    if (!isHttpUrl(current.href)) {
+      return { error: `${redactSceneUrl(current.href)} is not an http(s) URL` };
+    }
+    let allowed = false;
+    try {
+      allowed = await gate.allows(current.href);
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) return { reason: "policy", error: `refusing to fetch ${redactSceneUrl(current.href)}` };
+    if (opts?.onHop && !(await opts.onHop(current.href, previousUrl))) {
+      return { reason: "policy", error: `policy refused ${redactSceneUrl(current.href)}` };
+    }
+    const secure = current.protocol === "https:";
+    const address = await gate.connectAddress(
+      current.hostname,
+      Number(current.port || (secure ? 443 : 80)),
+      [current.origin],
+    );
+    if (!address) return { error: `refusing to fetch ${redactSceneUrl(current.href)}` };
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { error: "the resource fetch deadline expired" };
+    const hop = await requestGuardedHop(current, address, remaining, maxBytes);
+    if ("error" in hop) return hop;
+    if (hop.status >= 300 && hop.status < 400) {
+      if (!hop.location) return { status: hop.status, error: `HTTP ${hop.status}` };
+      previousUrl = current.href;
+      try {
+        current = new URL(hop.location, current);
+      } catch {
+        return { status: hop.status, error: "the redirect target is not a valid URL" };
+      }
+      continue;
+    }
+    if (hop.bodyBuffer === undefined) {
+      return { status: hop.status, error: `HTTP ${hop.status} fetching ${redactSceneUrl(current.href)}` };
+    }
+    return { status: hop.status, body: hop.bodyBuffer, headers: hop.headers };
+  }
+  return { reason: "redirect_limit", error: `more than ${SCENE_GUARDED_HTML.maxRedirects} redirects` };
 }
 
 // ---- checkpoints and assets ---------------------------------------------

@@ -1,0 +1,182 @@
+{
+  "schemaVersion": "atlas-phase2-fixture-v1",
+  "viewport": { "width": 1440, "height": 900 },
+  "sections": [
+    {
+      "selector": "header.site-header",
+      "tag": "header",
+      "landmark": "header",
+      "rect": { "x": 0, "y": 0, "width": 1440, "height": 80 },
+      "labels": ["header"]
+    },
+    {
+      "selector": "main > section.hero",
+      "tag": "section",
+      "heading": "Build what matters",
+      "headingLevel": 1,
+      "text": "A studio building digital products with measurable outcomes for ambitious teams.",
+      "rect": { "x": 0, "y": 80, "width": 1440, "height": 700 },
+      "labels": ["hero"]
+    },
+    {
+      "selector": "main > section.about",
+      "tag": "section",
+      "heading": "About us",
+      "text": "We are an independent design and engineering studio. We partner with founders to turn complex ideas into clear products, systems and experiences that people trust.",
+      "rect": { "x": 0, "y": 780, "width": 1440, "height": 420 },
+      "labels": ["about"]
+    },
+    {
+      "selector": "main > section.features",
+      "tag": "section",
+      "heading": "Features",
+      "text": "Strategy, systems, implementation and support. Each engagement is shaped around the work.",
+      "repeatedItems": 3,
+      "rect": { "x": 0, "y": 1200, "width": 1440, "height": 460 },
+      "labels": ["features"]
+    },
+    {
+      "selector": "main > section.services",
+      "tag": "section",
+      "heading": "Services",
+      "text": "Brand systems, product design, web engineering and ongoing partnership.",
+      "repeatedItems": 3,
+      "rect": { "x": 0, "y": 1660, "width": 1440, "height": 460 },
+      "labels": ["services"]
+    },
+    {
+      "selector": "main > section.process",
+      "tag": "section",
+      "heading": "How it works",
+      "text": "Discover, define, design, build and launch with a small senior team.",
+      "orderedItems": 3,
+      "rect": { "x": 0, "y": 2120, "width": 1440, "height": 460 },
+      "labels": ["process"]
+    },
+    {
+      "selector": "main > section.pricing",
+      "tag": "section",
+      "heading": "Pricing plans",
+      "text": "Starter $4,000 per month. Scale $8,000 per month. Enterprise custom terms.",
+      "repeatedItems": 2,
+      "numericPairs": 2,
+      "rect": { "x": 0, "y": 2580, "width": 1440, "height": 500 },
+      "labels": ["pricing"]
+    },
+    {
+      "selector": "main > section.testimonials",
+      "tag": "section",
+      "heading": "What clients say",
+      "text": "Working with the team changed how we ship.",
+      "quoteCount": 1,
+      "citationCount": 1,
+      "rect": { "x": 0, "y": 3080, "width": 1440, "height": 400 },
+      "labels": ["testimonials"]
+    },
+    {
+      "selector": "main > section.logos",
+      "tag": "section",
+      "heading": "Trusted by teams",
+      "mediaCount": 4,
+      "rect": { "x": 0, "y": 3480, "width": 1440, "height": 260 },
+      "labels": ["logos"]
+    },
+    {
+      "selector": "main > section.metrics",
+      "tag": "section",
+      "heading": "By the numbers",
+      "numericPairs": 3,
+      "rect": { "x": 0, "y": 3740, "width": 1440, "height": 320 },
+      "labels": ["metrics"]
+    },
+    {
+      "selector": "main > section.team",
+      "tag": "section",
+      "heading": "Our team",
+      "repeatedItems": 3,
+      "rect": { "x": 0, "y": 4060, "width": 1440, "height": 420 },
+      "labels": ["team"]
+    },
+    {
+      "selector": "main > section.work",
+      "tag": "section",
+      "heading": "Selected work",
+      "mediaCount": 3,
+      "rect": { "x": 0, "y": 4480, "width": 1440, "height": 520 },
+      "labels": ["portfolio_gallery"]
+    },
+    {
+      "selector": "main > section.case-study",
+      "tag": "section",
+      "heading": "Case study: Northwind",
+      "text": "Northwind needed a new commerce platform. We rebuilt the experience around a faster catalogue, clearer product pages and a measurable checkout flow.",
+      "linkCount": 2,
+      "rect": { "x": 0, "y": 5000, "width": 1440, "height": 480 },
+      "labels": ["case_study"]
+    },
+    {
+      "selector": "main > article.insight",
+      "tag": "article",
+      "heading": "Designing with evidence",
+      "text": "A practical note on turning observed interface evidence into design decisions. Measure first, then make the smallest change that improves the experience.",
+      "paragraphCount": 2,
+      "rect": { "x": 0, "y": 5480, "width": 1440, "height": 380 },
+      "labels": ["editorial_content"]
+    },
+    {
+      "selector": "main > section.resources",
+      "tag": "section",
+      "heading": "Resources",
+      "linkCount": 4,
+      "rect": { "x": 0, "y": 5860, "width": 1440, "height": 320 },
+      "labels": ["resource_list"]
+    },
+    {
+      "selector": "main > section.contact",
+      "tag": "section",
+      "heading": "Get in touch",
+      "formCount": 1,
+      "rect": { "x": 0, "y": 6180, "width": 1440, "height": 420 },
+      "labels": ["contact"]
+    },
+    {
+      "selector": "main > section.newsletter",
+      "tag": "section",
+      "heading": "Newsletter",
+      "emailInputCount": 1,
+      "rect": { "x": 0, "y": 6600, "width": 1440, "height": 300 },
+      "labels": ["newsletter"]
+    },
+    {
+      "selector": "main > section.faq",
+      "tag": "section",
+      "heading": "FAQ",
+      "repeatedItems": 3,
+      "rect": { "x": 0, "y": 6900, "width": 1440, "height": 400 },
+      "labels": ["faq"]
+    },
+    {
+      "selector": "main > section.cta",
+      "tag": "section",
+      "heading": "Get started",
+      "buttonCount": 1,
+      "buttonLabels": ["Get started"],
+      "rect": { "x": 0, "y": 7300, "width": 1440, "height": 360 },
+      "labels": ["cta"]
+    },
+    {
+      "selector": "footer.site-footer",
+      "tag": "footer",
+      "landmark": "footer",
+      "rect": { "x": 0, "y": 7660, "width": 1440, "height": 240 },
+      "labels": ["footer"]
+    },
+    {
+      "selector": "nav.primary",
+      "tag": "nav",
+      "landmark": "navigation",
+      "rect": { "x": 0, "y": 0, "width": 1440, "height": 60 },
+      "labels": ["navigation"]
+    }
+  ]
+}

@@ -43,6 +43,7 @@
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "smoke": "tsx test/live-smoke.ts",
+    "atlas:heldout": "tsx src/atlas/heldout-cli.ts",
     "smoke:browser": "node scripts/browser-smoke.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "protocol:smoke": "node scripts/protocol-smoke.mjs",

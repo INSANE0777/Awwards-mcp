@@ -115,7 +115,11 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     let bestArea = 0;
     try {
       const de = doc.documentElement;
-      if (de.scrollHeight > de.clientHeight + 100) return null;
+      // Quirks-mode documents report clientHeight as the full content height,
+      // so compare the taller of html/body against the real viewport instead.
+      const bodyHeight = doc.body ? Number(doc.body.scrollHeight || 0) : 0;
+      const viewportHeight = Number(g.innerHeight || de.clientHeight || 0);
+      if (Math.max(Number(de.scrollHeight || 0), bodyHeight) > viewportHeight + 100) return null;
       const all = doc.querySelectorAll("*");
       for (let i = 0; i < all.length; i++) {
         const el = all[i];
@@ -155,9 +159,11 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   const scrollerRect = scroller ? scroller.getBoundingClientRect() : null;
   const scrollerTop = scrollerRect ? scrollerRect.top : 0;
   const scrollerScrollTop = scroller ? scroller.scrollTop || 0 : 0;
-  const totalHeight = Math.round(
-    scroller ? scroller.scrollHeight : doc.documentElement.scrollHeight,
+  const documentHeight = Math.max(
+    Number(doc.documentElement.scrollHeight || 0),
+    doc.body ? Number(doc.body.scrollHeight || 0) : 0,
   );
+  const totalHeight = Math.round(scroller ? scroller.scrollHeight : documentHeight);
 
   // Content y in the scanned scroller's coordinates: the document root adds
   // window scroll; an element scroller subtracts its viewport top and adds its
@@ -732,7 +738,11 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
     let bestArea = 0;
     try {
       const de = doc.documentElement;
-      if (!(de.scrollHeight > de.clientHeight + 100)) {
+      // Quirks-mode documents report clientHeight as the content height, so
+      // compare html/body height against the real viewport (mirrors scan).
+      const bodyHeight = doc.body ? Number(doc.body.scrollHeight || 0) : 0;
+      const viewportHeight = Number(g.innerHeight || de.clientHeight || 0);
+      if (!(Math.max(Number(de.scrollHeight || 0), bodyHeight) > viewportHeight + 100)) {
         const all = doc.querySelectorAll("*");
         for (let i = 0; i < all.length; i++) {
           const el = all[i];
@@ -773,15 +783,31 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
       scrollRoot = String(scroller.tagName || "").toLowerCase() + id + cls;
     }
     if (scroller) {
+      // A scroll-behavior:smooth container animates each assignment, so a walk
+      // without this pin would advance while the browser is still scrolling.
+      const inlineBehavior = scroller.style
+        ? scroller.style.getPropertyValue("scroll-behavior")
+        : "";
+      const inlinePriority = scroller.style
+        ? scroller.style.getPropertyPriority("scroll-behavior")
+        : "";
       let y = 0;
       let steps = 0;
-      while (steps < maxSteps && Date.now() - started < deadlineMs && y < scroller.scrollHeight) {
-        scroller.scrollTop = y;
-        await new Promise((r) => setTimeout(r, 40));
-        y += step;
-        steps++;
+      try {
+        if (scroller.style) scroller.style.setProperty("scroll-behavior", "auto", "important");
+        while (steps < maxSteps && Date.now() - started < deadlineMs && y < scroller.scrollHeight) {
+          scroller.scrollTop = y;
+          await new Promise((r) => setTimeout(r, 40));
+          y += step;
+          steps++;
+        }
+        scroller.scrollTop = 0;
+      } finally {
+        if (scroller.style) {
+          if (inlineBehavior) scroller.style.setProperty("scroll-behavior", inlineBehavior, inlinePriority);
+          else scroller.style.removeProperty("scroll-behavior");
+        }
       }
-      scroller.scrollTop = 0;
       await new Promise((r) => setTimeout(r, 150));
       return {
         scrollRoot: scrollRoot,
@@ -791,18 +817,38 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
     }
     let y = 0;
     let steps = 0;
-    while (steps < maxSteps && Date.now() - started < deadlineMs && y < doc.documentElement.scrollHeight) {
-      g.window.scrollTo(0, y);
+    while (
+      steps < maxSteps &&
+      Date.now() - started < deadlineMs &&
+      y <
+        Math.max(
+          Number(doc.documentElement.scrollHeight || 0),
+          doc.body ? Number(doc.body.scrollHeight || 0) : 0,
+        )
+    ) {
+      g.window.scrollTo({ left: 0, top: y, behavior: "instant" });
       await new Promise((r) => setTimeout(r, 40));
       y += step;
       steps++;
     }
-    g.window.scrollTo(0, 0);
+    g.window.scrollTo({ left: 0, top: 0, behavior: "instant" });
     await new Promise((r) => setTimeout(r, 150));
     return {
       scrollRoot: null,
-      scrollHeight: Math.round(doc.documentElement.scrollHeight || 0),
-      clientHeight: Math.round(doc.documentElement.clientHeight || 0),
+      scrollHeight: Math.round(
+        Math.max(
+          Number(doc.documentElement.scrollHeight || 0),
+          doc.body ? Number(doc.body.scrollHeight || 0) : 0,
+        ),
+      ),
+      clientHeight: Math.round(
+        Number(
+          (doc.scrollingElement && doc.scrollingElement.clientHeight) ||
+            g.innerHeight ||
+            doc.documentElement.clientHeight ||
+            0,
+        ),
+      ),
     };
   });
 }
