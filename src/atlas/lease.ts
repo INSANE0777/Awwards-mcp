@@ -107,6 +107,19 @@ function openLeaseDb(path: string): DatabaseSync {
 
 function quarantine(path: string): string {
   const target = `${path}.corrupt-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  // Windows refuses to rename a file while another process still has it
+  // open. The losing recovery worker is about to close and retry, so give it
+  // a short bounded window instead of swallowing the failure and leaving the
+  // corrupt file in place.
+  const buffer = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      renameSync(path, target);
+      return target;
+    } catch {
+      Atomics.wait(buffer, 0, 0, 20);
+    }
+  }
   try {
     renameSync(path, target);
   } catch {

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Cache } from "../src/cache.js";
+import { Cache, enableAtlasWal } from "../src/cache.js";
 import { prepareSitePage } from "../src/atlas/ingest.js";
 import { AtlasStore } from "../src/atlas/store.js";
 
@@ -59,7 +59,7 @@ describe("atlas schema", () => {
           .prepare("SELECT schema_version, fts_version, revision FROM atlas_state WHERE singleton = 1")
           .get() as { schema_version: number; fts_version: number; revision: number },
     );
-    expect(state.schema_version).toBe(6);
+    expect(state.schema_version).toBe(8);
     expect([0, 2]).toContain(state.fts_version);
     expect(state.revision).toBe(0);
     if (state.fts_version === 2) {
@@ -273,7 +273,7 @@ describe("atlas schema", () => {
           )
           .get() as { schema_version: number; revision: number },
     );
-    expect(state.schema_version).toBe(6);
+    expect(state.schema_version).toBe(8);
     expect(state.revision).toBe(revisionBefore + 1);
     expect(
       reopened.withAtlasDb(
@@ -593,5 +593,51 @@ describe("atlas schema", () => {
           .run(),
       ),
     ).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it("uses WAL with NORMAL synchronous durability", () => {
+    const cache = new Cache(tmpDir(), () => 1_700_000_000_000, { atlas: true });
+    const pragmas = cache.withAtlasDb((db) => ({
+      journal_mode: (
+        db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }
+      ).journal_mode,
+      synchronous: (
+        db.prepare("PRAGMA synchronous").get() as { synchronous: number }
+      ).synchronous,
+    }));
+    expect(pragmas).toEqual({ journal_mode: "wal", synchronous: 1 });
+  });
+
+  it("does not apply NORMAL when the VFS refuses WAL", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      // The in-memory VFS never enters WAL: the requested pragma silently
+      // stays on the memory journal, so the read-back must not confirm it.
+      expect(enableAtlasWal(db)).toBe(false);
+      expect(db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "memory" });
+      // synchronous stays FULL; NORMAL on a rollback journal may corrupt.
+      expect(db.prepare("PRAGMA synchronous").get()).toEqual({ synchronous: 2 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("opens a healthy normal cache without waiting on the write lock", () => {
+    const root = tmpDir();
+    const cache = new Cache(root, () => 1_700_000_000_000, { atlas: true });
+    cache.withAtlasDb((db) => {
+      db.exec("BEGIN IMMEDIATE");
+      const started = performance.now();
+      // The FTS layer is current: construction probes it read-only instead of
+      // taking the write lock the outer transaction is holding.
+      const second = new Cache(root, () => 1_700_000_000_000, { atlas: true });
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(
+        second.withReadDb(
+          (read) => (read.prepare("SELECT COUNT(*) AS n FROM atlas_state").get() as { n: number }).n,
+        ),
+      ).toBe(1);
+      db.exec("COMMIT");
+    });
   });
 });

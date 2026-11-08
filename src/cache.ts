@@ -2,14 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  existsSync,
   mkdirSync,
   openSync,
   readdirSync,
+  readSync,
   rmSync,
   statSync,
 } from "node:fs";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalizeTechnology } from "./awwwards.js";
 import { migrateAtlas } from "./atlas/schema.js";
@@ -35,6 +37,86 @@ export function atlasEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return env.AWWWARDS_MCP_ATLAS === "1";
+}
+
+const SQLITE_CANTOPEN = 14;
+
+function isCannotOpen(error: unknown): boolean {
+  const errcode = (error as { errcode?: number } | null)?.errcode;
+  const message = error instanceof Error ? error.message : String(error);
+  // A WAL database on read-only media may fail as CANTOPEN when SQLite
+  // cannot create -shm, or as READONLY when the deferred shm write is
+  // attempted by the first b-tree read. Both mean the main file is intact.
+  return (
+    errcode === SQLITE_CANTOPEN ||
+    errcode === 8 ||
+    errcode === 1544 ||
+    /unable to open database file|readonly database|read-only database/i.test(message)
+  );
+}
+
+/**
+ * Marks a WAL database as immutable for a read-only open, but only when every
+ * sidecar is absent: a present -wal can hold committed frames that
+ * `immutable=1` silently ignores, and a present -shm means another connection
+ * may be live. Bytes 18/19 of the SQLite header are 2 exactly when the file
+ * format is WAL, so a rollback-journal database never takes this path.
+ */
+function immutableDatabaseUri(path: string): string | null {
+  if (
+    existsSync(`${path}-wal`) ||
+    existsSync(`${path}-shm`) ||
+    existsSync(`${path}-journal`)
+  ) {
+    return null;
+  }
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const header = Buffer.alloc(20);
+    if (readSync(fd, header, 0, header.length, 0) !== header.length) return null;
+    if (header[18] !== 2 || header[19] !== 2) return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  const escaped = resolve(path)
+    .replace(/\\/g, "/")
+    .replace(/%/g, "%25")
+    .replace(/#/g, "%23")
+    .replace(/\?/g, "%3F");
+  return `file:${escaped}?immutable=1`;
+}
+
+/**
+ * Confirms WAL from the pragma's read-back before applying NORMAL synchronous
+ * durability: `PRAGMA journal_mode = WAL` can silently stay on a rollback
+ * journal (e.g. a VFS without WAL support), where NORMAL may corrupt.
+ *
+ * @visibleForTesting
+ */
+export function enableAtlasWal(db: DatabaseSync): boolean {
+  let wal = false;
+  try {
+    const mode = db.prepare("PRAGMA journal_mode").get() as {
+      journal_mode?: string;
+    };
+    wal = mode.journal_mode === "wal";
+    if (!wal) {
+      db.exec("PRAGMA journal_mode = WAL");
+      // The pragma returns the mode actually entered, not the mode requested.
+      const confirmed = db.prepare("PRAGMA journal_mode").get() as {
+        journal_mode?: string;
+      };
+      wal = confirmed.journal_mode === "wal";
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/SQLITE_BUSY|database is locked/i.test(message)) throw error;
+  }
+  if (wal) db.exec("PRAGMA synchronous = NORMAL");
+  return wal;
 }
 
 const SCHEMA = `
@@ -216,6 +298,7 @@ function rowToElement(r: ElementRow): ElementRecord {
 export class Cache {
   private readonly dbPath: string;
   private readonly now: () => number;
+  private readonly readOnly: boolean;
   readonly atlas: boolean;
   readonly rootDir: string;
   readonly imagesDir: string;
@@ -232,11 +315,20 @@ export class Cache {
   constructor(
     rootDir: string,
     now: () => number = Date.now,
-    options: { atlas?: boolean; fts?: boolean } = {},
+    options: { atlas?: boolean; fts?: boolean; readOnly?: boolean } = {},
   ) {
     this.now = now;
     this.atlas = options.atlas ?? atlasEnabled();
+    this.readOnly = options.readOnly ?? false;
     if (options.fts === false) this.ftsAvailable = false;
+    if (this.readOnly) {
+      // Search-only processes never create, migrate or write the cache: no
+      // eager DB open, no directory repair, no image retention cleanup.
+      this.rootDir = rootDir;
+      this.imagesDir = join(rootDir, "images");
+      this.dbPath = join(rootDir, "cache.db");
+      return;
+    }
     // 0700/0600 keep the cache (tokens, page text) private to the OS user.
     // Windows ignores POSIX modes, so passing them must not fail there.
     mkdirSync(rootDir, { recursive: true, mode: 0o700 });
@@ -302,11 +394,20 @@ export class Cache {
   // undeletable, which broke temp-dir cleanup in tests. Per-operation
   // open/close keeps the same public API with no lingering handles.
   private openDb(): DatabaseSync {
+    if (this.readOnly) return this.openReadOnlyDb();
     const db = new DatabaseSync(this.dbPath);
     try {
       // Wait (instead of failing SQLITE_BUSY) when another process holds the
       // short write transaction used by migrations and lock acquisition.
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+      if (this.atlas) {
+        // WAL lets search read the last committed snapshot while a publisher
+        // holds its write transaction, and lets publish commit without
+        // waiting for readers to finish. Another process may already be
+        // switching/migrating; a busy check is safe because the database is
+        // still usable and the next open retries.
+        enableAtlasWal(db);
+      }
       db.exec(SCHEMA);
       // Lazy column migration: databases created before Task 5 lack the
       // elements.siteSlug column. CREATE TABLE above adds it for fresh
@@ -329,6 +430,30 @@ export class Cache {
         db.exec("ALTER TABLE sites ADD COLUMN nominee INTEGER");
       } catch {
         /* column already exists */
+      }
+      if (this.ftsAvailable === null) {
+        // Cheap read-only probe first: a healthy database must never take the
+        // write lock during construction, because a concurrent publisher holds
+        // it for the whole rebuild and a new search process would block for
+        // the busy timeout before failing.
+        const probe = db
+          .prepare(
+            `SELECT (SELECT value FROM meta WHERE key = 'elements_fts_version') AS version,
+                    (SELECT COUNT(*) FROM sqlite_master
+                     WHERE type = 'table' AND name IN ('sites_fts','elements_fts')) AS tables`,
+          )
+          .get() as { version: string | null; tables: number };
+        if (Number(probe.version ?? 0) >= ELEMENTS_FTS_VERSION && probe.tables === 2) {
+          try {
+            // Opening an existing FTS5 table also proves this Node build has
+            // FTS5 compiled in; broken or absent tables re-run the write path.
+            db.prepare("SELECT 1 FROM elements_fts LIMIT 0").all();
+            db.prepare("SELECT 1 FROM sites_fts LIMIT 0").all();
+            this.ftsAvailable = true;
+          } catch {
+            this.ftsAvailable = false; // FTS5 compiled out → legacy fallback
+          }
+        }
       }
       if (this.ftsAvailable === null) {
         // One transaction: an interruption must not leave a partial FTS layer
@@ -422,6 +547,51 @@ export class Cache {
     }
   }
 
+  /**
+   * Genuine read-only connection: no schema DDL, no ALTER, no FTS migration,
+   * no Atlas migration and no write PRAGMAs. Used by search-only processes and
+   * by `withAtlasReadDb`, so a publisher holding the write lock can never make
+   * a reader wait on schema work.
+   *
+   * A WAL database normally needs a writable directory even to read, because
+   * SQLite creates the -shm file. On read-only media (or a directory whose
+   * ACL denies writes) that open fails with SQLITE_CANTOPEN even though the
+   * main file is intact. With every sidecar absent the file is exactly the
+   * last checkpointed snapshot, so retry it as `immutable=1`, which takes no
+   * locks and creates nothing.
+   */
+  private openReadOnlyDb(): DatabaseSync {
+    const open = (target: string): DatabaseSync => {
+      const db = new DatabaseSync(target, { readOnly: true });
+      try {
+        db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+        if (this.atlas) db.exec("PRAGMA foreign_keys = ON");
+        // Force the first b-tree read here: a read-only WAL open can defer
+        // the CANTOPEN (no writable directory for -shm) until the first
+        // statement, which would surface mid-search instead of here.
+        db.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get();
+        return db;
+      } catch (error) {
+        db.close();
+        throw error;
+      }
+    };
+    try {
+      return open(this.dbPath);
+    } catch (error) {
+      const immutable = isCannotOpen(error) ? immutableDatabaseUri(this.dbPath) : null;
+      if (!immutable) throw error;
+      const db = open(immutable);
+      // A writer may have created a sidecar between the check and the open;
+      // immutable would silently miss its frames, so refuse that snapshot.
+      if (existsSync(`${this.dbPath}-wal`) || existsSync(`${this.dbPath}-shm`)) {
+        db.close();
+        throw error;
+      }
+      return db;
+    }
+  }
+
   private withDb<T>(fn: (db: DatabaseSync) => T): T {
     const db = this.openDb();
     try {
@@ -464,6 +634,20 @@ export class Cache {
       db.exec("PRAGMA foreign_keys = ON");
       return fn(db);
     });
+  }
+
+  /**
+   * Read-only Atlas connection for search. It never runs schema migrations or
+   * writes the main database, so a concurrent publisher cannot make search
+   * wait on schema work; WAL serves the last committed snapshot.
+   */
+  withAtlasReadDb<T>(fn: (db: DatabaseSync) => T): T {
+    const db = this.openReadOnlyDb();
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
   }
 
   /**

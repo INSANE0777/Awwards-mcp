@@ -19,6 +19,7 @@ import {
 import type { WrittenArtifact } from "./artifacts.js";
 import { evidenceRefSchema, validatePreparedSitePage } from "./contracts.js";
 import { removeHead, restoreGalleryAliases } from "./heads.js";
+import { bumpAtlasRevision } from "./search-projections.js";
 import { writeLegacyProjection } from "./legacy.js";
 import type {
   GalleryCommitResult,
@@ -650,9 +651,7 @@ export class AtlasStore {
               "UPDATE atlas_heads SET published_at = ? WHERE page_id = ? AND profile_key = ?",
             ).run(now, page, SOURCE_PROFILE);
             if (eligibilityChanged || ftsChanged) {
-              db.prepare(
-                "UPDATE atlas_state SET revision = revision + 1, updated_at = ? WHERE singleton = 1",
-              ).run(now);
+              bumpAtlasRevision(db, now);
             }
           } else {
             if (head) {
@@ -669,9 +668,7 @@ export class AtlasStore {
             ).run(page, SOURCE_PROFILE, capture, now);
             insertSiteFts();
 
-            db.prepare(
-              "UPDATE atlas_state SET revision = revision + 1, updated_at = ? WHERE singleton = 1",
-            ).run(now);
+            bumpAtlasRevision(db, now);
           }
 
           writeAliases(db, prepared, page, capture);
@@ -1095,9 +1092,7 @@ export class AtlasStore {
           ).run(now, page, GALLERY_PROFILE);
           writeGalleryAlias();
           if (eligibilityChanged || ftsChanged || retiredOtherHeads) {
-            db.prepare(
-              "UPDATE atlas_state SET revision = revision + 1, updated_at = ? WHERE singleton = 1",
-            ).run(now);
+            bumpAtlasRevision(db, now);
           }
         } else if (validStatus) {
           const deleteAliasesForCapture = db.prepare(
@@ -1120,9 +1115,7 @@ export class AtlasStore {
           insertGalleryFts();
           writeGalleryAlias();
 
-          db.prepare(
-            "UPDATE atlas_state SET revision = revision + 1, updated_at = ? WHERE singleton = 1",
-          ).run(now);
+          bumpAtlasRevision(db, now);
         } else if (alreadyHead) {
           removeHead(db, page, GALLERY_PROFILE, now);
         }
