@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { Cache } from "../src/cache.js";
+import { discoverComponents } from "../src/atlas/components.js";
 import { collectAtlasPage } from "../src/atlas/collector.js";
+import { ATLAS_COMPONENT_HINTS, ATLAS_SECTION_SCAN } from "../src/atlas/scan.js";
 import { publishCapture } from "../src/atlas/publish.js";
+import { atlasSearchStore, searchAtlas } from "../src/atlas/search.js";
+import type { AtlasPageScan } from "../src/atlas/live-types.js";
 import type { SiteSummary } from "../src/types.js";
 
 const REQUIRED = process.env.AWWARDS_CHROMIUM_SMOKE === "1";
@@ -1751,6 +1755,2066 @@ suite("Atlas collector with real Chromium", () => {
     expect(viewport.screenshots).toHaveLength(1);
     expect(viewport.observations?.some((item) => item.checkpoint === 1)).toBe(false);
   }, 60_000);
+
+  it("bounds component candidates and packs during acquisition", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      const buttons = Array.from(
+        { length: 130 },
+        (_, index) => `<button aria-label="Action ${index}">Action ${index}</button>`,
+      ).join("");
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Components</h1>
+            <div role="dialog" aria-label="Menu" style="position:fixed;transform:translateX(-100%);width:200px;height:300px">
+              <button>Inside</button>
+            </div>
+            ${buttons}
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const scan = attempt.viewports[0]!.scan;
+    const components = scan.components ?? [];
+    expect(components).toHaveLength(120);
+    expect(scan.componentLimitHit).toBe(true);
+    expect(new Set(components.map((component) => component.nodeKey)).size).toBe(120);
+    const packs = components.filter((component) => component.pack);
+    expect(packs.length).toBeLessThanOrEqual(12);
+    for (const component of packs) {
+      expect(component.pack!.nodes.length).toBeLessThanOrEqual(150);
+      expect(Math.max(...component.pack!.nodes.map((node) => node.depth))).toBeLessThanOrEqual(12);
+    }
+    // The fixed panel still overlaps the viewport by 8px, so it is a visible
+    // large candidate; the cap and pack bounds are what this test binds.
+    expect(components.some((component) => component.hint === "dialog")).toBe(true);
+    expect(components[0]!.hint).toBe("dialog");
+    // Checkpoint scans run the browser-side scan with components disabled.
+    const checkpoint = attempt.viewports[0]!.artifacts.find(
+      (artifact) => artifact.key === "checkpoint-desktop-0",
+    );
+    expect(checkpoint).toBeTruthy();
+    const checkpointPayload = JSON.parse(
+      readFileSync(join(cache.rootDir, checkpoint!.storagePath), "utf8"),
+    ) as { scan: { components?: unknown[] } };
+    expect(checkpointPayload.scan.components ?? []).toEqual([]);
+  }, 60_000);
+
+  it("skips the component loop when the scan is told not to collect components", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Controls</h1><button>Action</button><a href="/x">Link</a></section></main>`,
+        ),
+      );
+    });
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage({ viewport: { width: 1_200, height: 800 } });
+      await page.goto(`${origin}/`);
+      const withComponents = (await page.evaluate(
+        ATLAS_SECTION_SCAN,
+        ATLAS_COMPONENT_HINTS,
+      )) as AtlasPageScan;
+      const withoutComponents = (await page.evaluate(ATLAS_SECTION_SCAN, {
+        ...ATLAS_COMPONENT_HINTS,
+        components: false,
+      })) as AtlasPageScan;
+      expect(withComponents.components?.length).toBeGreaterThan(0);
+      expect(withoutComponents.components ?? []).toEqual([]);
+      expect(withoutComponents.sections.length).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("records hidden and offscreen controls without claiming they are usable", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Controls</h1>
+            <input type="text" aria-label="Hidden field" style="display:none">
+            <button aria-label="Offscreen action" style="position:absolute;left:-9999px;top:0">Offscreen</button>
+            <button aria-label="Visible action">Visible</button>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const components = attempt.viewports[0]!.scan.components ?? [];
+    const hidden = components.find((component) => component.label === "Hidden field")!;
+    const offscreen = components.find((component) => component.label === "Offscreen action")!;
+    const visible = components.find((component) => component.label === "Visible action")!;
+    expect(hidden.hint).toBe("text_input");
+    expect(hidden.visible).toBe(false);
+    expect(offscreen.visible).toBe(true);
+    expect(offscreen.offscreen).toBe(true);
+    expect(visible.visible).toBe(true);
+    expect(visible.offscreen).toBe(false);
+    const discovered = attempt.viewports[0]!.components ?? [];
+    expect(discovered.find((component) => component.label === "Hidden field")!.typeDecision).toBe(
+      "candidate",
+    );
+    expect(
+      discovered.find((component) => component.label === "Offscreen action")!.typeDecision,
+    ).toBe("candidate");
+    expect(discovered.find((component) => component.label === "Visible action")!.typeDecision).toBe(
+      "accepted",
+    );
+  }, 60_000);
+
+  it("keeps card inference structural and drops lossy listbox and grid aliases", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Cards</h1>
+            <ul class="cards">
+              <li class="card"><h3>One</h3><a href="/one">Open</a></li>
+              <li class="card"><h3>Two</h3><a href="/two">Open</a></li>
+            </ul>
+            <article class="long">
+              <h2>Story</h2>
+              <p>First paragraph of a long editorial article.</p>
+              <p>Second paragraph of the same article.</p>
+              <p>Third paragraph with <a href="/more">a link</a>.</p>
+            </article>
+            <div role="listbox" aria-label="Options"><div role="option">A</div></div>
+            <div role="grid" aria-label="Sheet"><div role="row">B</div></div>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const viewport = attempt.viewports[0]!;
+    const scan = viewport.scan;
+    const cards = (scan.components ?? []).filter(
+      (component) => component.tag === "li" && component.hint === "card",
+    );
+    expect(cards).toHaveLength(2);
+    expect(cards.every((component) => component.hint === "card")).toBe(true);
+    expect((scan.components ?? []).some((component) => component.tag === "article")).toBe(false);
+    expect(
+      (scan.components ?? []).some(
+        (component) => component.role === "listbox" || component.role === "grid",
+      ),
+    ).toBe(false);
+    const discoveredCards = (viewport.components ?? []).filter(
+      (component) => component.type === "card",
+    );
+    expect(discoveredCards).toHaveLength(2);
+    expect(discoveredCards.every((component) => component.typeDecision === "candidate")).toBe(true);
+  }, 60_000);
+
+  it("omits an explicit unsupported ARIA role instead of aliasing the native tag", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Roles</h1>
+            <table role="grid" aria-label="Grid table"><tr><td>1</td></tr></table>
+            <ul role="listbox" aria-label="Listbox list"><li>One</li></ul>
+            <table aria-label="Plain table"><tr><td>2</td></tr></table>
+            <ul aria-label="Plain list"><li>Two</li></ul>
+          </section></main>`,
+        ),
+      );
+    });
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage({ viewport: { width: 1_200, height: 800 } });
+      await page.goto(`${origin}/`);
+      const scan = (await page.evaluate(
+        ATLAS_SECTION_SCAN,
+        ATLAS_COMPONENT_HINTS,
+      )) as AtlasPageScan;
+      const components = scan.components ?? [];
+      expect(components.find((component) => component.label === "Grid table")).toBeUndefined();
+      expect(components.find((component) => component.label === "Listbox list")).toBeUndefined();
+      expect(components.find((component) => component.label === "Plain table")?.hint).toBe("table");
+      expect(components.find((component) => component.label === "Plain list")?.hint).toBe("list");
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("keys distinct three-level trees apart while identical trees share one pattern", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Trees</h1>
+            <button aria-label="Tree A"><div><div></div><div></div></div><div></div></button>
+            <button aria-label="Tree B"><div><div></div></div><div><div></div></div></button>
+            <button aria-label="Twin A"><div><div></div><div></div></div><div></div></button>
+            <button aria-label="Twin B"><div><div></div><div></div></div><div></div></button>
+          </section></main>`,
+        ),
+      );
+    });
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage({ viewport: { width: 1_200, height: 800 } });
+      await page.goto(`${origin}/`);
+      const scan = (await page.evaluate(
+        ATLAS_SECTION_SCAN,
+        ATLAS_COMPONENT_HINTS,
+      )) as AtlasPageScan;
+      const candidates = discoverComponents(scan);
+      const byLabel = new Map(candidates.map((candidate) => [candidate.label, candidate]));
+      const treeA = byLabel.get("Tree A")!;
+      const treeB = byLabel.get("Tree B")!;
+      const twinA = byLabel.get("Twin A")!;
+      const twinB = byLabel.get("Twin B")!;
+      expect(treeA.patternKey).not.toBe(treeB.patternKey);
+      expect(twinA.patternKey).toBe(twinB.patternKey);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("records off-canvas and clipped controls without accepting them", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Clipping</h1>
+            <button aria-label="Fixed below" style="position:fixed;left:10px;top:900px">Fixed</button>
+            <div style="height:100px;overflow:hidden;position:relative">
+              <button aria-label="Fully clipped" style="position:absolute;top:200px">Clipped</button>
+            </div>
+            <div style="height:100px;overflow:hidden;position:relative">
+              <button aria-label="Partially visible" style="position:absolute;top:80px">Partial</button>
+            </div>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const scan = attempt.viewports[0]!.scan;
+    const components = scan.components ?? [];
+    const fixed = components.find((component) => component.label === "Fixed below")!;
+    const clipped = components.find((component) => component.label === "Fully clipped")!;
+    const partial = components.find((component) => component.label === "Partially visible")!;
+    expect(fixed).toMatchObject({
+      visible: true,
+      offscreen: false,
+      offCanvas: true,
+      fullyClipped: true,
+    });
+    expect(clipped).toMatchObject({
+      visible: true,
+      offscreen: false,
+      offCanvas: false,
+      fullyClipped: true,
+    });
+    expect(partial).toMatchObject({
+      visible: true,
+      offscreen: false,
+      offCanvas: false,
+      fullyClipped: false,
+    });
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const accepted = searchAtlas(
+      { kind: "components", evidenceMode: "accepted", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!accepted.ok) throw new Error(accepted.error.code);
+    expect(accepted.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Partially visible",
+    ]);
+    const candidates = searchAtlas(
+      { kind: "components", evidenceMode: "candidate", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!candidates.ok) throw new Error(candidates.error.code);
+    expect(candidates.data.total).toBe(3);
+  }, 60_000);
+
+  it("applies padding boxes and containing-block chains to effective visibility", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Effective visibility</h1>
+            <div style="position:static;width:200px;height:100px;overflow:hidden;border:10px solid #000">
+              <button aria-label="Visible positioned" style="position:absolute;left:400px;top:0;width:140px;height:40px">Visible positioned</button>
+            </div>
+            <div style="position:relative;width:160px;height:60px;overflow:hidden;border:20px solid #000">
+              <button aria-label="Hidden border" style="position:absolute;left:-15px;top:-15px;width:10px;height:10px">Hidden border</button>
+            </div>
+            <div style="position:relative;width:240px;height:140px;overflow:hidden;border:24px solid #000">
+              <div style="position:absolute;left:10px;top:10px;width:160px;height:90px;overflow:hidden;border:18px solid #000">
+                <button aria-label="Combined clipping" style="position:absolute;left:-12px;top:-12px;width:8px;height:8px">Combined clipping</button>
+              </div>
+            </div>
+            <div style="width:200px;height:60px;overflow:hidden">
+              <button aria-label="Static clipped" style="margin-top:150px;width:80px;height:30px">Static clipped</button>
+            </div>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const scan = attempt.viewports[0]!.scan;
+    const byLabel = new Map(
+      (scan.components ?? []).map((component) => [component.label, component]),
+    );
+    expect(byLabel.get("Visible positioned")).toMatchObject({ fullyClipped: false });
+    expect(byLabel.get("Hidden border")).toMatchObject({ fullyClipped: true });
+    expect(byLabel.get("Combined clipping")).toMatchObject({ fullyClipped: true });
+    expect(byLabel.get("Static clipped")).toMatchObject({ fullyClipped: true });
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const accepted = searchAtlas(
+      { kind: "components", evidenceMode: "accepted", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!accepted.ok) throw new Error(accepted.error.code);
+    expect(accepted.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Visible positioned",
+    ]);
+    const observed = searchAtlas(
+      { kind: "components", evidenceMode: "observed_only", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!observed.ok) throw new Error(observed.error.code);
+    expect(observed.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Visible positioned",
+    ]);
+    const candidates = searchAtlas(
+      { kind: "components", evidenceMode: "candidate", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!candidates.ok) throw new Error(candidates.error.code);
+    expect(candidates.data.total).toBe(4);
+  }, 60_000);
+
+  it("hit-tests visibility through transforms, escaping wrappers and overlays", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Hit-test visibility</h1>
+            <div style="transform:scale(2);transform-origin:0 0;width:120px;height:60px;overflow:hidden;margin:20px">
+              <button aria-label="Scaled fixed" style="position:fixed;left:70px;top:10px;width:40px;height:24px">Scaled fixed</button>
+            </div>
+            <div style="position:static;width:160px;height:40px;overflow:hidden;border:1px solid #000;margin:20px">
+              <div style="position:absolute;left:320px;top:20px">
+                <button aria-label="Escaping wrapper" style="width:150px;height:30px">Escaping wrapper</button>
+              </div>
+            </div>
+            <div style="position:relative;width:160px;height:40px;overflow:hidden;margin:20px">
+              <button aria-label="Fully clipped" style="position:absolute;top:200px;width:120px;height:30px">Fully clipped</button>
+            </div>
+            <div style="position:relative;width:160px;height:60px;overflow:hidden;border:20px solid #000;margin:20px">
+              <button aria-label="Hidden border" style="position:absolute;left:-16px;top:-16px;width:10px;height:10px">Hidden border</button>
+            </div>
+            <div style="position:relative;width:180px;height:40px;margin:20px">
+              <button aria-label="Covered overlay" style="width:180px;height:40px">Covered overlay</button>
+              <div aria-hidden="true" style="position:absolute;inset:0;background:#000"></div>
+            </div>
+            <div style="position:relative;width:160px;height:60px;overflow:hidden;margin:20px">
+              <button aria-label="Partial edge" style="position:absolute;top:45px;width:120px;height:30px">Partial edge</button>
+            </div>
+            <button aria-label="Fixed below viewport" style="position:fixed;left:10px;top:2000px">Fixed below viewport</button>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const scan = attempt.viewports[0]!.scan;
+    const byLabel = new Map(
+      (scan.components ?? []).map((component) => [component.label, component]),
+    );
+    expect(byLabel.get("Scaled fixed")).toMatchObject({ fullyClipped: false });
+    expect(byLabel.get("Escaping wrapper")).toMatchObject({ fullyClipped: false });
+    expect(byLabel.get("Partial edge")).toMatchObject({ fullyClipped: false });
+    expect(byLabel.get("Fully clipped")).toMatchObject({ visible: true, fullyClipped: true });
+    expect(byLabel.get("Hidden border")).toMatchObject({ visible: true, fullyClipped: true });
+    expect(byLabel.get("Covered overlay")).toMatchObject({ visible: true, fullyClipped: true });
+    expect(byLabel.get("Fixed below viewport")).toMatchObject({
+      offCanvas: true,
+      fullyClipped: true,
+    });
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const labels = (mode: "accepted" | "observed_only" | "candidate") => {
+      const result = searchAtlas(
+        { kind: "components", evidenceMode: mode, groupBy: "instance", limit: 20 },
+        atlasSearchStore(cache),
+        Date.now(),
+      );
+      if (!result.ok) throw new Error(result.error.code);
+      return result;
+    };
+    const visible = ["Escaping wrapper", "Partial edge", "Scaled fixed"];
+    expect(
+      labels("accepted")
+        .data.results.map((hit) => labelByRegion.get(hit.regionId))
+        .sort(),
+    ).toEqual(visible);
+    expect(
+      labels("observed_only")
+        .data.results.map((hit) => labelByRegion.get(hit.regionId))
+        .sort(),
+    ).toEqual(visible);
+    expect(labels("candidate").data.total).toBe(7);
+  }, 60_000);
+
+  it("clips a fixed control only inside its fixed containing block", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Fixed containing block</h1>
+            <div style="width:200px;height:120px;overflow:hidden;border:10px solid #000">
+              <button aria-label="Visible fixed" style="position:fixed;left:500px;top:20px;width:100px;height:30px">Visible fixed</button>
+            </div>
+            <div style="width:200px;height:120px;overflow:hidden;border:10px solid #000;transform:translateZ(0)">
+              <button aria-label="Clipped fixed" style="position:fixed;left:700px;top:200px;width:100px;height:30px">Clipped fixed</button>
+            </div>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const scan = attempt.viewports[0]!.scan;
+    const byLabel = new Map(
+      (scan.components ?? []).map((component) => [component.label, component]),
+    );
+    expect(byLabel.get("Visible fixed")).toMatchObject({ fullyClipped: false });
+    expect(byLabel.get("Clipped fixed")).toMatchObject({ fullyClipped: true });
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const accepted = searchAtlas(
+      { kind: "components", evidenceMode: "accepted", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!accepted.ok) throw new Error(accepted.error.code);
+    expect(accepted.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Visible fixed",
+    ]);
+    const candidates = searchAtlas(
+      { kind: "components", evidenceMode: "candidate", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!candidates.ok) throw new Error(candidates.error.code);
+    expect(candidates.data.total).toBe(2);
+  }, 60_000);
+
+  it("captures real hover and focus samples with resets between states", async () => {
+    let clicks = 0;
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      if (path === "/clicked") {
+        clicks += 1;
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (path === "/state-page") {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(
+          "<!doctype html>" +
+            shell(
+              `<style>
+                 body { margin: 0; }
+                 #focus-input:focus-visible { outline: 4px solid rgb(220, 20, 60); outline-offset: 2px; }
+                 #hover-target { display: inline-block; padding: 10px; color: rgb(10, 10, 10); background-color: rgb(240, 240, 240); }
+                 #hover-target:hover { color: rgb(250, 250, 250); background-color: rgb(20, 60, 200); }
+                 section#tail:hover { background-color: rgb(230, 240, 255); }
+               </style>
+               <main>
+                 <section id="hero"><h1>State fixture</h1><input id="focus-input" aria-label="Focus target"><div style="height:1400px"></div></section>
+                 <section id="tail"><h2>Tail section</h2><a id="hover-target" href="#tail">Hover target</a></section>
+               </main>`,
+              "document.addEventListener('click', () => { fetch('/clicked'); });",
+            ),
+        );
+        return;
+      }
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("missing");
+    });
+    // Count mutation methods at the fixture boundary, not only click handlers.
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/state-page`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", path: "/state-page", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const firstRevision = cache.withAtlasDb(
+      (db) =>
+        (db.prepare("SELECT revision FROM atlas_state WHERE singleton = 1").get() as {
+          revision: number;
+        }).revision,
+    );
+    const ids = cache.withAtlasDb((db) =>
+      (
+        db
+          .prepare(
+            "SELECT id, locator_json FROM atlas_regions WHERE kind = 'component'",
+          )
+          .all() as Array<{ id: string; locator_json: string }>
+      )
+        .map((row) => ({
+          id: row.id,
+          selector: String((JSON.parse(row.locator_json) as any).selector ?? ""),
+        }))
+        .filter((row) => row.selector.includes("#focus-input") || row.selector.includes("#hover-target")),
+    );
+    const focusId = ids.find((row) => row.selector.includes("#focus-input"))!.id;
+    const hoverId = ids.find((row) => row.selector.includes("#hover-target"))!.id;
+    const sectionIds = cache.withAtlasDb(
+      (db) =>
+        db
+          .prepare("SELECT id, locator_json FROM atlas_regions WHERE kind = 'section'")
+          .all() as Array<{ id: string; locator_json: string }>,
+    );
+    const tailSectionId = sectionIds.find((row) =>
+      String((JSON.parse(row.locator_json) as any).selector ?? "").includes("#tail"),
+    )!.id;
+
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        path: "/state-page",
+        viewports: ["desktop"],
+        states: [
+          { action: "focus", targetRegionId: focusId },
+          { action: "hover", targetRegionId: hoverId },
+          { action: "hover", targetRegionId: tailSectionId },
+        ],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const published = await publishCapture(second);
+    expect(published.published, published.code).toBe(true);
+    const viewport = second.viewports[0]!;
+    expect(viewport.states).toEqual([
+      expect.objectContaining({ action: "focus", targetRegionId: focusId, status: "observed" }),
+      expect.objectContaining({ action: "hover", targetRegionId: hoverId, status: "observed" }),
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: tailSectionId,
+        status: "observed",
+      }),
+    ]);
+    const stateObservations = (viewport.observations ?? []).filter(
+      (observation) => observation.state !== "default",
+    );
+    expect(stateObservations).toHaveLength(3);
+    const sectionObservation = stateObservations.find(
+      (observation) => observation.regions[0]!.targetRegionId === tailSectionId,
+    )!;
+    expect(sectionObservation.state).toBe("hover");
+    expect(sectionObservation.regions[0]!.sampleKey).toContain(":state-hover");
+    expect(
+      viewport.claims.find(
+        (claim) =>
+          claim.value === "hover_change_observed" &&
+          claim.sampleKey === sectionObservation.regions[0]!.sampleKey,
+      ),
+    ).toBeDefined();
+    expect(viewport.claims.filter((claim) => claim.field === "behavior")).toHaveLength(3);
+    const focusObservation = stateObservations.find(
+      (observation) => observation.state === "focus",
+    )!;
+    const hoverObservation = stateObservations.find(
+      (observation) => observation.state === "hover",
+    )!;
+    expect(focusObservation.scrollY).toBe(0);
+    expect(hoverObservation.scrollY).toBeGreaterThan(0);
+    expect(focusObservation.regions[0]).toMatchObject({
+      targetRegionId: focusId,
+      visible: true,
+      coordinateSpace: "document",
+    });
+    expect(hoverObservation.regions[0]).toMatchObject({
+      targetRegionId: hoverId,
+      visible: true,
+      coordinateSpace: "document",
+    });
+    expect(hoverObservation.regions[0]!.rect.y).not.toBe(
+      focusObservation.regions[0]!.rect.y,
+    );
+
+    const claims = viewport.claims.filter((claim) => claim.field === "behavior");
+    expect(claims).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          value: "focus_visible_observed",
+          decision: "accepted",
+          classification: "observed",
+          basis: "interaction_observation",
+          sampleKey: focusObservation.regions[0]!.sampleKey,
+        }),
+        expect.objectContaining({
+          value: "hover_change_observed",
+          decision: "accepted",
+          classification: "observed",
+          basis: "interaction_observation",
+          sampleKey: hoverObservation.regions[0]!.sampleKey,
+        }),
+      ]),
+    );
+
+    const focusArtifact = viewport.artifacts.find(
+      (artifact) => artifact.key === "state-desktop-0-focus",
+    )!;
+    const hoverArtifact = viewport.artifacts.find(
+      (artifact) => artifact.key === "state-desktop-1-hover",
+    )!;
+    const focusEvidence = JSON.parse(
+      readFileSync(join(cache.rootDir, focusArtifact.storagePath), "utf8"),
+    );
+    const hoverEvidence = JSON.parse(
+      readFileSync(join(cache.rootDir, hoverArtifact.storagePath), "utf8"),
+    );
+    expect(focusEvidence.activeElement).toMatchObject({ self: true, within: true });
+    expect(focusEvidence.focusVisible).toBe(true);
+    expect(focusEvidence.changedProperties).toContain("outlineStyle");
+    expect(focusEvidence.baselineScroll).toEqual({ x: 0, y: 0 });
+    expect(hoverEvidence.hovered).toBe(true);
+    expect(hoverEvidence.activeElement.within).toBe(false);
+    expect(hoverEvidence.baselineScroll).toEqual({ x: 0, y: 0 });
+    expect(hoverEvidence.changedProperties).toEqual(
+      expect.arrayContaining(["backgroundColor", "color"]),
+    );
+
+    const head = cache.withAtlasDb((db) => {
+      const headRow = db
+        .prepare(
+          "SELECT capture_id FROM atlas_heads WHERE page_id = (SELECT page_id FROM atlas_captures WHERE id = ?) AND profile_key = 'live-desktop'",
+        )
+        .get(published.captureIds[0]!) as { capture_id: string };
+      const headCount = (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM atlas_heads WHERE page_id = (SELECT page_id FROM atlas_captures WHERE id = ?) AND profile_key = 'live-desktop'",
+          )
+          .get(published.captureIds[0]!) as { n: number }
+      ).n;
+      const samples = db
+        .prepare(
+          `SELECT r.samples_json FROM atlas_regions r
+           WHERE r.capture_id = ?
+             AND json_extract(r.locator_json, '$.selector') LIKE '%#hover-target%'`,
+        )
+        .get(published.captureIds[0]!) as { samples_json: string };
+      const sectionSamples = db
+        .prepare(
+          `SELECT r.samples_json FROM atlas_regions r
+           WHERE r.capture_id = ?
+             AND json_extract(r.locator_json, '$.selector') LIKE '%#tail%'`,
+        )
+        .get(published.captureIds[0]!) as { samples_json: string };
+      return { headRow, headCount, samples, sectionSamples };
+    });
+    expect(head.headRow.capture_id).toBe(published.captureIds[0]);
+    expect(head.headCount).toBe(1);
+    expect(head.samples.samples_json).toContain('"state":"hover"');
+    expect(head.sectionSamples.samples_json).toContain('"state":"hover"');
+    expect(viewport.finalUrl).toBe(first.viewports[0]!.finalUrl);
+    const secondRevision = cache.withAtlasDb(
+      (db) =>
+        (db.prepare("SELECT revision FROM atlas_state WHERE singleton = 1").get() as {
+          revision: number;
+        }).revision,
+    );
+    expect(secondRevision).toBeGreaterThan(firstRevision);
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare(
+                "SELECT id, heading FROM atlas_regions WHERE capture_id = ?",
+              )
+              .all(published.captureIds[0]!) as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const hoverHits = searchAtlas(
+      { kind: "components", state: "hover", evidenceMode: "accepted", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!hoverHits.ok) throw new Error(hoverHits.error.code);
+    expect(hoverHits.data.outcome).toBe("matches");
+    expect(hoverHits.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Hover target",
+    ]);
+    expect(hoverHits.data.results[0]!.state).toBe("hover");
+    const focusHits = searchAtlas(
+      { kind: "components", state: "focus", evidenceMode: "accepted", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!focusHits.ok) throw new Error(focusHits.error.code);
+    expect(focusHits.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Focus target",
+    ]);
+    const defaultHits = searchAtlas(
+      { kind: "components", evidenceMode: "accepted", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!defaultHits.ok) throw new Error(defaultHits.error.code);
+    // The hover target is below the fold in the default scan, so its default
+    // type claim is candidate-only. The accepted type claim exists only in the
+    // hover sample and must not leak into default accepted search.
+    expect(defaultHits.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Focus target",
+    ]);
+    const defaultCandidates = searchAtlas(
+      { kind: "components", evidenceMode: "candidate", groupBy: "instance", limit: 20 },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!defaultCandidates.ok) throw new Error(defaultCandidates.error.code);
+    expect(
+      defaultCandidates.data.results
+        .map((hit) => labelByRegion.get(hit.regionId))
+        .sort(),
+    ).toEqual(["Focus target", "Hover target"]);
+    const sectionHits = searchAtlas(
+      {
+        kind: "sections",
+        state: "hover",
+        scope: "region",
+        evidenceMode: "candidate",
+        predicates: [{ field: "region.tag", values: ["section"] }],
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!sectionHits.ok) throw new Error(sectionHits.error.code);
+    expect(sectionHits.data.outcome).toBe("matches");
+    expect(sectionHits.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Tail section",
+    ]);
+    expect(clicks).toBe(0);
+  }, 90_000);
+
+  it("reports no measured change and unconfirmed focus as inconclusive", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             #flat-hover, #flat-hover:hover { color: rgb(0, 0, 0); background-color: rgb(255, 255, 255); border-color: rgb(0, 0, 0); outline: none; }
+             #flat-focus, #flat-focus:focus, #flat-focus:focus-visible { outline: none !important; box-shadow: none !important; color: rgb(0, 0, 0) !important; background-color: rgb(255, 255, 255) !important; border-color: rgb(0, 0, 0) !important; }
+           </style>
+           <main><section id="s">
+             <button id="flat-hover">Flat hover</button>
+             <input id="flat-focus" aria-label="Flat focus">
+             <input id="blurred" aria-label="Blurred focus" onfocus="this.blur()">
+           </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const ids = cache.withAtlasDb((db) =>
+      (
+        db
+          .prepare("SELECT id, locator_json FROM atlas_regions WHERE kind = 'component'")
+          .all() as Array<{ id: string; locator_json: string }>
+      ).map((row) => ({
+        id: row.id,
+        selector: String((JSON.parse(row.locator_json) as any).selector ?? ""),
+      })),
+    );
+    const flatHover = ids.find((row) => row.selector.includes("#flat-hover"))!.id;
+    const flatFocus = ids.find((row) => row.selector.includes("#flat-focus"))!.id;
+    const blurred = ids.find((row) => row.selector.includes("#blurred"))!.id;
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [
+          { action: "hover", targetRegionId: flatHover },
+          { action: "focus", targetRegionId: flatFocus },
+          { action: "focus", targetRegionId: blurred },
+        ],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: flatHover,
+        status: "inconclusive",
+        code: "STATE_NO_CHANGE",
+      }),
+      expect.objectContaining({
+        action: "focus",
+        targetRegionId: flatFocus,
+        status: "inconclusive",
+        code: "STATE_NO_CHANGE",
+      }),
+      expect.objectContaining({
+        action: "focus",
+        targetRegionId: blurred,
+        status: "inconclusive",
+        code: "STATE_FOCUS_UNCONFIRMED",
+      }),
+    ]);
+    expect(
+      second.viewports[0]!.claims.filter((claim) => claim.field === "behavior"),
+    ).toEqual([]);
+    expect(
+      (second.viewports[0]!.observations ?? []).filter(
+        (observation) => observation.state !== "default",
+      ),
+    ).toEqual([]);
+    expect((await publishCapture(second)).published).toBe(true);
+  }, 90_000);
+
+  it("reports ambiguous, missing and changed state targets without fallback", async () => {
+    let variant = 0;
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          variant === 0
+            ? `<main><section id="s">
+                 <a id="changed" class="c" href="#changed">Original label</a>
+                 <button id="removed">Remove me</button>
+                 <div><button class="dup">Duplicate one</button></div>
+                 <div><button class="dup">Duplicate two</button></div>
+               </section></main>`
+            : `<main><section id="s">
+                 <a id="changed" class="c" href="#changed">Changed label</a>
+                 <div><button class="dup">Duplicate one</button></div>
+                 <div><button class="dup">Duplicate two</button></div>
+               </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const ids = cache.withAtlasDb((db) =>
+      (
+        db
+          .prepare("SELECT id, locator_json FROM atlas_regions WHERE kind = 'component'")
+          .all() as Array<{ id: string; locator_json: string }>
+      ).map((row) => ({
+        id: row.id,
+        selector: String((JSON.parse(row.locator_json) as any).selector ?? ""),
+      })),
+    );
+    const changedId = ids.find((row) => row.selector.includes("#changed"))!.id;
+    const removedId = ids.find((row) => row.selector.includes("#removed"))!.id;
+    const ambiguousId = ids.find((row) => row.selector.includes("button.dup"))!.id;
+    variant = 1;
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [
+          { action: "hover", targetRegionId: changedId },
+          { action: "hover", targetRegionId: removedId },
+          { action: "focus", targetRegionId: ambiguousId },
+        ],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: changedId,
+        status: "inconclusive",
+        code: "STATE_TARGET_CHANGED",
+      }),
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: removedId,
+        status: "inconclusive",
+        code: "STATE_TARGET_MISSING",
+      }),
+      expect.objectContaining({
+        action: "focus",
+        targetRegionId: ambiguousId,
+        status: "inconclusive",
+        code: "STATE_TARGET_AMBIGUOUS",
+      }),
+    ]);
+    expect(
+      (second.viewports[0]!.observations ?? []).filter(
+        (observation) => observation.state !== "default",
+      ),
+    ).toEqual([]);
+    expect(
+      second.viewports[0]!.claims.filter((claim) => claim.field === "behavior"),
+    ).toEqual([]);
+    expect(second.limitations).toEqual(
+      expect.arrayContaining([
+        "STATE_TARGET_CHANGED",
+        "STATE_TARGET_MISSING",
+        "STATE_TARGET_AMBIGUOUS",
+      ]),
+    );
+    const published = await publishCapture(second);
+    expect(published.published, published.code).toBe(true);
+  }, 90_000);
+
+  it("normalizes nested inline identity and re-emits purpose evidence for state search", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             #inline-section:hover { background-color: rgb(235, 245, 255); }
+             #inline-link { color: rgb(10, 10, 10); }
+             #inline-link:hover { color: rgb(200, 20, 20); }
+             #focus-wrap { display: block; width: 220px; padding: 8px; }
+             #focus-wrap:focus-within { background-color: rgb(255, 240, 200); }
+             #inner:focus-visible { outline: 4px solid rgb(20, 80, 220); }
+           </style>
+           <main>
+             <header id="inline-section"><h2>Inline<span>heading</span></h2><p>Nested inline body</p></header>
+             <a id="inline-link" href="#inline-link"><span>Nested</span><span>inline</span></a>
+             <div id="focus-wrap" role="button" tabindex="0"
+                  onfocus="document.getElementById('inner').focus({ focusVisible: true })">
+               <span id="inner" tabindex="0">Inner</span>
+             </div>
+           </main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const ids = cache.withAtlasDb((db) =>
+      (
+        db
+          .prepare(
+            "SELECT id, kind, locator_json FROM atlas_regions WHERE kind IN ('section','component')",
+          )
+          .all() as Array<{ id: string; kind: string; locator_json: string }>
+      ).map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        selector: String((JSON.parse(row.locator_json) as any).selector ?? ""),
+      })),
+    );
+    const sectionId = ids.find((row) => row.selector.includes("#inline-section"))!.id;
+    const linkId = ids.find((row) => row.selector.includes("#inline-link"))!.id;
+    const focusId = ids.find((row) => row.selector.includes("#focus-wrap"))!.id;
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [
+          { action: "hover", targetRegionId: sectionId },
+          { action: "hover", targetRegionId: linkId },
+          { action: "focus", targetRegionId: focusId },
+        ],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({ targetRegionId: sectionId, status: "observed" }),
+      expect.objectContaining({ targetRegionId: linkId, status: "observed" }),
+      expect.objectContaining({ targetRegionId: focusId, status: "observed" }),
+    ]);
+    const stateObservations = (second.viewports[0]!.observations ?? []).filter(
+      (observation) => observation.state !== "default",
+    );
+    expect(stateObservations).toHaveLength(3);
+    expect(stateObservations.every((observation) => observation.scanArtifactKey === "scan-desktop")).toBe(
+      true,
+    );
+    expect(
+      stateObservations.every((observation) =>
+        Boolean(observation.stateArtifactKey?.startsWith("state-desktop-")),
+      ),
+    ).toBe(true);
+    const focusEvidence = JSON.parse(
+      readFileSync(
+        join(
+          cache.rootDir,
+          second.viewports[0]!.artifacts.find(
+            (artifact) => artifact.key === "state-desktop-2-focus",
+          )!.storagePath,
+        ),
+        "utf8",
+      ),
+    );
+    expect(focusEvidence.activeElement).toMatchObject({ within: true, self: false });
+    expect(focusEvidence.focusVisible).toBe(true);
+    expect(focusEvidence.changedProperties).toContain("backgroundColor");
+    const published = await publishCapture(second);
+    expect(published.published, published.code).toBe(true);
+    const purposeHits = searchAtlas(
+      {
+        kind: "sections",
+        state: "hover",
+        scope: "region",
+        evidenceMode: "candidate",
+        predicates: [{ field: "section.purpose", values: ["header"] }],
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!purposeHits.ok) throw new Error(purposeHits.error.code);
+    expect(purposeHits.data.outcome).toBe("matches");
+    expect(purposeHits.data.results.map((hit) => hit.regionId)).toContain(
+      cache.withAtlasDb(
+        (db) =>
+          (
+            db
+              .prepare(
+                "SELECT id FROM atlas_regions WHERE capture_id = ? AND locator_json LIKE '%#inline-section%'",
+              )
+              .get(published.captureIds[0]!) as { id: string }
+          ).id,
+      ),
+    );
+  }, 90_000);
+
+  it("rejects a structural change even when selector, tag and label are unchanged", async () => {
+    let variant = 0;
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<style>
+             ${variant === 0 ? "" : "#pattern-target { padding: 14px; }"}
+             #pattern-target { display: inline-block; color: rgb(5, 5, 5); }
+             #pattern-target:hover { color: rgb(220, 40, 40); }
+           </style>
+           <main><section id="s">
+             <a id="pattern-target" href="#pattern-target"><span>Same</span><span>label</span></a>
+           </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const targetId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'component' AND locator_json LIKE '%#pattern-target%'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    variant = 1;
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: targetId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        targetRegionId: targetId,
+        status: "inconclusive",
+        code: "STATE_TARGET_CHANGED",
+      }),
+    ]);
+    expect((await publishCapture(second)).published).toBe(true);
+  }, 90_000);
+
+  it("rejects targets relabelled or replaced by the interaction", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #relabel, #replace { display: inline-block; margin: 12px; padding: 10px;
+               background-color: rgb(240, 240, 240); color: rgb(10, 10, 10); }
+             #relabel:hover, #replace:hover { background-color: rgb(20, 60, 200); color: rgb(250, 250, 250); }
+           </style>
+           <main><section id="s"><h1>Interaction identity</h1>
+             <a id="relabel" href="#relabel">Stable label</a>
+             <button id="replace">Replace me</button>
+           </section></main>`,
+          `document.getElementById('relabel').addEventListener('mouseenter', () => {
+             document.getElementById('relabel').textContent = 'Changed label';
+           });
+           document.getElementById('replace').addEventListener('focus', (event) => {
+             event.target.outerHTML = '<button id="replace">Replace me</button>';
+             document.getElementById('replace').focus({ focusVisible: true });
+           });`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const ids = cache.withAtlasDb((db) =>
+      (
+        db
+          .prepare("SELECT id, locator_json FROM atlas_regions WHERE kind = 'component'")
+          .all() as Array<{ id: string; locator_json: string }>
+      ).map((row) => ({
+        id: row.id,
+        selector: String((JSON.parse(row.locator_json) as any).selector ?? ""),
+      })),
+    );
+    const relabelId = ids.find((row) => row.selector.includes("#relabel"))!.id;
+    const replaceId = ids.find((row) => row.selector.includes("#replace"))!.id;
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [
+          { action: "hover", targetRegionId: relabelId },
+          { action: "focus", targetRegionId: replaceId },
+        ],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: relabelId,
+        status: "inconclusive",
+        code: "STATE_TARGET_CHANGED",
+      }),
+      expect.objectContaining({
+        action: "focus",
+        targetRegionId: replaceId,
+        status: "inconclusive",
+        code: "STATE_TARGET_CHANGED",
+      }),
+    ]);
+    expect(
+      second.viewports[0]!.claims.filter((claim) => claim.field === "behavior"),
+    ).toEqual([]);
+    expect(
+      (second.viewports[0]!.observations ?? []).filter(
+        (observation) => observation.state !== "default",
+      ),
+    ).toEqual([]);
+    const published = await publishCapture(second);
+    expect(published.published, published.code).toBe(true);
+
+    const acceptedHover = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        evidenceMode: "accepted",
+        groupBy: "instance",
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!acceptedHover.ok) throw new Error(acceptedHover.error.code);
+    expect(acceptedHover.data.total).toBe(0);
+    expect(acceptedHover.data.outcome).toBe("insufficient_coverage");
+    const candidateHover = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        evidenceMode: "candidate",
+        groupBy: "instance",
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!candidateHover.ok) throw new Error(candidateHover.error.code);
+    expect(candidateHover.data.total).toBe(0);
+
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const defaultHits = searchAtlas(
+      {
+        kind: "components",
+        evidenceMode: "accepted",
+        groupBy: "instance",
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!defaultHits.ok) throw new Error(defaultHits.error.code);
+    expect(defaultHits.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual(
+      expect.arrayContaining(["Stable label", "Replace me"]),
+    );
+  }, 120_000);
+
+  it("rejects a target whose structure changes after the interaction", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #shape { display: inline-block; margin: 12px; padding: 10px;
+               background-color: rgb(240, 240, 240); color: rgb(10, 10, 10); }
+             #shape:hover { background-color: rgb(20, 60, 200); }
+           </style>
+           <main><section id="s"><h1>Structure identity</h1>
+             <button id="shape">Shape me</button>
+           </section></main>`,
+          `document.getElementById('shape').addEventListener('mouseenter', () => {
+             const el = document.getElementById('shape');
+             if (!el.querySelector('i')) el.appendChild(document.createElement('i'));
+           });`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const id = cache.withAtlasDb((db) => {
+      const row = db
+        .prepare("SELECT id FROM atlas_regions WHERE kind = 'component' AND locator_json LIKE '%#shape%' LIMIT 1")
+        .get() as { id?: string } | undefined;
+      return row?.id;
+    });
+    expect(id).toBeTruthy();
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: id! }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: id,
+        status: "inconclusive",
+        code: "STATE_TARGET_CHANGED",
+      }),
+    ]);
+    expect(
+      second.viewports[0]!.claims.filter((claim) => claim.field === "behavior"),
+    ).toEqual([]);
+    expect((await publishCapture(second)).published).toBe(true);
+  }, 120_000);
+
+  it("requires the pointer to remain over the hover target", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #steady, #moved { display: inline-block; margin: 12px; padding: 10px;
+               background-color: rgb(240, 240, 240); color: rgb(10, 10, 10); }
+             #steady:hover, #moved:hover { background-color: rgb(20, 60, 200); color: rgb(250, 250, 250); }
+           </style>
+           <main><section id="s"><h1>Pointer position</h1>
+             <a id="steady" href="#steady">Steady target</a>
+             <a id="moved" href="#moved">Moved target</a>
+           </section></main>`,
+          `document.getElementById('moved').addEventListener('mouseenter', () => {
+             document.getElementById('moved').style.transform = 'translateY(320px)';
+           });`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const ids = cache.withAtlasDb((db) =>
+      (
+        db
+          .prepare("SELECT id, locator_json FROM atlas_regions WHERE kind = 'component'")
+          .all() as Array<{ id: string; locator_json: string }>
+      ).map((row) => ({
+        id: row.id,
+        selector: String((JSON.parse(row.locator_json) as any).selector ?? ""),
+      })),
+    );
+    const steadyId = ids.find((row) => row.selector.includes("#steady"))!.id;
+    const movedId = ids.find((row) => row.selector.includes("#moved"))!.id;
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [
+          { action: "hover", targetRegionId: steadyId },
+          { action: "hover", targetRegionId: movedId },
+        ],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: steadyId,
+        status: "observed",
+      }),
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: movedId,
+        status: "inconclusive",
+        code: "STATE_HOVER_NOT_ACTIVE",
+      }),
+    ]);
+    const behaviorClaims = second.viewports[0]!.claims.filter(
+      (claim) => claim.field === "behavior",
+    );
+    expect(behaviorClaims).toHaveLength(1);
+    expect(behaviorClaims[0]).toMatchObject({
+      value: "hover_change_observed",
+      decision: "accepted",
+    });
+    expect(
+      (second.viewports[0]!.observations ?? []).filter(
+        (observation) => observation.state !== "default",
+      ),
+    ).toHaveLength(1);
+    expect((await publishCapture(second)).published).toBe(true);
+  }, 120_000);
+
+  it("returns published region ids that a follow-up state request accepts", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<style>
+             #follow-target { display: inline-block; padding: 8px; }
+             #follow-target:hover { background-color: rgb(20, 90, 220); color: rgb(255, 255, 255); }
+           </style>
+           <main><section id="s"><a id="follow-target" href="#follow-target">Follow target</a></section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const targetId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'component' AND locator_json LIKE '%#follow-target%'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: targetId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const published = await publishCapture(second);
+    expect(published.published, published.code).toBe(true);
+    const followUpId = published.publishedRegionIds?.[targetId];
+    expect(followUpId).toBeTruthy();
+    expect(followUpId).not.toBe(targetId);
+    const third = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: followUpId! }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(third.viewports[0]!.states).toEqual([
+      expect.objectContaining({ targetRegionId: followUpId, status: "observed" }),
+    ]);
+    expect((await publishCapture(third)).published).toBe(true);
+  }, 120_000);
+
+  it("keeps a candidate section purpose candidate in the hover sample", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #hero { min-height: 60vh; background-color: rgb(240, 240, 240); }
+             #hero:hover { background-color: rgb(20, 60, 200); }
+           </style>
+           <main>
+             <section id="hero"><h1>Hero</h1><p>Hero copy</p></section>
+             <section id="tail"><h2>Tail</h2><div style="height:900px"></div></section>
+           </main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const firstPublished = await publishCapture(first);
+    expect(firstPublished.published, firstPublished.code).toBe(true);
+    const heroId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'section' AND json_extract(locator_json, '$.selector') LIKE '%#hero'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    const defaultPurpose = first.viewports[0]!.claims.find(
+      (claim) => claim.field === "section.purpose",
+    )!;
+    expect(defaultPurpose).toMatchObject({ value: "hero", decision: "candidate" });
+
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: heroId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: heroId,
+        status: "observed",
+      }),
+    ]);
+    const hoverPurpose = second.viewports[0]!.claims.find(
+      (claim) => claim.field === "section.purpose" && claim.state === "hover",
+    )!;
+    expect(hoverPurpose).toMatchObject({
+      value: "hero",
+      decision: "candidate",
+      classification: "inferred",
+    });
+    const secondPublished = await publishCapture(second);
+    expect(secondPublished.published, secondPublished.code).toBe(true);
+    const publishedHeroId = secondPublished.publishedRegionIds?.[heroId] ?? heroId;
+
+    const accepted = searchAtlas(
+      {
+        kind: "sections",
+        state: "hover",
+        scope: "region",
+        evidenceMode: "accepted",
+        predicates: [{ field: "section.purpose", values: ["hero"] }],
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!accepted.ok) throw new Error(accepted.error.code);
+    expect(accepted.data.total).toBe(0);
+    const candidates = searchAtlas(
+      {
+        kind: "sections",
+        state: "hover",
+        scope: "region",
+        evidenceMode: "candidate",
+        predicates: [{ field: "section.purpose", values: ["hero"] }],
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!candidates.ok) throw new Error(candidates.error.code);
+    expect(candidates.data.results.map((hit) => hit.regionId)).toEqual([
+      publishedHeroId,
+    ]);
+    expect(candidates.data.results[0]!.claims).toContainEqual(
+      expect.objectContaining({ value: "hero", decision: "candidate" }),
+    );
+  }, 120_000);
+
+  it("keeps an unresolved navigation trigger candidate in default and hover samples", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #missing-trigger { display: block; margin: 8px; padding: 8px;
+               color: rgb(10, 10, 10); background-color: rgb(240, 240, 240); }
+             #missing-trigger:hover { color: rgb(250, 250, 250); background-color: rgb(20, 60, 200); }
+           </style>
+           <main><section id="nav-section"><h1>Navigation</h1>
+             <nav><button id="missing-trigger" aria-haspopup="true"
+               aria-controls="missing-panel">Missing trigger</button></nav>
+           </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const triggerKey = first.viewports[0]!.components!.find((component) =>
+      component.selector.includes("#missing-trigger"),
+    )!.key;
+    const typeClaim = first.viewports[0]!.claims.find(
+      (claim) => claim.field === "component.type" && claim.regionKey === triggerKey,
+    )!;
+    expect(typeClaim).toMatchObject({
+      value: "navigation_trigger",
+      decision: "candidate",
+      ruleId: "component.aria.navigation-trigger.unresolved",
+    });
+    const triggerId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'component' AND json_extract(locator_json, '$.selector') LIKE '%#missing-trigger'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: triggerId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: triggerId,
+        status: "observed",
+      }),
+    ]);
+    const hoverType = second.viewports[0]!.claims.find(
+      (claim) =>
+        claim.field === "component.type" &&
+        claim.state === "hover" &&
+        claim.regionKey === triggerKey,
+    )!;
+    expect(hoverType).toMatchObject({
+      decision: "candidate",
+      ruleId: "component.aria.navigation-trigger.unresolved",
+    });
+    expect((await publishCapture(second)).published).toBe(true);
+
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const accepted = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        evidenceMode: "accepted",
+        groupBy: "instance",
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!accepted.ok) throw new Error(accepted.error.code);
+    expect(accepted.data.outcome).toBe("insufficient_coverage");
+    expect(accepted.data.total).toBe(0);
+    const candidates = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        evidenceMode: "candidate",
+        groupBy: "instance",
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!candidates.ok) throw new Error(candidates.error.code);
+    expect(candidates.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Missing trigger",
+    ]);
+    expect(candidates.data.results[0]!.claims).toContainEqual(
+      expect.objectContaining({ value: "navigation_trigger", decision: "candidate" }),
+    );
+  }, 120_000);
+
+  it("keeps a resolved navigation trigger accepted in default and hover samples", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #resolved-trigger { display: block; margin: 8px; padding: 8px;
+               color: rgb(10, 10, 10); background-color: rgb(240, 240, 240); }
+             #resolved-trigger:hover { color: rgb(250, 250, 250); background-color: rgb(20, 140, 60); }
+           </style>
+           <main><section id="nav-section"><h1>Navigation</h1>
+             <nav><button id="resolved-trigger" aria-haspopup="true"
+               aria-controls="real-panel">Resolved trigger</button>
+               <div id="real-panel">Menu</div></nav>
+           </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect((await publishCapture(first)).published).toBe(true);
+    const triggerKey = first.viewports[0]!.components!.find((component) =>
+      component.selector.includes("#resolved-trigger"),
+    )!.key;
+    expect(
+      first.viewports[0]!.claims.find(
+        (claim) =>
+          claim.field === "component.type" && claim.regionKey === triggerKey,
+      ),
+    ).toMatchObject({
+      value: "navigation_trigger",
+      decision: "accepted",
+      ruleId: "component.aria.navigation-trigger.resolved",
+    });
+    const triggerId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'component' AND json_extract(locator_json, '$.selector') LIKE '%#resolved-trigger'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: triggerId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const hoverType = second.viewports[0]!.claims.find(
+      (claim) =>
+        claim.field === "component.type" &&
+        claim.state === "hover" &&
+        claim.regionKey === triggerKey,
+    )!;
+    expect(hoverType).toMatchObject({
+      decision: "accepted",
+      ruleId: "component.aria.navigation-trigger.resolved",
+    });
+    expect((await publishCapture(second)).published).toBe(true);
+    const labelByRegion = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare("SELECT id, heading FROM atlas_regions WHERE kind = 'component'")
+              .all() as Array<{ id: string; heading: string }>
+          ).map((row) => [row.id, row.heading]),
+        ),
+    );
+    const hovered = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        evidenceMode: "accepted",
+        groupBy: "instance",
+        limit: 20,
+      },
+      atlasSearchStore(cache),
+      Date.now(),
+    );
+    if (!hovered.ok) throw new Error(hovered.error.code);
+    expect(hovered.data.results.map((hit) => labelByRegion.get(hit.regionId))).toEqual([
+      "Resolved trigger",
+    ]);
+  }, 120_000);
+
+  it("re-measures the hover baseline away from a top-left reset pointer", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(
+          `<style>
+             body { margin: 0; }
+             #corner { position: absolute; left: 0; top: 0; z-index: 5;
+               width: 240px; height: 120px; padding: 8px; box-sizing: border-box;
+               background-color: rgb(240, 240, 240); color: rgb(10, 10, 10); }
+             #corner:hover { background-color: rgb(20, 60, 200); color: rgb(250, 250, 250); }
+           </style>
+           <main>
+             <header id="corner"><h1>Corner</h1></header>
+             <section id="tail"><h2>Tail</h2><div style="height:800px"></div></section>
+           </main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const firstPublished = await publishCapture(first);
+    expect(firstPublished.published, firstPublished.code).toBe(true);
+    const cornerId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'section' AND json_extract(locator_json, '$.selector') LIKE '%#corner'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: cornerId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: cornerId,
+        status: "observed",
+      }),
+    ]);
+    expect(
+      second.viewports[0]!.claims.find(
+        (claim) => claim.field === "behavior" && claim.state === "hover",
+      ),
+    ).toMatchObject({ value: "hover_change_observed", decision: "accepted" });
+    expect((await publishCapture(second)).published).toBe(true);
+  }, 120_000);
+
+  it("reports a full-viewport state target as inconclusive instead of no change", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<style>
+             html, body { margin: 0; height: 100%; }
+             #full { position: absolute; inset: 0; z-index: 5;
+               background-color: rgb(240, 240, 240); }
+             #full:hover { background-color: rgb(20, 60, 200); }
+           </style>
+           <main><section id="full"><h1>Full viewport</h1></section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const first = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const firstPublished = await publishCapture(first);
+    expect(firstPublished.published, firstPublished.code).toBe(true);
+    const fullId = cache.withAtlasDb(
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM atlas_regions WHERE kind = 'section' AND json_extract(locator_json, '$.selector') LIKE '%#full'",
+            )
+            .get() as { id: string }
+        ).id,
+    );
+    const second = await collectAtlasPage(
+      {
+        siteSlug: "chromium-fixture",
+        viewports: ["desktop"],
+        states: [{ action: "hover", targetRegionId: fullId }],
+      },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    expect(second.viewports[0]!.states).toEqual([
+      expect.objectContaining({
+        action: "hover",
+        targetRegionId: fullId,
+        status: "inconclusive",
+        code: "STATE_TARGET_FULL_VIEWPORT",
+      }),
+    ]);
+    expect(second.viewports[0]!.limitations).toContain("STATE_TARGET_FULL_VIEWPORT");
+    expect(
+      second.viewports[0]!.claims.filter((claim) => claim.field === "behavior"),
+    ).toEqual([]);
+    expect((await publishCapture(second)).published).toBe(true);
+  }, 120_000);
 
   it("blocks robots.txt HTTP 503 instead of launching a browser", async () => {
     const origin = await start((path, res) => {

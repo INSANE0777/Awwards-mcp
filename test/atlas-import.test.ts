@@ -1368,7 +1368,7 @@ describe("legacy Atlas import", () => {
           .prepare("SELECT fts_version, revision FROM atlas_state WHERE singleton = 1")
           .get() as { fts_version: number; revision: number },
     );
-    expect(state).toEqual({ fts_version: 2, revision: 2 });
+    expect(state).toEqual({ fts_version: 4, revision: 2 });
     expect(
       reopened.withAtlasDb(
         (db) =>

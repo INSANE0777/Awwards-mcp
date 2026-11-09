@@ -52,6 +52,63 @@ export interface AtlasScanSection {
   inScrollRoot?: boolean;
 }
 
+/** One bounded node in a serialized component pack. No page copy is stored. */
+export interface AtlasComponentNode {
+  tag: string;
+  role: string | null;
+  depth: number;
+  childCount: number;
+}
+
+/**
+ * Raw component evidence serialized by the page scan. `hint` is the semantic
+ * type the DOM/ARIA structure points at; classification still decides whether
+ * it is observed, inferred or unknown.
+ */
+export interface AtlasScanComponent {
+  nodeKey: string;
+  selector: string;
+  tag: string;
+  role: string | null;
+  hint: string;
+  hintBasis: "native_semantics" | "declared_aria" | "rule_derivation";
+  label: string;
+  visible: boolean;
+  offscreen: boolean;
+  /** Off-canvas geometry: rect fully outside the viewport on any axis. */
+  offCanvas: boolean;
+  /** No visible pixels after viewport and containing-block overflow clipping. */
+  fullyClipped: boolean;
+  sectionNodeKey: string | null;
+  childCount: number;
+  descendantCount: number;
+  hasHeading: boolean;
+  hasMedia: boolean;
+  hasIcon: boolean;
+  inNavigation: boolean;
+  ariaHasPopup: boolean;
+  ariaExpanded: string | null;
+  ariaControlsResolved: boolean;
+  ariaLabel: string | null;
+  overflowX: string;
+  scrollableX: boolean;
+  position: string;
+  transformed: boolean;
+  shape: string;
+  childCounts: string;
+  display: string;
+  gap: string;
+  padding: string;
+  radius: string;
+  fontFamily: string;
+  fontSize: string;
+  fontWeight: string;
+  lineHeight: string;
+  rect: AtlasRect;
+  depth: number;
+  pack: { nodes: AtlasComponentNode[]; truncated: boolean } | null;
+}
+
 export interface AtlasPageScan {
   title: string;
   url: string;
@@ -63,8 +120,12 @@ export interface AtlasPageScan {
   scrollX?: number;
   scrollY?: number;
   sections: AtlasScanSection[];
+  components?: AtlasScanComponent[];
   rawSectionCount?: number;
   sectionLimitHit?: boolean;
+  componentLimitHit?: boolean;
+  /** Candidates discarded by the component cap after ranking. */
+  componentDroppedCount?: number;
   nodeBudgetHit?: boolean;
   technologies: string[];
   canvasCount: number;
@@ -115,6 +176,55 @@ export interface SectionEvidence {
   artifactKey?: string;
 }
 
+/**
+ * A classified component candidate. A declared type is not an observed state:
+ * `type` records how the control is declared, never that it is open or active.
+ */
+export interface ComponentCandidate {
+  key: string;
+  ordinal: number;
+  /** Original index in the serialized scan components array. */
+  scanIndex: number;
+  nodeKey: string;
+  selector: string;
+  tag: string;
+  role: string | null;
+  type: string;
+  typeClassification: "observed" | "inferred";
+  typeBasis: "native_semantics" | "declared_aria" | "rule_derivation";
+  typeDecision: "accepted" | "candidate";
+  typeRuleId: string;
+  label: string;
+  visible: boolean;
+  offscreen: boolean;
+  sectionNodeKey: string | null;
+  /** Published containing section key, when that section was retained. */
+  sectionKey: string | null;
+  patternKey: string;
+  rect: AtlasRect;
+  depth: number;
+  pack: { nodes: AtlasComponentNode[]; truncated: boolean } | null;
+}
+
+export interface ComponentEvidence {
+  viewport: AtlasViewportProfile;
+  candidate: ComponentCandidate;
+  /** Artifact key supplied by the collector/publication layer. */
+  artifactKey?: string;
+  /** Component pack artifact key, when one was serialized. */
+  packArtifactKey?: string | null;
+  /** Accepted purposes of the containing section only. */
+  sectionPurposes?: string[];
+  /** Scan that produced the candidate, used to resolve the section evidence pointer. */
+  scan?: AtlasPageScan;
+}
+
+export interface PatternMembership {
+  key: string;
+  memberKeys: string[];
+  count: number;
+}
+
 export interface AtlasClaim {
   regionKey: string;
   field: string;
@@ -127,6 +237,8 @@ export interface AtlasClaim {
   sampleKey: string;
   checkpointKeys?: string[];
   evidence: EvidenceRef[];
+  /** Interaction state this claim was observed in; absent means default. */
+  state?: AtlasStateName;
 }
 
 export interface AtlasStoredArtifact {
@@ -139,12 +251,32 @@ export interface AtlasStoredArtifact {
   regionKey: string | null;
 }
 
+export type AtlasStateAction = "hover" | "focus";
+export type AtlasStateName = "default" | AtlasStateAction;
+
+/** An explicit, bounded interaction-state request on an already published region. */
+export interface AtlasStateRequest {
+  action: AtlasStateAction;
+  targetRegionId: string;
+}
+
+/** Outcome of one explicit state request, including inconclusive results. */
+export interface AtlasStateResult {
+  action: AtlasStateAction;
+  targetRegionId: string;
+  status: "observed" | "inconclusive";
+  code?: string;
+  sampleKey?: string;
+  /** Capture-local region key that received the state sample. */
+  regionKey?: string;
+}
+
 export interface AtlasObservation {
   key: string;
   checkpoint: number;
   scrollY: number;
   scrollRoot: string | null;
-  state: "default";
+  state: AtlasStateName;
   settleStatus?: "settled";
   coordinateSpace: "document" | "scroll_root";
   scrollX: number;
@@ -166,6 +298,8 @@ export interface AtlasObservation {
   }>;
   screenshotKey: string;
   scanArtifactKey: string;
+  /** State evidence JSON for non-default observations. */
+  stateArtifactKey?: string;
 }
 
 export interface AtlasViewportCapture {
@@ -183,9 +317,12 @@ export interface AtlasViewportCapture {
   loadingFailures: string[];
   scan: AtlasPageScan;
   regions: RegionCandidate[];
+  components?: ComponentCandidate[];
   claims: AtlasClaim[];
   screenshots: AtlasStoredArtifact[];
   observations?: AtlasObservation[];
+  /** State request outcomes, including explicit inconclusive codes. */
+  states?: AtlasStateResult[];
   artifacts: AtlasStoredArtifact[];
 }
 
@@ -202,6 +339,8 @@ export interface AtlasCaptureAttempt {
   limitations: string[];
   viewports: AtlasViewportCapture[];
   artifacts: AtlasStoredArtifact[];
+  /** Explicit state requests this attempt was asked to observe. */
+  states?: AtlasStateRequest[];
   error?: string;
 }
 
@@ -209,6 +348,8 @@ export interface AtlasCollectInput {
   siteSlug: string;
   path?: string;
   viewports?: AtlasViewportProfile[];
+  /** At most three explicit hover/focus observations on current head regions. */
+  states?: AtlasStateRequest[];
 }
 
 export interface AtlasCollectDeps {
@@ -224,7 +365,11 @@ export interface AtlasCollectDeps {
   navigationTimeoutMs?: number;
   /** Test seams; production uses the guarded page-level defaults. */
   settle?: (page: any) => Promise<void>;
-  scanPage?: (page: any, viewport: AtlasViewportProfile) => Promise<AtlasPageScan>;
+  scanPage?: (
+    page: any,
+    viewport: AtlasViewportProfile,
+    options?: { components?: boolean },
+  ) => Promise<AtlasPageScan>;
   screenshot?: (page: any) => Promise<Buffer>;
 }
 
@@ -233,8 +378,17 @@ export interface AtlasPublicationResult {
   code?: string;
   captureIds: AtlasId[];
   pageId: AtlasId;
+  /** Section regions stored by this publication. */
   regionCount: number;
+  /** Component regions stored by this publication. */
+  componentCount: number;
   claimCount: number;
+  /**
+   * For observed state requests: the requested region id mapped to the region
+   * id stored in this publication's capture. A follow-up state request uses
+   * the published id, which belongs to the new active head.
+   */
+  publishedRegionIds?: Record<string, string>;
 }
 
 export interface AtlasPublishDeps {

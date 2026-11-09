@@ -42,6 +42,7 @@ interface SeedResult {
   staleRegions: number;
   unknownRegions: number;
   claims: number;
+  stateClaims: number;
   purposes: string[];
   captures: number;
   sites: number;
@@ -118,8 +119,8 @@ function seedBenchmarkDatabase(
     const claimInsert = db.prepare(
       `INSERT INTO atlas_claims
          (id, region_id, field, value, sample_key, classification, basis, decision,
-          rule_id, rule_version, evidence_json, limitations_json, review_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, '[]', '[]', NULL)`,
+          state, rule_id, rule_version, evidence_json, limitations_json, review_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, '[]', '[]', NULL)`,
     );
     const headInsert = db.prepare(
       "INSERT INTO atlas_heads (page_id, profile_key, capture_id, published_at) VALUES (?, 'live-desktop', ?, ?)",
@@ -136,6 +137,7 @@ function seedBenchmarkDatabase(
     let captureIndex = 0;
     let regionIndex = 0;
     let claimCount = 0;
+    let stateClaimCount = 0;
     let eligiblePlaced = 0;
     let stalePlaced = 0;
     let unknownPlaced = 0;
@@ -204,8 +206,38 @@ function seedBenchmarkDatabase(
             claimIndex === 0 && regionIndex % 10 === 0 ? "observed" : "inferred",
             claimIndex === 0 && regionIndex % 10 === 0 ? "native_semantics" : "rule_derivation",
             regionIndex % 10 < 6 ? "candidate" : "accepted",
+            "default",
           );
           claimCount += 1;
+        }
+        // A realistic minority of regions carries hover evidence: one
+        // interaction claim plus the purpose re-emitted under the state sample.
+        if (regionIndex % 20 === 0) {
+          const stateSample = `desktop:${regionId}:state-hover`;
+          claimInsert.run(
+            `bench-state-behavior-${regionIndex}`,
+            regionId,
+            "behavior",
+            "hover_change_observed",
+            stateSample,
+            "observed",
+            "interaction_observation",
+            "accepted",
+            "hover",
+          );
+          claimInsert.run(
+            `bench-state-purpose-${regionIndex}`,
+            regionId,
+            "section.purpose",
+            purpose,
+            stateSample,
+            "inferred",
+            "rule_derivation",
+            "accepted",
+            "hover",
+          );
+          claimCount += 2;
+          stateClaimCount += 2;
         }
         regionIndex += 1;
       }
@@ -249,6 +281,7 @@ function seedBenchmarkDatabase(
       staleRegions: stalePlaced,
       unknownRegions: unknownPlaced,
       claims: claimCount,
+      stateClaims: stateClaimCount,
       purposes,
       captures,
       sites: siteCount,
@@ -296,6 +329,7 @@ export interface AtlasSearchBenchResult {
   staleRegions: number;
   unknownRegions: number;
   claims: number;
+  stateClaims: number;
   claimsPerRegion: number;
   captures: number;
   sites: number;
@@ -323,6 +357,7 @@ export interface AtlasSearchBenchResult {
   databaseBytes: number;
   totalResults: number;
   deterministicDigest: string;
+  statePaging: { pages: number; regions: number };
   now: number;
   environment: {
     cpu: string | null;
@@ -363,6 +398,23 @@ function benchmarkPredicates(purposes: string[]): AtlasPredicate[] {
   ];
 }
 
+/**
+ * State evidence is a 5% subset, so the state workload keeps the purpose
+ * predicate and structural sets that subset actually carries. It still
+ * exercises predicate filtering, facets and state eligibility.
+ */
+function benchmarkStatePredicates(purposes: string[]): AtlasPredicate[] {
+  const pick = (values: string[], indexes: number[]): string[] =>
+    indexes.map((index) => values[index]!).filter((value): value is string => Boolean(value));
+  return [
+    { field: "section.purpose", values: pick(purposes, [0, 3, 6, 7, 10, 14, 17, 20]) },
+    { field: "section.purpose", values: pick(purposes, [0, 7, 14, 20]) },
+    { field: "region.tag", values: ["section", "header", "main"] },
+    { field: "region.role", values: ["region", "navigation"] },
+    { field: "region.landmark", values: ["main", "footer"] },
+  ];
+}
+
 function cpuModel(): string | null {
   try {
     return cpus()[0]?.model?.trim() ?? null;
@@ -393,6 +445,7 @@ export function runAtlasSearchBenchmark(
     migrateAtlas(db, now, false);
     const seeded = seedBenchmarkDatabase(db, regionCount, claimsPerRegion, now, random);
     const predicates = benchmarkPredicates(seeded.purposes);
+    const statePredicates = benchmarkStatePredicates(seeded.purposes);
     const run = (input: SearchAtlasInput) => {
       const compiled = compilePredicates(input);
       if (!compiled.ok) throw new Error(`${compiled.error.code}: ${compiled.error.message}`);
@@ -416,11 +469,14 @@ export function runAtlasSearchBenchmark(
       scope: "region" | "page" | "site",
       facets: SearchField[],
       cold: boolean,
+      state: "hover" | "default" = "default",
     ): { workload: AtlasSearchBenchWorkload; ids: string[]; schemaBytes: number; maxRssBytes: number } => {
+      const activePredicates = state === "default" ? predicates : statePredicates;
       const input: SearchAtlasInput = {
         kind: "sections",
-        predicates,
+        predicates: activePredicates,
         scope,
+        ...(state === "default" ? {} : { state }),
         ...(facets.length > 0 ? { facets } : {}),
         limit: 8,
       };
@@ -448,7 +504,7 @@ export function runAtlasSearchBenchmark(
           name,
           scope,
           facets,
-          predicateCount: predicates.length,
+          predicateCount: activePredicates.length,
           gateMs,
           p50Ms: percentile(samples, 0.5),
           p95Ms: percentile(samples, 0.95),
@@ -467,12 +523,47 @@ export function runAtlasSearchBenchmark(
     const measured = [
       measure("region-8-predicates", "region", [], true),
       measure("region-8-predicates-4-facets", "region", FOUR_FACETS, false),
+      measure("state-region-predicates", "region", [], false, "hover"),
+      measure("state-region-predicates-4-facets", "region", FOUR_FACETS, false, "hover"),
       measure("page-8-predicates", "page", [], false),
       measure("page-8-predicates-4-facets", "page", FOUR_FACETS, false),
       measure("site-8-predicates", "site", [], false),
       measure("site-8-predicates-4-facets", "site", FOUR_FACETS, false),
     ];
     const maxRss = Math.max(baselineRss, ...measured.map((entry) => entry.maxRssBytes));
+
+    // State cursor pagination: two regions per page until the corpus is
+    // exhausted, proving the state filter survives page boundaries.
+    const pagingCompiled = compilePredicates({
+      kind: "sections",
+      state: "hover",
+      predicates: statePredicates,
+      limit: 2,
+    });
+    if (!pagingCompiled.ok) {
+      throw new Error(`${pagingCompiled.error.code}: ${pagingCompiled.error.message}`);
+    }
+    let pagingAfter: string[] | null = null;
+    const pagingIds: string[] = [];
+    let pagingPages = 0;
+    for (let page = 0; page < 3; page += 1) {
+      const result = queryAtlasDatabase(db, {
+        input: pagingCompiled.input,
+        asOf: now,
+        tokens: pagingCompiled.tokens,
+        ftsQuery: pagingCompiled.ftsQuery,
+        afterTuple: pagingAfter,
+      });
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
+      pagingPages += 1;
+      pagingIds.push(...result.data.hits.map((hit) => hit.regionId));
+      if (!result.data.hasMore || !result.data.nextTuple) break;
+      pagingAfter = result.data.nextTuple;
+    }
+    if (new Set(pagingIds).size !== pagingIds.length) {
+      throw new Error("state cursor pagination returned duplicate regions");
+    }
+    const statePaging = { pages: pagingPages, regions: pagingIds.length };
 
     const workloads = measured.map((entry) => entry.workload);
     const noFacetSamples = workloads
@@ -492,6 +583,7 @@ export function runAtlasSearchBenchmark(
       staleRegions: seeded.staleRegions,
       unknownRegions: seeded.unknownRegions,
       claims: seeded.claims,
+      stateClaims: seeded.stateClaims,
       claimsPerRegion,
       captures: seeded.captures,
       sites: seeded.sites,
@@ -517,6 +609,7 @@ export function runAtlasSearchBenchmark(
       databaseBytes: statSync(dbPath).size,
       totalResults: workloads.reduce((total, workload) => total + workload.total, 0),
       deterministicDigest: digest,
+      statePaging,
       now,
       environment: {
         cpu: cpuModel(),

@@ -34,10 +34,17 @@ export interface PurposeSpec {
   classification?: Classification;
   basis?: Basis;
   sampleKey?: string;
+  state?: "default" | "hover" | "focus";
 }
 
 export interface SectionSpec {
   id: string;
+  kind?: "section" | "component";
+  /** Convenience component.type claim (observed/native/accepted by default). */
+  componentType?: string;
+  componentTypeState?: "default" | "hover" | "focus";
+  /** Convenience context.section_purpose claims from accepted section purposes. */
+  sectionPurpose?: string | string[];
   purpose?: PurposeSpec | PurposeSpec[];
   claims?: Array<{
     field: string;
@@ -46,6 +53,7 @@ export interface SectionSpec {
     classification?: Classification;
     basis?: Basis;
     sampleKey?: string;
+    state?: "default" | "hover" | "focus";
   }>;
   site?: string;
   siteTitle?: string | null;
@@ -69,6 +77,8 @@ export interface SectionSpec {
   primaryLabel?: string | null;
   heading?: string;
   text?: string;
+  /** State samples stored on the region (observation state + sample key). */
+  samples?: Array<{ sampleKey: string; state: "default" | "hover" | "focus" }>;
   bm25?: number;
   screenshots?: string[];
   artifacts?: Array<{
@@ -140,7 +150,7 @@ export function makeSnapshot(
       id: spec.id,
       captureId,
       parentId: null,
-      kind: "section",
+      kind: spec.kind ?? "section",
       ordinal: spec.ordinal ?? index,
       tag: spec.tag === undefined ? "section" : spec.tag,
       role: spec.role ?? null,
@@ -153,6 +163,7 @@ export function makeSnapshot(
       textExcerpt: spec.text ?? "",
       fingerprint: null,
       coverage: coverage(spec.coverage),
+      samples: spec.samples ?? [],
     });
     if (spec.bm25 !== undefined) bm25[spec.id] = spec.bm25;
     if (spec.screenshots) screenshots[captureId] = [...spec.screenshots];
@@ -178,9 +189,45 @@ export function makeSnapshot(
         field: "section.purpose",
         value: purpose.value,
         sampleKey: purpose.sampleKey ?? `${viewport}:${spec.id}`,
+        state: purpose.state,
         classification: purpose.classification ?? "inferred",
         basis: purpose.basis ?? "rule_derivation",
         decision: purpose.decision ?? "candidate",
+        ruleId: null,
+      });
+      claimIndex += 1;
+    }
+    if (spec.componentType) {
+      claims.push({
+        id: `${spec.id}:component.type:${claimIndex}`,
+        regionId: spec.id,
+        field: "component.type",
+        value: spec.componentType,
+        sampleKey: `${viewport}:${spec.id}`,
+        state: spec.componentTypeState,
+        classification: "observed",
+        basis: "native_semantics",
+        decision: "accepted",
+        ruleId: null,
+      });
+      claimIndex += 1;
+    }
+    const contextPurposes =
+      spec.sectionPurpose === undefined
+        ? []
+        : Array.isArray(spec.sectionPurpose)
+          ? spec.sectionPurpose
+          : [spec.sectionPurpose];
+    for (const purpose of contextPurposes) {
+      claims.push({
+        id: `${spec.id}:context.section_purpose:${claimIndex}`,
+        regionId: spec.id,
+        field: "context.section_purpose",
+        value: purpose,
+        sampleKey: `${viewport}:${spec.id}`,
+        classification: "inferred",
+        basis: "rule_derivation",
+        decision: "accepted",
         ruleId: null,
       });
       claimIndex += 1;
@@ -192,6 +239,7 @@ export function makeSnapshot(
         field: claim.field,
         value: claim.value,
         sampleKey: claim.sampleKey ?? `${viewport}:${spec.id}`,
+        state: claim.state,
         classification: claim.classification ?? "inferred",
         basis: claim.basis ?? "rule_derivation",
         decision: claim.decision ?? "candidate",

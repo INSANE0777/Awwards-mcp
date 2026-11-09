@@ -7,13 +7,17 @@ export type AtlasEvidenceMode = "accepted" | "observed_only" | "candidate";
 export type AtlasGroupBy = "instance" | "pattern";
 export type AtlasSort = "relevance" | "newest";
 
-/** Phase 3 exposes the region-level predicates shipped by the Phase 2 model. */
 export type SearchField =
   | "section.purpose"
+  | "component.type"
+  | "context.section_purpose"
   | "region.kind"
   | "region.tag"
   | "region.role"
   | "region.landmark";
+
+export type AtlasResultKind = "section" | "component";
+export type AtlasCountUnit = "region_instance" | "component_pattern";
 
 export interface AtlasPredicate {
   field: SearchField;
@@ -161,7 +165,9 @@ export interface AtlasHit {
   sourceUrl: string | null;
   pageUrl: string | null;
   pagePath: string | null;
-  kind: "section";
+  kind: AtlasResultKind;
+  /** Canonical component type for component hits; null for sections. */
+  componentType: string | null;
   primaryLabel: string | null;
   viewport: AtlasSearchViewport;
   state: AtlasSearchState;
@@ -200,7 +206,7 @@ export interface AtlasFacet {
    * advertised value is not the same as selecting it and can yield zero.
    */
   disjunctive: true;
-  countUnit: "region_instance";
+  countUnit: AtlasCountUnit;
   values: AtlasFacetValue[];
 }
 
@@ -211,7 +217,7 @@ export interface SearchAtlasData {
   interpreted: InterpretedSearchInput;
   results: AtlasHit[];
   total: number;
-  countUnit: "region_instance";
+  countUnit: AtlasCountUnit;
   nextCursor: string | null;
   facets: AtlasFacet[];
   corpus: {
@@ -258,7 +264,7 @@ export interface AtlasSearchRegion {
   id: string;
   captureId: string;
   parentId: string | null;
-  kind: "section";
+  kind: AtlasResultKind;
   ordinal: number;
   tag: string | null;
   role: string | null;
@@ -271,6 +277,11 @@ export interface AtlasSearchRegion {
   textExcerpt: string;
   fingerprint: string | null;
   coverage: EvidenceCoverage;
+  /** Test/benchmark state samples; production filters on `atlas_claims.state`. */
+  samples?: Array<{
+    sampleKey: string;
+    state: "default" | "hover" | "focus";
+  }>;
 }
 
 export interface AtlasSearchClaim {
@@ -279,6 +290,8 @@ export interface AtlasSearchClaim {
   field: string;
   value: string;
   sampleKey: string;
+  /** Observed interaction state; absent means default. */
+  state?: AtlasSearchState;
   classification: "observed" | "inferred" | "proposed";
   basis: EvidenceBasis;
   decision: "accepted" | "candidate" | "rejected";
@@ -318,6 +331,8 @@ export interface AtlasSearchQueryData {
   corpus: { sites: number; pages: number; captures: number };
   /** True when at least one section region is eligible for the requested viewport and age. */
   hasEligibleRegions: boolean;
+  /** Distinct regions carrying evidence for the requested state; 0 for default. */
+  stateEvidence?: number;
   predicatePresence: Partial<Record<SearchField, boolean>>;
 }
 

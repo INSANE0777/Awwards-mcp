@@ -10,9 +10,9 @@ import {
 } from "./search-projections.js";
 import { ATLAS_VOCABULARY_VERSION } from "./vocabulary.js";
 
-export const ATLAS_SCHEMA_VERSION = 8;
-export const ATLAS_FTS_VERSION = 2;
-export const ATLAS_CLASSIFIER_VERSION = "atlas-classifier-0";
+export const ATLAS_SCHEMA_VERSION = 10;
+export const ATLAS_FTS_VERSION = 4;
+export const ATLAS_CLASSIFIER_VERSION = "atlas-classifier-2";
 
 const BASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS atlas_state (
@@ -96,6 +96,7 @@ const BASE_SCHEMA = `
     classification TEXT NOT NULL CHECK (classification IN ('observed','inferred','proposed')),
     basis TEXT NOT NULL CHECK (basis IN ('source_title','source_metadata','native_semantics','declared_aria','computed_style','geometry','interaction_observation','rule_derivation','human_review')),
     decision TEXT NOT NULL CHECK (decision IN ('accepted','candidate','rejected')),
+    state TEXT NOT NULL DEFAULT 'default',
     rule_id TEXT,
     rule_version TEXT,
     evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
@@ -108,6 +109,10 @@ const BASE_SCHEMA = `
     ON atlas_claims(field, value, decision, region_id, sample_key);
   CREATE INDEX IF NOT EXISTS atlas_claims_region_idx ON atlas_claims(region_id, decision);
   CREATE INDEX IF NOT EXISTS atlas_claims_decision_idx ON atlas_claims(decision, classification);
+  CREATE INDEX IF NOT EXISTS atlas_claims_state_region_idx
+    ON atlas_claims(state, region_id, sample_key, decision, classification, value);
+  CREATE INDEX IF NOT EXISTS atlas_claims_region_state_idx
+    ON atlas_claims(region_id, state, sample_key, field, value, decision, classification);
 
   CREATE TABLE IF NOT EXISTS atlas_artifacts (
     id TEXT PRIMARY KEY,
@@ -254,8 +259,9 @@ function rebuildActiveFts(db: DatabaseSync): boolean {
     .prepare(
       `SELECT r.id AS region_id,
               COALESCE(r.raw_title, '') AS title,
-              '' AS heading,
+              CASE WHEN r.kind IN ('section', 'component') THEN r.heading ELSE '' END AS heading,
               CASE
+                WHEN r.kind = 'section' THEN r.text_excerpt
                 WHEN p.kind = 'legacy_gallery' AND r.kind = 'component'
                   THEN COALESCE(r.raw_title, '')
                 ELSE ''
@@ -264,6 +270,7 @@ function rebuildActiveFts(db: DatabaseSync): boolean {
                 SELECT group_concat(cl.field || ' ' || cl.value, ' ' ORDER BY cl.field, cl.value)
                 FROM atlas_claims cl
                 WHERE cl.region_id = r.id
+                  AND cl.state = 'default'
                   AND cl.decision = 'accepted'
                   AND cl.classification <> 'proposed'
               ), '') AS labels,
@@ -340,6 +347,34 @@ function reconcileActiveProjection(
   return changed;
 }
 
+/**
+ * Legacy caches predate the explicit claim state, but FTS reconciliation reads
+ * `atlas_claims.state`. Add and backfill the column before any rebuild so a
+ * schema 3-9 cache upgrades instead of failing on a missing column.
+ */
+function ensureClaimStateColumn(db: DatabaseSync): void {
+  const table = db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'atlas_claims'")
+    .get();
+  if (!table) return;
+  const columns = db.prepare("PRAGMA table_info(atlas_claims)").all() as Array<{
+    name: string;
+  }>;
+  if (!columns.some((column) => column.name === "state")) {
+    db.exec("ALTER TABLE atlas_claims ADD COLUMN state TEXT NOT NULL DEFAULT 'default'");
+  }
+  db.exec(
+    `UPDATE atlas_claims
+     SET state = CASE
+       WHEN sample_key LIKE '%:state-hover' THEN 'hover'
+       WHEN sample_key LIKE '%:state-focus' THEN 'focus'
+       ELSE state
+     END
+     WHERE state = 'default'
+       AND (sample_key LIKE '%:state-hover' OR sample_key LIKE '%:state-focus')`,
+  );
+}
+
 export function migrateAtlas(
   db: DatabaseSync,
   now: number,
@@ -409,6 +444,9 @@ export function migrateAtlas(
       db.exec(BASE_SCHEMA);
       version = 1;
     }
+    // v5 and v6 reconciliation read the state column; legacy caches must have
+    // it before those steps regardless of which version started the upgrade.
+    ensureClaimStateColumn(db);
     if (version < 2) {
       if (ftsAvailable) db.exec(HEADS_AND_FTS_SCHEMA);
       else db.exec("CREATE TABLE IF NOT EXISTS atlas_heads (page_id TEXT NOT NULL REFERENCES atlas_pages(id), profile_key TEXT NOT NULL, capture_id TEXT NOT NULL, published_at INTEGER NOT NULL, PRIMARY KEY (page_id, profile_key), FOREIGN KEY (capture_id, page_id, profile_key) REFERENCES atlas_captures(id, page_id, profile_key));");
@@ -510,6 +548,52 @@ export function migrateAtlas(
       // A v8 cache written before the site profile/freshness columns existed
       // keeps schema version 8; only the derived tables are recreated.
       projectionsDirty = true;
+    }
+    if (version < 9) {
+      // v9 adds the component count column and claim tiers to the derived
+      // projections. They are derived data, so recreate and rebuild rather
+      // than alter in place. FTS v3 also indexes component documents.
+      ensureSearchProjectionShape(db);
+      projectionsDirty = true;
+      version = 9;
+    }
+    if (version < 10) {
+      // v10 makes the observed interaction state an explicit claim dimension.
+      const columns = db.prepare("PRAGMA table_info(atlas_claims)").all() as Array<{
+        name: string;
+      }>;
+      if (!columns.some((column) => column.name === "state")) {
+        db.exec("ALTER TABLE atlas_claims ADD COLUMN state TEXT NOT NULL DEFAULT 'default'");
+      }
+      // v9 stored state claims with the existing sample-key model. Recover
+      // their state from the deterministic state sample suffix before any
+      // label or projection reads them as default evidence.
+      db.exec(
+        `UPDATE atlas_claims
+         SET state = CASE
+           WHEN sample_key LIKE '%:state-hover' THEN 'hover'
+           WHEN sample_key LIKE '%:state-focus' THEN 'focus'
+           ELSE state
+         END
+         WHERE state = 'default'
+           AND (sample_key LIKE '%:state-hover' OR sample_key LIKE '%:state-focus')`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_claims_state_region_idx
+           ON atlas_claims(state, region_id, sample_key, decision, classification, value)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS atlas_claims_region_state_idx
+           ON atlas_claims(region_id, state, sample_key, field, value, decision, classification)`,
+      );
+      // FTS v4 labels exclude non-default state claims.
+      if (reconcileActiveProjection(db, ftsAvailable && ftsVersion > 0, now)) {
+        revision += 1;
+        projectionsDirty = true;
+      }
+      if (ftsAvailable && ftsVersion > 0) ftsVersion = ATLAS_FTS_VERSION;
+      projectionsDirty = true;
+      version = 10;
     }
     // Supporting indexes are separate from the derived table shapes: recreate
     // any that a v8 database lost without paying a projection rebuild.

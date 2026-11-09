@@ -93,6 +93,7 @@ function claimLabels(db: DatabaseSync, region: string): string {
     .prepare(
       `SELECT field, value FROM atlas_claims
        WHERE region_id = ? AND decision = 'accepted' AND classification <> 'proposed'
+         AND state = 'default'
        ORDER BY field, value`,
     )
     .all(region) as Array<{ field: string; value: string }>;

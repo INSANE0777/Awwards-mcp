@@ -1,7 +1,22 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Cache } from "../cache.js";
-import { artifactId, captureConfigHash, captureId, pageId, regionId, sha256Text, stableHash } from "./identity.js";
-import { validateStoredArtifact, artifactPointerResolves, isPngStoredArtifact } from "./artifacts.js";
+import {
+  artifactId,
+  captureConfigHash,
+  captureId,
+  componentFingerprint,
+  pageId,
+  regionId,
+  sectionFingerprint,
+  sha256Text,
+  stableHash,
+} from "./identity.js";
+import {
+  validateStoredArtifact,
+  artifactPointerResolves,
+  isPngStoredArtifact,
+  readStoredArtifactJson,
+} from "./artifacts.js";
 import { primaryPurpose } from "./classification.js";
 import { regionStableKey } from "./segmentation.js";
 import { checkAtlasRedirect } from "./policy.js";
@@ -16,12 +31,14 @@ import type {
   AtlasCaptureAttempt,
   AtlasClaim,
   AtlasPublicationResult,
+  AtlasStateRequest,
   AtlasStoredArtifact,
   AtlasViewportCapture,
+  ComponentCandidate,
 } from "./live-types.js";
 
-const EXTRACTOR_VERSION = "atlas-extractor-2";
-const CLASSIFIER_VERSION = "atlas-classifier-1";
+const EXTRACTOR_VERSION = "atlas-extractor-3";
+const CLASSIFIER_VERSION = "atlas-classifier-2";
 const SOURCE_KIND = "live_page";
 /** Must match the search freshness window: 30 days. */
 const FRESH_WINDOW_MS = 30 * 86_400_000;
@@ -48,12 +65,90 @@ function claimKey(region: string, claim: AtlasClaim): string {
   );
 }
 
+/**
+ * Capture config identity for state requests: sorted and de-duplicated, so the
+ * same request set always hashes equally and a different set never conflates.
+ */
+function canonicalStates(
+  states: AtlasStateRequest[] | undefined,
+): Array<{ action: string; targetRegionId: string }> {
+  const unique = new Map<string, { action: string; targetRegionId: string }>();
+  for (const state of states ?? []) {
+    unique.set(`${state.action}\u0000${state.targetRegionId}`, {
+      action: state.action,
+      targetRegionId: state.targetRegionId,
+    });
+  }
+  return [...unique.values()].sort(
+    (left, right) =>
+      left.action.localeCompare(right.action) ||
+      left.targetRegionId.localeCompare(right.targetRegionId),
+  );
+}
+
+/** Maps observed state targets onto the region ids stored by this capture. */
+function stateRegionIdMap(
+  viewport: AtlasViewportCapture,
+  capture: string,
+): Record<string, string> {
+  const components = viewport.components ?? [];
+  const retained = new Map([
+    ...viewport.regions.map(
+      (region) => [region.key, regionId(capture, "section", region.ordinal, region.key)] as const,
+    ),
+    ...components.map(
+      (component) => [component.key, regionId(capture, "component", component.ordinal, component.key)] as const,
+    ),
+  ]);
+  const mapped: Record<string, string> = {};
+  for (const state of viewport.states ?? []) {
+    const key = state.regionKey;
+    const published = key ? retained.get(key) : undefined;
+    if (published) mapped[state.targetRegionId] = published;
+  }
+  return mapped;
+}
+
 function claimLabels(claims: AtlasClaim[]): string {
   return claims
-    .filter((claim) => claim.decision === "accepted" && claim.classification !== "proposed")
+    .filter(
+      (claim) =>
+        (claim.state ?? "default") === "default" &&
+        claim.decision === "accepted" &&
+        claim.classification !== "proposed",
+    )
     .sort((a, b) => a.field.localeCompare(b.field) || a.value.localeCompare(b.value))
     .map((claim) => `${claim.field} ${claim.value}`)
     .join(" ");
+}
+
+/**
+ * A pack proves structure only for the component that owns it. The payload's
+ * component key and type, plus its root tag/role, must match that component.
+ */
+function packOwnershipMismatch(
+  cacheRoot: string,
+  artifact: AtlasStoredArtifact,
+  components: Map<string, ComponentCandidate>,
+): boolean {
+  const owner = artifact.regionKey ? components.get(artifact.regionKey) : undefined;
+  if (!owner) return true;
+  let payload: unknown;
+  try {
+    payload = readStoredArtifactJson(cacheRoot, artifact);
+  } catch {
+    return true;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return true;
+  const record = payload as Record<string, unknown>;
+  if (record.componentKey !== owner.key || record.type !== owner.type) return true;
+  const nodes = record.nodes;
+  if (!Array.isArray(nodes) || nodes.length === 0) return true;
+  const root = nodes[0];
+  if (!root || typeof root !== "object" || Array.isArray(root)) return true;
+  const node = root as Record<string, unknown>;
+  const role = node.role === null || node.role === undefined ? null : String(node.role);
+  return node.tag !== owner.tag || role !== owner.role;
 }
 
 function artifactRow(
@@ -106,9 +201,12 @@ function deleteHeadFts(db: DatabaseSync, page: string, profile: string): void {
 function existingCaptureCounts(
   db: DatabaseSync,
   capture: string,
-): { regions: number; claims: number } {
+): { regions: number; components: number; claims: number } {
   const regions = db
     .prepare("SELECT COUNT(*) AS n FROM atlas_regions WHERE capture_id = ? AND kind = 'section'")
+    .get(capture) as { n: number };
+  const components = db
+    .prepare("SELECT COUNT(*) AS n FROM atlas_regions WHERE capture_id = ? AND kind = 'component'")
     .get(capture) as { n: number };
   const claims = db
     .prepare(
@@ -117,7 +215,7 @@ function existingCaptureCounts(
        WHERE r.capture_id = ?`,
     )
     .get(capture) as { n: number };
-  return { regions: regions.n, claims: claims.n };
+  return { regions: regions.n, components: components.n, claims: claims.n };
 }
 
 /** Refresh FTS/head for an already-stored deterministic capture. */
@@ -128,7 +226,13 @@ function refreshExistingCapture(
   capture: string,
   page: string,
   now: number,
-): { regions: number; claims: number; freshnessChanged: boolean; freshnessAdvanced: boolean } {
+): {
+  regions: number;
+  components: number;
+  claims: number;
+  freshnessChanged: boolean;
+  freshnessAdvanced: boolean;
+} {
   const prior = db
     .prepare(
       `SELECT status, COALESCE(last_confirmed_at, observed_at) AS fresh
@@ -157,7 +261,8 @@ function refreshExistingCapture(
         `SELECT r.id, r.raw_title, r.heading, r.text_excerpt,
                 COALESCE((SELECT group_concat(c.field || ' ' || c.value, ' ' ORDER BY c.field, c.value)
                           FROM atlas_claims c
-                          WHERE c.region_id = r.id AND c.decision = 'accepted'
+                          WHERE c.region_id = r.id AND c.state = 'default'
+                            AND c.decision = 'accepted'
                             AND c.classification <> 'proposed'), '') AS labels
          FROM atlas_regions r WHERE r.capture_id = ? AND r.kind = 'section' ORDER BY r.ordinal`,
       )
@@ -175,6 +280,28 @@ function refreshExistingCapture(
         section.heading,
         section.text_excerpt,
         section.labels,
+        attempt.target.siteSlug,
+      );
+    }
+    const components = db
+      .prepare(
+        `SELECT r.id, COALESCE(r.raw_title, '') AS title, r.heading,
+                COALESCE((SELECT group_concat(c.field || ' ' || c.value, ' ' ORDER BY c.field, c.value)
+                          FROM atlas_claims c
+                          WHERE c.region_id = r.id AND c.state = 'default'
+                            AND c.decision = 'accepted'
+                            AND c.classification <> 'proposed'), '') AS labels
+         FROM atlas_regions r WHERE r.capture_id = ? AND r.kind = 'component'
+         ORDER BY r.ordinal`,
+      )
+      .all(capture) as Array<{ id: string; title: string; heading: string; labels: string }>;
+    for (const component of components) {
+      insertFts.run(
+        component.id,
+        component.title,
+        component.heading,
+        "",
+        component.labels,
         attempt.target.siteSlug,
       );
     }
@@ -225,10 +352,11 @@ function storeViewport(
   page: string,
   now: number,
   artifactIds: Map<string, string>,
-): number {
+): { regions: number; components: number } {
   for (const [index, artifact] of viewport.artifacts.entries()) {
     artifactIds.set(artifact.key, artifactRow(db, capture, artifact, index, now));
   }
+  const components = viewport.components ?? [];
   const root = regionId(capture, "page", 0, attempt.target.urlKey);
   db.prepare(
     `INSERT INTO atlas_regions
@@ -266,22 +394,76 @@ function storeViewport(
     }
   }
   const retainedIds = new Map(
-    viewport.regions.map((region) => [
-      region.key,
-      regionId(capture, "section", region.ordinal, region.key),
-    ]),
+    [
+      ...viewport.regions.map((region) => [
+        region.key,
+        regionId(capture, "section", region.ordinal, region.key),
+      ] as const),
+      ...components.map((component) => [
+        component.key,
+        regionId(capture, "component", component.ordinal, component.key),
+      ] as const),
+    ],
   );
   const observations = viewport.observations ?? [];
-  const stableIds = new Map(
-    viewport.regions.map((region) => [regionStableKey(region), retainedIds.get(region.key)!]),
-  );
+  const stableIds = new Map([
+    ...viewport.regions.map(
+      (region) => [regionStableKey(region), retainedIds.get(region.key)!] as const,
+    ),
+    ...components.map(
+      (component) => [component.key, retainedIds.get(component.key)!] as const,
+    ),
+  ]);
+  const observationsFor = (key: string) =>
+    observations
+      .filter((observation) => observation.regionKeys.includes(key))
+      .map((observation) => ({
+        ...observation,
+        regionKeys: [key],
+        regions: observation.regions
+          .filter((sample) => sample.key === key)
+          .map((sample) => ({
+            ...sample,
+            targetRegionId:
+              (sample.targetRegionId
+                ? retainedIds.get(sample.targetRegionId)
+                : null) ?? stableIds.get(sample.key) ?? null,
+          })),
+      }));
+
+  const insertClaims = (id: string, regionKey: string): void => {
+    const claims = claimsByRegion.get(regionKey) ?? [];
+    for (const claim of claims) {
+      const evidence = claim.evidence.map((ref) => {
+        const mapped = artifactIds.get(ref.artifactId);
+        if (!mapped) throw new Error(`unresolved evidence artifact ${ref.artifactId}`);
+        return { ...ref, artifactId: mapped };
+      });
+      db.prepare(
+        `INSERT OR IGNORE INTO atlas_claims
+           (id, region_id, field, value, sample_key, classification, basis, decision,
+            state, rule_id, rule_version, evidence_json, limitations_json, review_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      ).run(
+        claimKey(id, claim),
+        id,
+        claim.field,
+        claim.value,
+        claim.sampleKey,
+        claim.classification,
+        claim.basis,
+        claim.decision,
+        claim.state ?? "default",
+        claim.ruleId,
+        claim.ruleVersion,
+        JSON.stringify(evidence),
+        "[]",
+      );
+    }
+  };
 
   for (const region of viewport.regions) {
     const id = retainedIds.get(region.key)!;
-    const parent =
-      region.parentKey && retainedIds.has(region.parentKey)
-        ? retainedIds.get(region.parentKey)!
-        : root;
     const claims = claimsByRegion.get(region.key) ?? [];
     db.prepare(
       `INSERT INTO atlas_regions
@@ -291,10 +473,10 @@ function storeViewport(
     ).run(
       id,
       capture,
-      parent,
+      root,
       region.ordinal,
       JSON.stringify({ selector: region.selector, tag: region.tag, rect: region.rect }),
-      sha256Text(`${region.selector}|${region.heading ?? ""}|${region.text.slice(0, 80)}`),
+      sectionFingerprint(region.selector, region.heading, region.text),
       region.heading ? region.heading.slice(0, 300) : "",
       region.text.slice(0, 4_000),
       region.heading ? region.heading.slice(0, 300) : null,
@@ -308,23 +490,7 @@ function storeViewport(
         depth: region.depth,
         backgroundColor: region.backgroundColor,
         seq: region.ordinal,
-        observations: observations
-          .filter((observation) =>
-            observation.regionKeys.includes(regionStableKey(region)),
-          )
-          .map((observation) => ({
-            ...observation,
-            regionKeys: [regionStableKey(region)],
-            regions: observation.regions
-              .filter((sample) => sample.key === regionStableKey(region))
-              .map((sample) => ({
-                ...sample,
-                targetRegionId:
-                  (sample.targetRegionId
-                    ? retainedIds.get(sample.targetRegionId)
-                    : null) ?? stableIds.get(sample.key) ?? null,
-              })),
-          })),
+        observations: observationsFor(regionStableKey(region)),
       }),
       JSON.stringify({
         status: viewport.coverage.status,
@@ -333,32 +499,86 @@ function storeViewport(
         limitations: viewport.limitations,
       }),
     );
-    for (const claim of claims) {
-      const evidence = claim.evidence.map((ref) => {
-        const mapped = artifactIds.get(ref.artifactId);
-        if (!mapped) throw new Error(`unresolved evidence artifact ${ref.artifactId}`);
-        return { ...ref, artifactId: mapped };
-      });
-      db.prepare(
-        `INSERT OR IGNORE INTO atlas_claims
-           (id, region_id, field, value, sample_key, classification, basis, decision,
-            rule_id, rule_version, evidence_json, limitations_json, review_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-      ).run(
-        claimKey(id, claim),
-        id,
-        claim.field,
-        claim.value,
-        claim.sampleKey,
-        claim.classification,
-        claim.basis,
-        claim.decision,
-        claim.ruleId,
-        claim.ruleVersion,
-        JSON.stringify(evidence),
-        "[]",
-      );
-    }
+    insertClaims(id, region.key);
+  }
+  // Region order is geometric, so a retained parent can follow its child. Set
+  // the real parent only after every section row exists.
+  for (const region of viewport.regions) {
+    if (!region.parentKey || !retainedIds.has(region.parentKey)) continue;
+    db.prepare("UPDATE atlas_regions SET parent_id = ? WHERE id = ?").run(
+      retainedIds.get(region.parentKey)!,
+      retainedIds.get(region.key)!,
+    );
+  }
+
+  for (const component of components) {
+    const id = retainedIds.get(component.key)!;
+    const parent =
+      component.sectionKey && retainedIds.has(component.sectionKey)
+        ? retainedIds.get(component.sectionKey)!
+        : root;
+    const packKey =
+      viewport.artifacts.find(
+        (artifact) =>
+          artifact.kind === "component_pack" && artifact.regionKey === component.key,
+      )?.key ?? null;
+    db.prepare(
+      `INSERT INTO atlas_regions
+         (id, capture_id, parent_id, kind, ordinal, locator_json, fingerprint, heading,
+          text_excerpt, raw_title, primary_label, samples_json, pattern_key, coverage_json)
+       VALUES (?, ?, ?, 'component', ?, ?, ?, ?, '', ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      capture,
+      parent,
+      component.ordinal,
+      JSON.stringify({
+        selector: component.selector,
+        tag: component.tag,
+        rect: component.rect,
+        visible: component.visible,
+        offscreen: component.offscreen,
+      }),
+      componentFingerprint(component.selector, component.type, component.patternKey),
+      component.label.slice(0, 300),
+      component.type,
+      component.type,
+      JSON.stringify({
+        role: component.role,
+        type: component.type,
+        typeBasis: component.typeBasis,
+        typeClassification: component.typeClassification,
+        sectionKey: component.sectionKey,
+        rect: component.rect,
+        viewport: viewport.viewport,
+        depth: component.depth,
+        visible: component.visible,
+        offscreen: component.offscreen,
+        packKey,
+        observations: observationsFor(component.key),
+      }),
+      component.patternKey,
+      JSON.stringify({
+        status: viewport.coverage.status,
+        collected: (claimsByRegion.get(component.key) ?? []).length,
+        excluded: 0,
+        limitations: viewport.limitations,
+      }),
+    );
+    insertClaims(id, component.key);
+  }
+
+  // Attach each component pack to the component region it describes. The
+  // artifact row is inserted before regions exist (claims need its id), so the
+  // link is applied once the region ids are known.
+  for (const artifact of viewport.artifacts) {
+    if (!artifact.regionKey) continue;
+    const artifactIdValue = artifactIds.get(artifact.key);
+    const regionIdValue = retainedIds.get(artifact.regionKey);
+    if (!artifactIdValue || !regionIdValue) continue;
+    db.prepare(
+      "UPDATE atlas_artifacts SET region_id = ? WHERE id = ? AND region_id IS NULL",
+    ).run(regionIdValue, artifactIdValue);
   }
 
   const ftsVersion = (
@@ -384,6 +604,19 @@ function storeViewport(
         attempt.target.siteSlug,
       );
     }
+    for (const component of components) {
+      const id = retainedIds.get(component.key)!;
+      const claims = acceptedByRegion.get(component.key) ?? [];
+      const labels = claimLabels(claims);
+      insertFts.run(
+        id,
+        component.type,
+        component.label,
+        "",
+        labels,
+        attempt.target.siteSlug,
+      );
+    }
   }
 
   db.prepare(
@@ -393,7 +626,7 @@ function storeViewport(
        capture_id = excluded.capture_id,
        published_at = excluded.published_at`,
   ).run(page, viewport.profileKey, capture, now);
-  return viewport.regions.length;
+  return { regions: viewport.regions.length, components: components.length };
 }
 
 type WithdrawalResult = { ok: true } | { ok: false; code: "PUBLICATION_BUSY" };
@@ -495,6 +728,7 @@ export async function publishCapture(
       captureIds: [],
       pageId: pageIdValue,
       regionCount: 0,
+      componentCount: 0,
       claimCount: 0,
     };
   }
@@ -505,6 +739,7 @@ export async function publishCapture(
       captureIds: [],
       pageId: pageIdValue,
       regionCount: 0,
+      componentCount: 0,
       claimCount: 0,
     };
   }
@@ -515,6 +750,7 @@ export async function publishCapture(
       captureIds: [],
       pageId: pageIdValue,
       regionCount: 0,
+      componentCount: 0,
       claimCount: 0,
     };
   }
@@ -526,11 +762,16 @@ export async function publishCapture(
       captureIds: [],
       pageId: pageIdValue,
       regionCount: 0,
+      componentCount: 0,
       claimCount: 0,
     };
   }
   for (const viewport of publishableViewports) {
-    const regionIds = viewport.regions.map((region) => region.key);
+    const components = viewport.components ?? [];
+    const regionIds = [
+      ...viewport.regions.map((region) => region.key),
+      ...components.map((component) => component.key),
+    ];
     if (new Set(regionIds).size !== regionIds.length) {
       return {
         published: false,
@@ -538,6 +779,7 @@ export async function publishCapture(
         captureIds: [],
         pageId: pageIdValue,
         regionCount: 0,
+        componentCount: 0,
         claimCount: 0,
       };
     }
@@ -557,6 +799,7 @@ export async function publishCapture(
         captureIds: [],
         pageId: pageIdValue,
         regionCount: 0,
+        componentCount: 0,
         claimCount: 0,
       };
     }
@@ -567,10 +810,32 @@ export async function publishCapture(
         captureIds: [],
         pageId: pageIdValue,
         regionCount: 0,
+        componentCount: 0,
         claimCount: 0,
       };
     }
-    const regionKeys = new Set(usableRegions.map((region) => region.key));
+    for (const component of components) {
+      if (
+        !Number.isFinite(component.rect.x) ||
+        !Number.isFinite(component.rect.y) ||
+        !Number.isFinite(component.rect.width) ||
+        !Number.isFinite(component.rect.height)
+      ) {
+        return {
+          published: false,
+          code: "INVALID_GEOMETRY",
+          captureIds: [],
+          pageId: pageIdValue,
+          regionCount: 0,
+          componentCount: 0,
+          claimCount: 0,
+        };
+      }
+    }
+    const regionKeys = new Set([
+      ...usableRegions.map((region) => region.key),
+      ...components.map((component) => component.key),
+    ]);
     for (const claim of viewport.claims) {
       if (!regionKeys.has(claim.regionKey)) {
         return {
@@ -579,6 +844,7 @@ export async function publishCapture(
           captureIds: [],
           pageId: pageIdValue,
           regionCount: 0,
+          componentCount: 0,
           claimCount: 0,
         };
       }
@@ -592,6 +858,7 @@ export async function publishCapture(
         captureIds: [],
         pageId: pageIdValue,
         regionCount: 0,
+        componentCount: 0,
         claimCount: 0,
       };
     }
@@ -610,6 +877,7 @@ export async function publishCapture(
           captureIds: [],
           pageId: pageIdValue,
           regionCount: 0,
+          componentCount: 0,
           claimCount: 0,
         };
       }
@@ -628,16 +896,54 @@ export async function publishCapture(
           captureIds: [],
           pageId: pageIdValue,
           regionCount: 0,
+          componentCount: 0,
+          claimCount: 0,
+        };
+      }
+    }
+    const componentsByKey = new Map(
+      (viewport.components ?? []).map((component) => [component.key, component]),
+    );
+    for (const artifact of viewport.artifacts) {
+      if (
+        artifact.kind === "component_pack" &&
+        packOwnershipMismatch(cache.rootDir, artifact, componentsByKey)
+      ) {
+        return {
+          published: false,
+          code: "PACK_OWNERSHIP_MISMATCH",
+          captureIds: [],
+          pageId: pageIdValue,
+          regionCount: 0,
+          componentCount: 0,
+          claimCount: 0,
+        };
+      }
+    }
+    const artifactsByKey = new Map(viewport.artifacts.map((artifact) => [artifact.key, artifact]));
+    for (const claim of viewport.claims) {
+      if (
+        claim.evidence.some((ref) => {
+          const artifact = artifactsByKey.get(ref.artifactId);
+          return artifact?.kind === "component_pack" && artifact.regionKey !== claim.regionKey;
+        })
+      ) {
+        return {
+          published: false,
+          code: "PACK_OWNERSHIP_MISMATCH",
+          captureIds: [],
+          pageId: pageIdValue,
+          regionCount: 0,
+          componentCount: 0,
           claimCount: 0,
         };
       }
     }
     for (const claim of viewport.claims) {
-      const byKey = new Map(viewport.artifacts.map((artifact) => [artifact.key, artifact]));
       if (
         claim.evidence.length === 0 ||
         claim.evidence.some((ref) => {
-          const artifact = byKey.get(ref.artifactId);
+          const artifact = artifactsByKey.get(ref.artifactId);
           return (
             !artifact ||
             !artifactPointerResolves(cache.rootDir, {
@@ -654,6 +960,7 @@ export async function publishCapture(
           captureIds: [],
           pageId: pageIdValue,
           regionCount: 0,
+          componentCount: 0,
           claimCount: 0,
         };
       }
@@ -688,6 +995,7 @@ export async function publishCapture(
               captureIds: [],
               pageId: pageIdValue,
               regionCount: 0,
+              componentCount: 0,
               claimCount: 0,
             };
           }
@@ -709,7 +1017,9 @@ export async function publishCapture(
         );
         const captureIds: string[] = [];
         let regionCount = 0;
+        let componentCount = 0;
         let claimCount = 0;
+        const publishedRegionIds: Record<string, string> = {};
         let revisionChanged = false;
         let freshnessAdvanced = false;
         for (const viewport of publishableViewports) {
@@ -717,6 +1027,7 @@ export async function publishCapture(
             schemaVersion: "awwwards-atlas-live-config-v1",
             viewport: viewport.viewport,
             target: attempt.target,
+            states: canonicalStates(attempt.states),
             browserVersion: viewport.browserVersion,
             dpr: viewport.dpr,
             reducedMotion: viewport.reducedMotion,
@@ -734,6 +1045,16 @@ export async function publishCapture(
                 text: region.text,
                 rect: region.rect,
               })),
+              components: (viewport.components ?? []).map((component) => ({
+                key: component.key,
+                type: component.type,
+                sectionKey: component.sectionKey,
+                patternKey: component.patternKey,
+                rect: component.rect,
+              })),
+              componentPacks: viewport.artifacts
+                .filter((artifact) => artifact.kind === "component_pack")
+                .map((artifact) => artifact.sha256),
               claims: viewport.claims.map((claim) => ({
                 regionKey: claim.regionKey,
                 field: claim.field,
@@ -780,6 +1101,7 @@ export async function publishCapture(
             captureConfigHash(config),
           );
           captureIds.push(capture);
+          Object.assign(publishedRegionIds, stateRegionIdMap(viewport, capture));
           const existing = db
             .prepare("SELECT 1 FROM atlas_captures WHERE id = ?")
             .get(capture) !== undefined;
@@ -796,6 +1118,7 @@ export async function publishCapture(
               attempt.finishedAt,
             );
             regionCount += counts.regions;
+            componentCount += counts.components;
             claimCount += counts.claims;
             if (priorHead?.capture_id !== capture || counts.freshnessChanged) {
               revisionChanged = true;
@@ -832,7 +1155,7 @@ export async function publishCapture(
             attempt.finishedAt,
           );
           const artifactIds = new Map<string, string>();
-          regionCount += storeViewport(
+          const storedCounts = storeViewport(
             db,
             attempt,
             viewport,
@@ -841,6 +1164,8 @@ export async function publishCapture(
             attempt.finishedAt,
             artifactIds,
           );
+          regionCount += storedCounts.regions;
+          componentCount += storedCounts.components;
           db.prepare(
             "UPDATE atlas_captures SET status = ?, coverage_json = ? WHERE id = ?",
           ).run(viewport.status, JSON.stringify(viewport.coverage), capture);
@@ -862,7 +1187,9 @@ export async function publishCapture(
         captureIds,
         pageId: pageIdValue,
         regionCount,
+        componentCount,
         claimCount,
+        ...(Object.keys(publishedRegionIds).length > 0 ? { publishedRegionIds } : {}),
       };
     } catch (error) {
       if (inTransaction) {
@@ -882,6 +1209,7 @@ export async function publishCapture(
         captureIds: [],
         pageId: pageIdValue,
         regionCount: 0,
+        componentCount: 0,
         claimCount: 0,
       };
     }
@@ -894,6 +1222,7 @@ export async function publishCapture(
         captureIds: [],
         pageId: pageIdValue,
         regionCount: 0,
+        componentCount: 0,
         claimCount: 0,
       };
     }
