@@ -243,16 +243,19 @@ describe("Atlas search corpus filters", () => {
     });
   });
 
-  it("honours maxAgeDays and rejects unsupported states", () => {
+  it("honours maxAgeDays and reports missing state evidence honestly", () => {
     const data = dataOrThrow(
       searchAtlas({ kind: "sections", limit: 20, maxAgeDays: 1 }, memoryStore(snapshot), SEARCH_NOW),
     );
     expect(data.results.map((hit) => hit.regionId)).toEqual(["fresh-desktop"]);
 
     for (const state of ["hover", "focus"] as const) {
-      const result = searchAtlas({ kind: "sections", state }, memoryStore(snapshot), SEARCH_NOW);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error.code).toBe("UNSUPPORTED_STATE");
+      const stateData = dataOrThrow(
+        searchAtlas({ kind: "sections", state }, memoryStore(snapshot), SEARCH_NOW),
+      );
+      expect(stateData.outcome).toBe("insufficient_coverage");
+      expect(stateData.total).toBe(0);
+      expect(stateData.results).toEqual([]);
     }
   });
 
@@ -422,8 +425,17 @@ describe("Atlas search query and predicates", () => {
       memoryStore(makeSnapshot([])),
       SEARCH_NOW,
     );
-    expect(componentKind.ok).toBe(false);
-    if (!componentKind.ok) expect(componentKind.error.code).toBe("UNSUPPORTED_KIND");
+    expect(componentKind.ok).toBe(true);
+    if (componentKind.ok) expect(componentKind.data.outcome).toBe("empty_corpus");
+
+    const sectionOnlyField = compilePredicates({
+      kind: "components",
+      predicates: [{ field: "section.purpose", values: ["hero"] }],
+    });
+    expect(sectionOnlyField.ok).toBe(false);
+    if (!sectionOnlyField.ok) {
+      expect(sectionOnlyField.error.code).toBe("UNSUPPORTED_PREDICATE");
+    }
   });
 });
 
@@ -1000,7 +1012,7 @@ describe("Atlas search pattern grouping", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("UNSUPPORTED_GROUPING");
-      expect(result.error.message).toContain("Phase 4");
+      expect(result.error.message).toContain("components");
     }
   });
 });
@@ -1056,6 +1068,9 @@ interface SeedSection {
   purpose?: string;
   decision?: "accepted" | "candidate";
   classification?: "observed" | "inferred";
+  /** Claim state for the convenience purpose claim (default: default). */
+  state?: "default" | "hover" | "focus";
+  sampleKey?: string;
   tag?: string | null;
   selector?: string;
   role?: string | null;
@@ -1165,15 +1180,16 @@ function seed(
           db.prepare(
             `INSERT INTO atlas_claims
                (id, region_id, field, value, sample_key, classification, basis, decision,
-                rule_id, rule_version, evidence_json, limitations_json, review_json)
-             VALUES (?, ?, 'section.purpose', ?, ?, ?, 'rule_derivation', ?, NULL, NULL, '[]', '[]', NULL)`,
+                state, rule_id, rule_version, evidence_json, limitations_json, review_json)
+             VALUES (?, ?, 'section.purpose', ?, ?, ?, 'rule_derivation', ?, ?, NULL, NULL, '[]', '[]', NULL)`,
           ).run(
             `${section.id}:claim:${purposeIndex}`,
             section.id,
             section.purpose,
-            `desktop:${section.id}`,
+            section.sampleKey ?? `desktop:${section.id}`,
             section.classification ?? "inferred",
             section.decision ?? "candidate",
+            section.state ?? "default",
           );
           purposeIndex += 1;
         }
@@ -1875,6 +1891,130 @@ describe("Atlas section search projections", () => {
   });
 });
 
+describe("Atlas state-aware SQLite facets", () => {
+  const hoverPurpose = (
+    id: string,
+    purpose: string,
+    overrides: Partial<SeedSection> = {},
+  ): SeedSection => ({
+    id,
+    purpose,
+    decision: "accepted",
+    classification: "observed",
+    state: "hover",
+    sampleKey: `desktop:${id}:state-hover`,
+    ...overrides,
+  });
+
+  function seedStateFacets(): Cache {
+    const cache = new Cache(tmpDir(), () => SEARCH_NOW, { atlas: true });
+    seed(cache, {
+      siteSlug: "facet-site-a",
+      pageId: "facet-a-page",
+      captureId: "facet-a",
+      fts: true,
+      sections: [
+        hoverPurpose("facet-a-hero", "hero", { heading: "Alpha hero", text: "Alpha hero" }),
+        hoverPurpose("facet-a-pricing", "pricing", { heading: "Pricing", text: "Pricing" }),
+      ],
+    });
+    seed(cache, {
+      siteSlug: "facet-site-b",
+      pageId: "facet-b-page",
+      captureId: "facet-b",
+      sections: [hoverPurpose("facet-b-hero", "hero", { heading: "Beta hero", text: "Beta hero" })],
+    });
+    // Stale state evidence must never contribute to a facet count.
+    seed(cache, {
+      siteSlug: "facet-site-stale",
+      pageId: "facet-stale-page",
+      captureId: "facet-stale",
+      observedAt: SEARCH_NOW - 40 * SEARCH_DAY,
+      sections: [hoverPurpose("facet-stale-hero", "hero")],
+    });
+    return cache;
+  }
+
+  const facetCount = (data: SearchAtlasData, value: string): number | undefined =>
+    data.facets[0]!.values.find((entry) => entry.value === value)?.count;
+
+  it("counts a region-scope state purpose facet without structural predicates", () => {
+    const data = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "sections",
+          state: "hover",
+          evidenceMode: "accepted",
+          facets: ["section.purpose"],
+          limit: 20,
+        },
+        atlasSearchStore(seedStateFacets()),
+        SEARCH_NOW,
+      ),
+    );
+    expect(data.total).toBe(3);
+    expect(facetCount(data, "hero")).toBe(2);
+    expect(facetCount(data, "pricing")).toBe(1);
+  });
+
+  it("applies siteSlugs, the text query and capture eligibility to the state facet", () => {
+    const cache = seedStateFacets();
+    const site = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "sections",
+          state: "hover",
+          evidenceMode: "accepted",
+          siteSlugs: ["facet-site-a"],
+          facets: ["section.purpose"],
+          limit: 20,
+        },
+        atlasSearchStore(cache),
+        SEARCH_NOW,
+      ),
+    );
+    expect(site.total).toBe(2);
+    expect(facetCount(site, "hero")).toBe(1);
+
+    const text = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "sections",
+          state: "hover",
+          evidenceMode: "accepted",
+          query: "alpha",
+          facets: ["section.purpose"],
+          limit: 20,
+        },
+        atlasSearchStore(cache),
+        SEARCH_NOW,
+      ),
+    );
+    expect(text.total).toBe(1);
+    expect(facetCount(text, "hero")).toBe(1);
+    expect(facetCount(text, "pricing")).toBe(0);
+  });
+
+  it("returns empty_corpus for a state facet on an empty corpus", () => {
+    const cache = new Cache(tmpDir(), () => SEARCH_NOW, { atlas: true });
+    const data = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "sections",
+          state: "hover",
+          evidenceMode: "accepted",
+          facets: ["section.purpose"],
+        },
+        atlasSearchStore(cache),
+        SEARCH_NOW,
+      ),
+    );
+    expect(data.outcome).toBe("empty_corpus");
+    expect(data.total).toBe(0);
+    expect(data.facets[0]!.values.every((value) => value.count === 0)).toBe(true);
+  });
+});
+
 describe("Atlas publisher tag projection", () => {
   it("writes locator.tag for new captures", async () => {
     const cache = new Cache(tmpDir(), () => SEARCH_NOW, { atlas: true });
@@ -1957,11 +2097,63 @@ describe("Atlas publisher tag projection", () => {
   });
 });
 
+describe("Atlas section search component isolation", () => {
+  const snapshot = makeSnapshot([
+    {
+      id: "hero-section",
+      kind: "section",
+      heading: "Hero",
+      capture: "capture-shared",
+      page: "page-shared",
+      site: "site-shared",
+    },
+    {
+      id: "component-only",
+      kind: "component",
+      componentType: "button",
+      heading: "Component only",
+      capture: "capture-shared",
+      page: "page-shared",
+      site: "site-shared",
+      bm25: -9,
+    },
+  ]);
+
+  it("reports a component-only text match as an honest section no-match", () => {
+    const data = dataOrThrow(
+      searchAtlas(
+        { kind: "sections", query: "component" },
+        memoryStore(snapshot, { "component-only": -9 }),
+        SEARCH_NOW,
+      ),
+    );
+    expect(data.total).toBe(0);
+    expect(data.outcome).toBe("no_observed_match");
+    expect(data.results).toEqual([]);
+  });
+
+  it("counts only section anchors for a mixed text match", () => {
+    const data = dataOrThrow(
+      searchAtlas(
+        { kind: "sections", query: "hero component" },
+        memoryStore(snapshot, { "component-only": -9, "hero-section": -2 }),
+        SEARCH_NOW,
+      ),
+    );
+    expect(data.total).toBe(1);
+    expect(data.results.map((hit) => hit.regionId)).toEqual(["hero-section"]);
+    expect(data.results.every((hit) => hit.kind === "section")).toBe(true);
+  });
+});
+
 describe("Atlas search benchmark", () => {
   it("runs deterministically on a synthetic corpus", () => {
     const first = runAtlasSearchBenchmark({ regions: 300, queries: 2, runs: 1, now: SEARCH_NOW });
     const second = runAtlasSearchBenchmark({ regions: 300, queries: 2, runs: 1, now: SEARCH_NOW });
-    expect(first.measuredRuns).toBe(6);
+    expect(first.measuredRuns).toBe(8);
+    expect(first.stateClaims).toBeGreaterThan(0);
+    expect(first.statePaging.pages).toBeGreaterThan(0);
+    expect(first.workloads.some((workload) => workload.name.startsWith("state-"))).toBe(true);
     expect(first.p95Ms).toBeGreaterThanOrEqual(first.p50Ms);
     expect(first.p50Ms).toBeGreaterThanOrEqual(0);
     expect(first.schemaBytes).toBeGreaterThan(0);

@@ -14,7 +14,9 @@
     { "from": 4, "to": 5, "additive": true },
     { "from": 5, "to": 6, "additive": true },
     { "from": 6, "to": 7, "additive": true },
-    { "from": 7, "to": 8, "additive": true }
+    { "from": 7, "to": 8, "additive": true },
+    { "from": 8, "to": 9, "additive": true },
+    { "from": 9, "to": 10, "additive": true }
   ],
   "legacyFields": [
     {

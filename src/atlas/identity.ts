@@ -50,6 +50,24 @@ export function sha256Text(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+/** Persisted section identity; the collector re-verifies it against the DOM. */
+export function sectionFingerprint(
+  selector: string,
+  heading: string | null,
+  text: string,
+): string {
+  return sha256Text(`${selector}|${heading ?? ""}|${text.slice(0, 80)}`);
+}
+
+/** Persisted component identity; type and pattern are structural, not content. */
+export function componentFingerprint(
+  selector: string,
+  type: string,
+  patternKey: string | null,
+): string {
+  return sha256Text(`${selector}|${type}|${patternKey ?? ""}`);
+}
+
 export function captureConfigHash(value: unknown): string {
   return sha256Text(JSON.stringify(value));
 }

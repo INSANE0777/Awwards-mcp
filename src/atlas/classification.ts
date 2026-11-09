@@ -213,7 +213,10 @@ const CALIBRATED_SECTION_CLASSES = new Set<string>();
 export function primaryPurpose(claims: AtlasClaim[]): string | null {
   const values = new Set(
     claims.filter(
-      (claim) => claim.field === "section.purpose" && claim.decision === "accepted",
+      (claim) =>
+        claim.field === "section.purpose" &&
+        claim.decision === "accepted" &&
+        (claim.state ?? "default") === "default",
     ).map((claim) => claim.value),
   );
   return PRECEDENCE.find((value) => values.has(value)) ?? null;

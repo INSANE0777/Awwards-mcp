@@ -1,7 +1,7 @@
 import { TECHNOLOGY_ALIASES, canonicalizeTechnology } from "../awwwards.js";
 import type { EvidenceBasis } from "./types.js";
 
-export const ATLAS_VOCABULARY_VERSION = "atlas-vocabulary-3";
+export const ATLAS_VOCABULARY_VERSION = "atlas-vocabulary-4";
 
 /** Canonical technology tokens accepted by declared/detected providers. */
 export const TECHNOLOGY_ALLOWLIST: ReadonlySet<string> = new Set([
@@ -139,15 +139,6 @@ const componentValues = [
 ] as const;
 
 const reservedSections = new Set(["announcement", "product_listing", "product_showcase"]);
-const reservedComponents = new Set([
-  "carousel",
-  "drawer",
-  "tooltip",
-  "alert",
-  "progress",
-  "media_player",
-  "canvas",
-]);
 
 function entry(
   field: string,
@@ -192,11 +183,7 @@ export const ATLAS_VOCABULARY: readonly VocabularyEntry[] = [
         reservedSections.has(value) || value === "unknown" ? "reserved" : "supported",
     }),
   ),
-  ...componentValues.map((value) =>
-    entry("component.type", value, inferredBases, {
-      support: reservedComponents.has(value) ? "reserved" : "supported",
-    }),
-  ),
+  ...componentValues.map((value) => entry("component.type", value, inferredBases)),
   entry("appearance.surface", "dark", inferredBases, { aliases: ["treatment.surface:dark"] }),
   entry("appearance.surface", "light", inferredBases, { aliases: ["treatment.surface:light"] }),
   entry("appearance.surface", "mid", inferredBases),

@@ -6,8 +6,13 @@ import { Cache } from "../src/cache.js";
 import { writeArtifactBytesSync, writeJsonArtifactSync } from "../src/atlas/artifacts.js";
 import { classifySections } from "../src/atlas/classification.js";
 import { publishCapture } from "../src/atlas/publish.js";
+import { atlasSearchStore, searchAtlas } from "../src/atlas/search.js";
 import { regionStableKey, segmentRegions } from "../src/atlas/segmentation.js";
-import type { AtlasCaptureAttempt, AtlasStoredArtifact } from "../src/atlas/live-types.js";
+import type {
+  AtlasCaptureAttempt,
+  AtlasStoredArtifact,
+  ComponentCandidate,
+} from "../src/atlas/live-types.js";
 import { loadPhase2Fixture } from "./helpers/phase2-fixture.js";
 
 const dirs: string[] = [];
@@ -319,6 +324,32 @@ describe("Atlas live publication", () => {
         db
           .prepare(
             "SELECT id FROM atlas_regions WHERE kind = 'section' AND ordinal = 0",
+          )
+          .get() as { id: string },
+    );
+    expect(child.parent_id).toBe(parent.id);
+  });
+
+  it("persists a retained parent that sorts after its child", async () => {
+    const cache = new Cache(tmpDir(), () => NOW, { atlas: true });
+    const attempt = attemptFor(cache, "valid");
+    const regions = attempt.viewports[0]!.regions;
+    regions[0]!.parentKey = regions[1]!.key;
+    const result = await publishCapture(attempt);
+    expect(result.published, result.code).toBe(true);
+    const child = cache.withAtlasDb(
+      (db) =>
+        db
+          .prepare(
+            "SELECT parent_id FROM atlas_regions WHERE kind = 'section' AND ordinal = 0",
+          )
+          .get() as { parent_id: string },
+    );
+    const parent = cache.withAtlasDb(
+      (db) =>
+        db
+          .prepare(
+            "SELECT id FROM atlas_regions WHERE kind = 'section' AND ordinal = 1",
           )
           .get() as { id: string },
     );
@@ -863,5 +894,314 @@ describe("Atlas live publication", () => {
         (db) => (db.prepare("SELECT COUNT(*) AS n FROM atlas_captures").get() as { n: number }).n,
       ),
     ).toBe(2);
+  });
+
+  it("keeps hover claims out of default labels, hit claims and ranking", async () => {
+    const cache = new Cache(tmpDir(), () => NOW, { atlas: true });
+    const attempt = attemptFor(cache, "valid");
+    const viewport = attempt.viewports[0]!;
+    const first = viewport.regions[0]!;
+    const second = viewport.regions[1]!;
+    const hoverSample = `desktop:${regionStableKey(first)}:state-hover`;
+    viewport.claims.push({
+      regionKey: first.key,
+      field: "behavior",
+      value: "hover_change_observed",
+      decision: "accepted",
+      classification: "observed",
+      basis: "interaction_observation",
+      ruleId: "behavior.state.hover",
+      ruleVersion: "test",
+      sampleKey: hoverSample,
+      state: "hover",
+      evidence: [
+        {
+          artifactId: "scan-desktop",
+          pointer: `/scan/sections/${first.scanIndex}`,
+          sampleKey: hoverSample,
+        },
+      ],
+    });
+    const defaultSample = `desktop:${regionStableKey(second)}:default`;
+    viewport.claims.push({
+      regionKey: second.key,
+      field: "section.purpose",
+      value: "pricing",
+      decision: "accepted",
+      classification: "observed",
+      basis: "native_semantics",
+      ruleId: "test.default",
+      ruleVersion: "test",
+      sampleKey: defaultSample,
+      evidence: [
+        {
+          artifactId: "scan-desktop",
+          pointer: `/scan/sections/${second.scanIndex}`,
+          sampleKey: defaultSample,
+        },
+      ],
+    });
+    viewport.states = [
+      {
+        action: "hover",
+        targetRegionId: "requested-region",
+        status: "observed",
+        sampleKey: hoverSample,
+        regionKey: first.key,
+      },
+    ];
+    attempt.states = [{ action: "hover", targetRegionId: "requested-region" }];
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const idByOrdinal = cache.withAtlasDb(
+      (db) =>
+        new Map(
+          (
+            db
+              .prepare(
+                "SELECT id, ordinal FROM atlas_regions WHERE capture_id = ? AND kind = 'section'",
+              )
+              .all(published.captureIds[0]!) as Array<{ id: string; ordinal: number }>
+          ).map((row) => [row.ordinal, row.id]),
+        ),
+    );
+    const firstId = idByOrdinal.get(first.ordinal)!;
+    const secondId = idByOrdinal.get(second.ordinal)!;
+    expect(published.publishedRegionIds).toEqual({ "requested-region": firstId });
+    expect(
+      cache.withAtlasDb(
+        (db) =>
+          (
+            db
+              .prepare(
+                "SELECT state FROM atlas_claims WHERE region_id = ? AND field = 'behavior'",
+              )
+              .all(firstId) as Array<{ state: string }>
+          )[0]?.state,
+      ),
+    ).toBe("hover");
+
+    const store = atlasSearchStore(cache);
+    const defaultHits = searchAtlas(
+      { kind: "sections", evidenceMode: "accepted", limit: 20 },
+      store,
+      NOW + 2_000,
+    );
+    if (!defaultHits.ok) throw new Error(defaultHits.error.code);
+    expect(defaultHits.data.results[0]!.regionId).toBe(secondId);
+    expect(
+      defaultHits.data.results
+        .find((hit) => hit.regionId === firstId)!
+        .claims.some((claim) => claim.field === "behavior"),
+    ).toBe(false);
+
+    const text = searchAtlas(
+      {
+        kind: "sections",
+        query: "hover_change_observed",
+        evidenceMode: "accepted",
+        limit: 20,
+      },
+      store,
+      NOW + 2_000,
+    );
+    if (!text.ok) throw new Error(text.error.code);
+    expect(text.data.total).toBe(0);
+
+    const hovered = searchAtlas(
+      { kind: "sections", state: "hover", evidenceMode: "accepted", limit: 20 },
+      store,
+      NOW + 2_000,
+    );
+    if (!hovered.ok) throw new Error(hovered.error.code);
+    expect(hovered.data.outcome).toBe("matches");
+    expect(hovered.data.results.map((hit) => hit.regionId)).toEqual([firstId]);
+    expect(
+      hovered.data.results[0]!.claims.map((claim) => claim.value),
+    ).toEqual(["hover_change_observed"]);
+  });
+
+  it("keeps a candidate state context purpose candidate in search", async () => {
+    const cache = new Cache(tmpDir(), () => NOW, { atlas: true });
+    const attempt = attemptFor(cache, "valid");
+    const viewport = attempt.viewports[0]!;
+    const component: ComponentCandidate = {
+      key: "component-state",
+      ordinal: 0,
+      scanIndex: 0,
+      nodeKey: "component-node",
+      selector: "main > section#a > button#open",
+      tag: "button",
+      role: null,
+      type: "button",
+      typeClassification: "observed",
+      typeBasis: "native_semantics",
+      typeDecision: "accepted",
+      typeRuleId: "component.native_semantics.button",
+      label: "Open",
+      visible: true,
+      offscreen: false,
+      sectionNodeKey: null,
+      sectionKey: null,
+      patternKey: "pattern-state",
+      rect: { x: 0, y: 0, width: 40, height: 20 },
+      depth: 1,
+      pack: null,
+    };
+    viewport.components = [component];
+    const defaultSample = "desktop:component-state:default";
+    const hoverSample = "desktop:component-state:state-hover";
+    const ref = (sampleKey: string) => [
+      { artifactId: "scan-desktop", pointer: "/scan/sections/0", sampleKey },
+    ];
+    viewport.claims.push(
+      {
+        regionKey: component.key,
+        field: "component.type",
+        value: "button",
+        decision: "accepted",
+        classification: "observed",
+        basis: "native_semantics",
+        ruleId: "component.native_semantics.button",
+        ruleVersion: "test",
+        sampleKey: defaultSample,
+        evidence: ref(defaultSample),
+      },
+      {
+        regionKey: component.key,
+        field: "context.section_purpose",
+        value: "hero",
+        decision: "accepted",
+        classification: "inferred",
+        basis: "rule_derivation",
+        ruleId: "context.section_purpose.accepted",
+        ruleVersion: "test",
+        sampleKey: defaultSample,
+        evidence: ref(defaultSample),
+      },
+      {
+        regionKey: component.key,
+        field: "component.type",
+        value: "button",
+        decision: "accepted",
+        classification: "observed",
+        basis: "native_semantics",
+        ruleId: "component.native_semantics.button",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+      {
+        regionKey: component.key,
+        field: "context.section_purpose",
+        value: "pricing",
+        decision: "candidate",
+        classification: "inferred",
+        basis: "rule_derivation",
+        ruleId: "test.state",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+      {
+        regionKey: component.key,
+        field: "behavior",
+        value: "hover_change_observed",
+        decision: "accepted",
+        classification: "observed",
+        basis: "interaction_observation",
+        ruleId: "behavior.state.hover",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+    );
+    viewport.states = [
+      {
+        action: "hover",
+        targetRegionId: "component-request",
+        status: "observed",
+        sampleKey: hoverSample,
+        regionKey: component.key,
+      },
+    ];
+    attempt.states = [{ action: "hover", targetRegionId: "component-request" }];
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const componentId = published.publishedRegionIds!["component-request"]!;
+
+    const accepted = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        scope: "region",
+        evidenceMode: "accepted",
+        predicates: [{ field: "context.section_purpose", values: ["pricing"] }],
+      },
+      atlasSearchStore(cache),
+      NOW + 2_000,
+    );
+    if (!accepted.ok) throw new Error(accepted.error.code);
+    expect(accepted.data.total).toBe(0);
+
+    const candidates = searchAtlas(
+      {
+        kind: "components",
+        state: "hover",
+        scope: "region",
+        evidenceMode: "candidate",
+        predicates: [{ field: "context.section_purpose", values: ["pricing"] }],
+      },
+      atlasSearchStore(cache),
+      NOW + 2_000,
+    );
+    if (!candidates.ok) throw new Error(candidates.error.code);
+    expect(candidates.data.results.map((hit) => hit.regionId)).toEqual([componentId]);
+    expect(candidates.data.results[0]!.claims).toContainEqual(
+      expect.objectContaining({ value: "pricing", decision: "candidate" }),
+    );
+  });
+
+  it("stores canonical state requests in the capture config", async () => {
+    const captureFor = async (
+      states: Array<{ action: "hover" | "focus"; targetRegionId: string }>,
+    ): Promise<string> => {
+      const cache = new Cache(tmpDir(), () => NOW, { atlas: true });
+      const attempt = attemptFor(cache, "valid");
+      attempt.states = states;
+      const published = await publishCapture(attempt);
+      expect(published.published, published.code).toBe(true);
+      return published.captureIds[0]!;
+    };
+    const forward = await captureFor([
+      { action: "hover", targetRegionId: "target-a" },
+      { action: "focus", targetRegionId: "target-b" },
+    ]);
+    const reversed = await captureFor([
+      { action: "focus", targetRegionId: "target-b" },
+      { action: "hover", targetRegionId: "target-a" },
+    ]);
+    const different = await captureFor([{ action: "focus", targetRegionId: "target-c" }]);
+    expect(reversed).toBe(forward);
+    expect(different).not.toBe(forward);
+
+    const cache = new Cache(tmpDir(), () => NOW, { atlas: true });
+    const attempt = attemptFor(cache, "valid");
+    attempt.states = [{ action: "hover", targetRegionId: "target-a" }];
+    const published = await publishCapture(attempt);
+    const config = cache.withAtlasDb(
+      (db) =>
+        JSON.parse(
+          (
+            db
+              .prepare("SELECT config_json FROM atlas_captures WHERE id = ?")
+              .get(published.captureIds[0]!) as { config_json: string }
+          ).config_json,
+        ) as { states: unknown },
+    );
+    expect(config.states).toEqual([{ action: "hover", targetRegionId: "target-a" }]);
   });
 });

@@ -18,6 +18,16 @@ import {
   writeJsonArtifactSync,
 } from "./artifacts.js";
 import { classifySections } from "./classification.js";
+import {
+  COMPONENT_PACK_CAP,
+  COMPONENT_PACK_DEPTH_CAP,
+  COMPONENT_PACK_NODE_CAP,
+  ATLAS_COMPONENT_RULE_VERSION,
+  classifyComponents,
+  componentPatternKey,
+  discoverComponents,
+} from "./components.js";
+import { componentFingerprint, pageId, sectionFingerprint } from "./identity.js";
 import { stableHash } from "./identity.js";
 import {
   acquireAtlasCaptureLease,
@@ -31,8 +41,16 @@ import {
   robotsAllows,
   type AtlasRobotsPolicy,
 } from "./policy.js";
-import { ATLAS_SECTION_SCAN } from "./scan.js";
+import { ATLAS_COMPONENT_HINTS, ATLAS_SECTION_SCAN } from "./scan.js";
 import { regionStableKey, segmentRegionsWithStats } from "./segmentation.js";
+import {
+  ATLAS_STATE_PROBE,
+  ATLAS_STATE_RULE_VERSION,
+  MAX_STATE_REQUESTS,
+  captureAtlasStates,
+  type AtlasStateResolvedRegion,
+  type AtlasStateTarget,
+} from "./states.js";
 import { resolveAtlasTarget } from "./target.js";
 import type {
   AtlasCaptureAttempt,
@@ -41,8 +59,12 @@ import type {
   AtlasCollectInput,
   AtlasObservation,
   AtlasPageScan,
+  AtlasScanComponent,
   AtlasScanSection,
+  AtlasStateRequest,
+  AtlasStateResult,
   AtlasStoredArtifact,
+  ComponentCandidate,
   AtlasViewportCapture,
   AtlasViewportProfile,
   RegionCandidate,
@@ -107,11 +129,11 @@ function viewportOptions(viewport: AtlasViewportProfile) {
   return resolveViewport(viewport);
 }
 
-async function scrollTo(
+export async function scrollTo(
   page: Page,
   scrollRoot: string | null,
   y: number,
-): Promise<{ found: boolean; unique: boolean; scrollY: number }> {
+): Promise<{ found: boolean; unique: boolean; scrollX: number; scrollY: number }> {
   return page.evaluate(
     ({ root, top }: { root: string | null; top: number }) => {
       const g = globalThis as any;
@@ -126,7 +148,12 @@ async function scrollTo(
           matches = null;
         }
         if (!matches || matches.length !== 1) {
-          return { found: Boolean(matches && matches.length > 0), unique: false, scrollY: 0 };
+          return {
+            found: Boolean(matches && matches.length > 0),
+            unique: false,
+            scrollX: 0,
+            scrollY: 0,
+          };
         }
         const el = matches[0];
         // Pin smooth scrolling for this jump, then restore: an inner root with
@@ -135,19 +162,29 @@ async function scrollTo(
         const inlinePriority = el.style ? el.style.getPropertyPriority("scroll-behavior") : "";
         try {
           if (el.style) el.style.setProperty("scroll-behavior", "auto", "important");
-          el.scrollTo({ top, behavior: "instant" });
+          el.scrollTo({ left: 0, top, behavior: "instant" });
         } finally {
           if (el.style) {
             if (inlineBehavior) el.style.setProperty("scroll-behavior", inlineBehavior, inlinePriority);
             else el.style.removeProperty("scroll-behavior");
           }
         }
-        return { found: true, unique: true, scrollY: Number(el.scrollTop || 0) };
+        return {
+          found: true,
+          unique: true,
+          scrollX: Number(el.scrollLeft || 0),
+          scrollY: Number(el.scrollTop || 0),
+        };
       }
       // Instant beats a page's scroll-behavior:smooth, which would otherwise
       // put the capture mid-animation.
       g.window.scrollTo({ left: 0, top, behavior: "instant" });
-      return { found: true, unique: true, scrollY: Number(g.window.scrollY || 0) };
+      return {
+        found: true,
+        unique: true,
+        scrollX: Number(g.window.scrollX || 0),
+        scrollY: Number(g.window.scrollY || 0),
+      };
     },
     { root: scrollRoot, top: y },
   );
@@ -184,9 +221,78 @@ async function measureScrollOffsets(
   }, { root: scrollRoot });
 }
 
-function normalizeScan(raw: AtlasPageScan): AtlasPageScan {
+function normalizeScan(
+  raw: AtlasPageScan,
+  options: { includeComponents?: boolean } = {},
+): AtlasPageScan {
   const rawSections = Array.isArray(raw.sections) ? raw.sections : [];
   const sections = rawSections.slice(0, 80);
+  const includeComponents = options.includeComponents !== false;
+  const rawComponents = includeComponents && Array.isArray(raw.components) ? raw.components : [];
+  const boundedComponents = rawComponents
+    .filter(
+      (component): component is AtlasScanComponent =>
+        Boolean(component) &&
+        typeof component === "object" &&
+        typeof component.selector === "string" &&
+        typeof component.tag === "string" &&
+        typeof component.hint === "string",
+    )
+    .slice(0, 600)
+    .map((component, index) => ({
+      index,
+      component: {
+        ...component,
+        scanIndex: index,
+        label: String(component.label ?? "").slice(0, 200),
+        visible: component.visible === true,
+        offscreen: component.offscreen === true,
+        offCanvas: component.offCanvas === true,
+        fullyClipped: component.fullyClipped === true,
+        sectionNodeKey:
+          typeof component.sectionNodeKey === "string" ? component.sectionNodeKey : null,
+        pack: component.pack && Array.isArray(component.pack.nodes)
+          ? (() => {
+              const nodes = component.pack!.nodes.filter(
+                (node) => node && Number(node.depth) <= COMPONENT_PACK_DEPTH_CAP,
+              );
+              const bounded = nodes.slice(0, COMPONENT_PACK_NODE_CAP);
+              return {
+                nodes: bounded,
+                truncated:
+                  component.pack!.truncated === true ||
+                  nodes.length !== component.pack!.nodes.length ||
+                  bounded.length !== nodes.length,
+              };
+            })()
+          : null,
+      },
+    }));
+  // DOM order is not importance: rank on-screen, large, section-bound
+  // candidates before applying the component cap. Already-ranked scans are
+  // unchanged by the stable original-index tie-break.
+  boundedComponents.sort(
+    (left, right) =>
+      Number(
+        right.component.visible && !right.component.offscreen && !right.component.offCanvas && !right.component.fullyClipped,
+      ) -
+        Number(
+          left.component.visible && !left.component.offscreen && !left.component.offCanvas && !left.component.fullyClipped,
+        ) ||
+      right.component.rect.width * right.component.rect.height -
+        left.component.rect.width * left.component.rect.height ||
+      Number(Boolean(right.component.sectionNodeKey)) -
+        Number(Boolean(left.component.sectionNodeKey)) ||
+      left.index - right.index,
+  );
+  const keptComponents = boundedComponents.slice(0, 120);
+  const components = keptComponents.map((entry) => entry.component);
+  // The browser-side scan caps before returning, so its own dropped count is
+  // the only evidence of how many candidates were discarded.
+  const componentDroppedCount = Math.max(
+    Number(raw.componentDroppedCount) || 0,
+    Math.max(0, boundedComponents.length - components.length),
+  );
   return {
     title: String(raw.title ?? "").slice(0, 500),
     url: String(raw.url ?? "").slice(0, 2048),
@@ -211,6 +317,11 @@ function normalizeScan(raw: AtlasPageScan): AtlasPageScan {
         typeof section.selector === "string" &&
         typeof section.tag === "string",
     ),
+    components,
+    componentLimitHit:
+      includeComponents &&
+      (raw.componentLimitHit === true || componentDroppedCount > 0),
+    componentDroppedCount,
     technologies: Array.isArray(raw.technologies)
       ? raw.technologies.filter((value): value is string => typeof value === "string").slice(0, 64)
       : [],
@@ -219,12 +330,213 @@ function normalizeScan(raw: AtlasPageScan): AtlasPageScan {
   };
 }
 
+const STATE_ACTIONS = new Set(["hover", "focus"]);
+
+function validateStateRequests(
+  states: AtlasStateRequest[] | undefined,
+): AtlasStateRequest[] {
+  const requests = states ?? [];
+  if (!Array.isArray(requests)) {
+    throw new AtlasCollectionError("INVALID_STATE_REQUEST", "states must be an array");
+  }
+  if (requests.length > MAX_STATE_REQUESTS) {
+    throw new AtlasCollectionError(
+      "INVALID_STATE_REQUEST",
+      `At most ${MAX_STATE_REQUESTS} explicit state requests are supported`,
+    );
+  }
+  const seen = new Set<string>();
+  return requests.map((request) => {
+    if (!request || typeof request !== "object") {
+      throw new AtlasCollectionError("INVALID_STATE_REQUEST", "Invalid state request");
+    }
+    if (!STATE_ACTIONS.has(request.action)) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State action must be hover or focus",
+      );
+    }
+    if (
+      typeof request.targetRegionId !== "string" ||
+      request.targetRegionId.length === 0
+    ) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State targetRegionId must be a non-empty string",
+      );
+    }
+    const key = `${request.action}\u0000${request.targetRegionId}`;
+    if (seen.has(key)) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "Duplicate state request for the same target and action",
+      );
+    }
+    seen.add(key);
+    return { action: request.action, targetRegionId: request.targetRegionId };
+  });
+}
+
+interface StoredStateTargetRow {
+  id: string;
+  kind: string;
+  locator_json: string | null;
+  fingerprint: string | null;
+  heading: string;
+  text_excerpt: string;
+  raw_title: string | null;
+  samples_json: string;
+  pattern_key: string | null;
+  profile_key: string;
+  page_id: string;
+  capture_id: string;
+  site_slug: string;
+  head_capture: string | null;
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stateViewport(profileKey: string): AtlasViewportProfile | null {
+  if (profileKey === "live-desktop") return "desktop";
+  if (profileKey === "live-mobile") return "mobile";
+  return null;
+}
+
+/**
+ * Loads the persisted locator for each requested target. The target must be a
+ * section/component of the current active head for the same page and a
+ * viewport this capture will collect; anything else is rejected as input.
+ */
+function loadStateTargets(
+  cache: AtlasCollectDeps["cache"],
+  pageIdValue: string,
+  siteSlug: string,
+  requests: AtlasStateRequest[],
+  viewports: AtlasViewportProfile[],
+): AtlasStateTarget[] {
+  if (requests.length === 0) return [];
+  if (!cache.atlas) {
+    throw new AtlasCollectionError(
+      "INVALID_STATE_REQUEST",
+      "Explicit state capture requires an Atlas-enabled cache",
+    );
+  }
+  const rows = new Map<string, StoredStateTargetRow>();
+  cache.withAtlasDb((db) => {
+    const placeholders = requests.map(() => "?").join(", ");
+    const found = db
+      .prepare(
+        `SELECT r.id, r.kind, r.locator_json, r.fingerprint, r.heading,
+                r.text_excerpt, r.raw_title, r.samples_json, r.pattern_key,
+                c.profile_key, c.page_id, c.id AS capture_id, p.site_slug,
+                h.capture_id AS head_capture
+         FROM atlas_regions r
+         JOIN atlas_captures c ON c.id = r.capture_id
+         JOIN atlas_pages p ON p.id = c.page_id
+         LEFT JOIN atlas_heads h
+           ON h.capture_id = c.id AND h.page_id = c.page_id AND h.profile_key = c.profile_key
+         WHERE r.id IN (${placeholders})`,
+      )
+      .all(...requests.map((request) => request.targetRegionId)) as unknown as StoredStateTargetRow[];
+    for (const row of found) rows.set(row.id, row);
+  });
+  return requests.map((request) => {
+    const row = rows.get(request.targetRegionId);
+    if (!row) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target is not a published region of this page",
+      );
+    }
+    if (row.kind !== "section" && row.kind !== "component") {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target must be a section or component",
+      );
+    }
+    if (row.site_slug !== siteSlug || row.page_id !== pageIdValue) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target belongs to a different page",
+      );
+    }
+    const viewport = stateViewport(row.profile_key);
+    if (!viewport || !viewports.includes(viewport)) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target belongs to a viewport this capture does not collect",
+      );
+    }
+    if (row.head_capture !== row.capture_id) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target is not part of the current active head",
+      );
+    }
+    const locator = parseJsonObject(row.locator_json);
+    const samples = parseJsonObject(row.samples_json);
+    const selector =
+      typeof locator?.selector === "string" ? locator.selector : null;
+    const tag = typeof locator?.tag === "string" ? locator.tag : null;
+    if (!selector || !tag || !row.fingerprint) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target has no verifiable locator and fingerprint",
+      );
+    }
+    const kind = row.kind as "section" | "component";
+    const componentType =
+      kind === "component"
+        ? (row.raw_title ?? (typeof samples?.type === "string" ? samples.type : null))
+        : null;
+    const patternKey =
+      kind === "component"
+        ? (row.pattern_key ??
+          (typeof samples?.patternKey === "string" ? samples.patternKey : null))
+        : null;
+    if (kind === "component" && (!componentType || !patternKey)) {
+      throw new AtlasCollectionError(
+        "INVALID_STATE_REQUEST",
+        "State target has no verifiable component type and pattern",
+      );
+    }
+    return {
+      request,
+      kind,
+      regionId: row.id,
+      viewport,
+      selector,
+      tag,
+      heading: row.heading ?? "",
+      text: kind === "section" ? row.text_excerpt : "",
+      componentType,
+      patternKey,
+      fingerprint: row.fingerprint,
+    };
+  });
+}
+
+function normalizeStateText(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * One guarded lifecycle for both viewport profiles. Browser, proxy, contexts
  * and temporary artifacts are owned by this function and closed in finally.
  */
-export async function collectAtlasPage(
-  input: AtlasCollectInput,
+export async function collectAtlasPage(  input: AtlasCollectInput,
   deps: AtlasCollectDeps,
 ): Promise<AtlasCaptureAttempt> {
   const now = deps.now ?? (() => Date.now());
@@ -238,6 +550,19 @@ export async function collectAtlasPage(
     throw new AtlasCollectionError(targetResult.code, targetResult.message);
   }
   const target = targetResult.target;
+  const stateRequests = validateStateRequests(input.states);
+  const requestedViewports = [
+    ...new Set<AtlasViewportProfile>(
+      input.viewports ?? ["desktop", "mobile"],
+    ),
+  ];
+  const stateTargets = loadStateTargets(
+    deps.cache,
+    pageId(input.siteSlug, "live_page", target.urlKey),
+    input.siteSlug,
+    stateRequests,
+    requestedViewports,
+  );
   const origins = normalizeScenePrivateOrigins(deps.allowPrivateOrigins);
   if ("error" in origins) throw new AtlasCollectionError("POLICY_CONFIG", origins.error);
   const gate = createSceneUrlGate(
@@ -349,6 +674,15 @@ export async function collectAtlasPage(
     );
   }
   if (preflight.error) {
+    if (
+      now() >= deadline ||
+      /budget is exhausted|deadline exceeded/i.test(preflight.error)
+    ) {
+      throw new AtlasCollectionError(
+        "CAPTURE_DEADLINE_EXCEEDED",
+        "The capture budget is exhausted",
+      );
+    }
     const privateDestination = /loopback|link-local|private|metadata|reserved/i.test(
       preflight.error,
     );
@@ -452,8 +786,8 @@ export async function collectAtlasPage(
       throw error;
     }
     const browserVersion = String(browser.version?.() ?? "unknown");
-    const requestedProfiles = input.viewports ?? ["desktop", "mobile"];
-    for (const viewport of [...new Set(requestedProfiles)]) {
+    const requestedProfiles = requestedViewports;
+    for (const viewport of requestedProfiles) {
       if (cancelled) break;
       if (now() > deadline) {
         attemptLimitations.push("CAPTURE_DEADLINE_EXCEEDED");
@@ -773,7 +1107,7 @@ export async function collectAtlasPage(
               "CAPTURE_DEADLINE_EXCEEDED",
             )
           : await withTimeout(
-              page.evaluate(ATLAS_SECTION_SCAN) as Promise<AtlasPageScan>,
+              page.evaluate(ATLAS_SECTION_SCAN, ATLAS_COMPONENT_HINTS) as Promise<AtlasPageScan>,
               Math.max(1, deadline - now()),
               "CAPTURE_DEADLINE_EXCEEDED",
             );
@@ -848,6 +1182,13 @@ export async function collectAtlasPage(
           limitations.push("SECTION_TRUNCATION");
         } else if (segmented.filtered > 0) {
           limitations.push("SECTION_EXCLUDED");
+        }
+        if (scan.componentLimitHit) {
+          limitations.push(
+            scan.componentDroppedCount && scan.componentDroppedCount > 0
+              ? `COMPONENT_CAP:${scan.componentDroppedCount}`
+              : "COMPONENT_CAP",
+          );
         }
         const scanPayload = {
           schemaVersion: "awwwards-atlas-live-scan-v1",
@@ -934,6 +1275,7 @@ export async function collectAtlasPage(
           observationKey: string;
           visibleKeys: string[];
         }> = [];
+        let componentInitialScanOnly = false;
         const viewportLimited = limitations.includes("SCREENSHOT_LIMIT");
         if (!viewportLimited) {
           const scrollViewportHeight = Math.max(
@@ -1074,16 +1416,21 @@ export async function collectAtlasPage(
             try {
               const rawCheckpointScan = deps.scanPage
                 ? await withTimeout(
-                    deps.scanPage(page, viewport),
+                    deps.scanPage(page, viewport, { components: false }),
                     Math.max(1, deadline - now()),
                     "CAPTURE_DEADLINE_EXCEEDED",
                   )
                 : await withTimeout(
-                    page.evaluate(ATLAS_SECTION_SCAN) as Promise<AtlasPageScan>,
+                    page.evaluate(ATLAS_SECTION_SCAN, {
+                      ...ATLAS_COMPONENT_HINTS,
+                      components: false,
+                    }) as Promise<AtlasPageScan>,
                     Math.max(1, deadline - now()),
                     "CAPTURE_DEADLINE_EXCEEDED",
                   );
-              const checkpointScan = normalizeScan(rawCheckpointScan);
+              const checkpointScan = normalizeScan(rawCheckpointScan, {
+                includeComponents: false,
+              });
               // The checkpoint scan re-picks the page's scroll root by
               // geometry. A different pick means every offset and rect in
               // this scan belongs to another element than the one the
@@ -1248,6 +1595,13 @@ export async function collectAtlasPage(
         if (observations.length < screenshots.length) {
           limitations.push("CHECKPOINT_OBSERVATION_MISSING");
         }
+        // Components are discovered and packed once, from the initial scan;
+        // checkpoint scans deliberately drop them. This is a coverage scope
+        // note, not an exhausted bound, so it does not by itself make the
+        // section capture partial.
+        if ((scan.components?.length ?? 0) > 0 && checkpointEvidence.length > 0) {
+          componentInitialScanOnly = true;
+        }
         const publishedRegions = [...regions];
         const stableRegions = new Map(
           regions.map((candidate) => [regionStableKey(candidate), candidate]),
@@ -1272,13 +1626,17 @@ export async function collectAtlasPage(
           }
         }
         const retainedKeysByObservedKey = new Map<string, string>();
+        const publishedByNodeKey = new Map<string, string>();
         for (const candidate of [
           ...regions,
           ...checkpointEvidence.flatMap((checkpoint) => checkpoint.regions),
         ]) {
           const retained = stableRegions.get(regionStableKey(candidate));
           // Geometry changes must not strand a child's native parent on an unused scan key.
-          if (retained) retainedKeysByObservedKey.set(candidate.key, retained.key);
+          if (retained) {
+            retainedKeysByObservedKey.set(candidate.key, retained.key);
+            publishedByNodeKey.set(candidate.nodeKey, retained.key);
+          }
         }
         for (const region of publishedRegions) {
           if (region.parentKey) {
@@ -1341,6 +1699,493 @@ export async function collectAtlasPage(
             checkpoint.visibleKeys,
           );
         }
+
+        const patternScope = `${target.siteSlug}|${target.urlKey}|${viewport}`;
+        const components: ComponentCandidate[] = discoverComponents(scan).map((candidate) => {
+          const sectionKey = candidate.sectionNodeKey
+            ? (publishedByNodeKey.get(candidate.sectionNodeKey) ?? null)
+            : null;
+          const withSection = { ...candidate, sectionKey };
+          return {
+            ...withSection,
+            patternKey: componentPatternKey(
+              withSection,
+              scan.components?.[candidate.scanIndex] ?? null,
+              patternScope,
+            ),
+          };
+        });
+        const componentArtifacts: AtlasStoredArtifact[] = [];
+        const packKeys = new Map<string, string>();
+        let packCount = 0;
+        for (const component of components) {
+          if (!component.pack || packCount >= 12) continue;
+          const payload = {
+            schemaVersion: "awwwards-atlas-component-pack-v1",
+            componentKey: component.key,
+            type: component.type,
+            nodes: component.pack.nodes,
+            truncated: component.pack.truncated,
+          };
+          const payloadBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+          if (artifactBytes + payloadBytes > MAX_SCREENSHOT_BYTES) continue;
+          const stored = writeJsonArtifactSync(deps.cache.rootDir, payload);
+          const item: AtlasStoredArtifact = {
+            key: `component-pack-${packCount}`,
+            kind: "component_pack",
+            storagePath: stored.storagePath,
+            sha256: stored.sha256,
+            bytes: stored.bytes,
+            mimeType: "application/json",
+            regionKey: component.key,
+          };
+          componentArtifacts.push(item);
+          artifacts.push(item);
+          packKeys.set(component.key, item.key);
+          artifactBytes += item.bytes;
+          packCount += 1;
+        }
+        if (
+          components.length > COMPONENT_PACK_CAP ||
+          components.filter((component) => component.pack !== null).length >
+            componentArtifacts.length
+        ) {
+          limitations.push("COMPONENT_PACK_CAP");
+        }
+        if (components.some((component) => component.pack?.truncated)) {
+          limitations.push("COMPONENT_PACK_TRUNCATED");
+        }
+        const purposesByRegion = new Map<string, string[]>();
+        for (const claim of claims) {
+          if (claim.field !== "section.purpose" || claim.decision !== "accepted") continue;
+          const list = purposesByRegion.get(claim.regionKey) ?? [];
+          if (!list.includes(claim.value)) list.push(claim.value);
+          purposesByRegion.set(claim.regionKey, list);
+        }
+        for (const component of components) {
+          const sampleKey = `${viewport}:${component.key}:${initialSampleKey}`;
+          const componentClaims = classifyComponents({
+            viewport,
+            candidate: component,
+            artifactKey: scanKey,
+            packArtifactKey: packKeys.get(component.key) ?? null,
+            sectionPurposes: component.sectionKey
+              ? (purposesByRegion.get(component.sectionKey) ?? [])
+              : [],
+            scan,
+          });
+          for (const claim of componentClaims) {
+            claim.sampleKey = sampleKey;
+            claim.evidence = claim.evidence.map((ref) => ({ ...ref, sampleKey }));
+            const id = `${claim.regionKey}|${claim.field}|${claim.value}|${claim.basis}|${sampleKey}`;
+            if (claimSeen.has(id)) continue;
+            claimSeen.add(id);
+            claims.push(claim);
+          }
+        }
+        const stateArtifacts: AtlasStoredArtifact[] = [];
+        const stateResults: AtlasStateResult[] = [];
+        const viewportStateTargets = stateTargets.filter(
+          (targetItem) => targetItem.viewport === viewport,
+        );
+        if (viewportStateTargets.length > 0) {
+          const resolveRegion = (targetItem: AtlasStateTarget) => {
+            const candidates =
+              targetItem.kind === "section"
+                ? publishedRegions.filter(
+                    (region) => region.selector === targetItem.selector,
+                  )
+                : components.filter(
+                    (component) => component.selector === targetItem.selector,
+                  );
+            if (candidates.length === 0) {
+              return { ok: false as const, code: "STATE_TARGET_MISSING" };
+            }
+            if (candidates.length > 1) {
+              return { ok: false as const, code: "STATE_TARGET_AMBIGUOUS" };
+            }
+            const current = candidates[0]!;
+            if (
+              normalizeStateText(current.tag) !== normalizeStateText(targetItem.tag) ||
+              normalizeStateText(
+                "heading" in current ? current.heading : current.label,
+              ) !== normalizeStateText(targetItem.heading)
+            ) {
+              return { ok: false as const, code: "STATE_TARGET_CHANGED" };
+            }
+            if (
+              targetItem.kind === "component" &&
+              "type" in current &&
+              normalizeStateText(current.type) !==
+                normalizeStateText(targetItem.componentType)
+            ) {
+              return { ok: false as const, code: "STATE_TARGET_CHANGED" };
+            }
+            return {
+              ok: true as const,
+              region: {
+                key: current.key,
+                observationKey:
+                  targetItem.kind === "section"
+                    ? regionStableKey(current as RegionCandidate)
+                    : current.key,
+                nodeKey: current.nodeKey,
+                ...(targetItem.kind === "component"
+                  ? {
+                      sectionNodeKey:
+                        (current as ComponentCandidate).sectionNodeKey ?? null,
+                      sectionKey:
+                        (current as ComponentCandidate).sectionKey ?? null,
+                    }
+                  : {}),
+                selector: current.selector,
+                tag: current.tag,
+                heading:
+                  ("heading" in current ? current.heading : current.label) ?? "",
+                text: "text" in current ? current.text : current.label,
+                fingerprint:
+                  targetItem.kind === "section"
+                    ? sectionFingerprint(
+                        current.selector,
+                        (current as RegionCandidate).heading,
+                        (current as RegionCandidate).text,
+                      )
+                    : componentFingerprint(
+                        current.selector,
+                        (current as ComponentCandidate).type,
+                        (current as ComponentCandidate).patternKey,
+                      ),
+              },
+            };
+          };
+          const rescanStatePage = async (): Promise<AtlasPageScan> =>
+            normalizeScan(
+              deps.scanPage
+                ? await deps.scanPage(page, viewport)
+                : ((await page.evaluate(
+                    ATLAS_SECTION_SCAN,
+                    ATLAS_COMPONENT_HINTS,
+                  )) as AtlasPageScan),
+            );
+          const revalidateRegion = async (
+            targetItem: AtlasStateTarget,
+            region: AtlasStateResolvedRegion,
+          ): Promise<{ ok: true } | { ok: false; code: string }> => {
+            const rescanned = await rescanStatePage();
+            const sections = segmentRegionsWithStats(rescanned).regions;
+            if (targetItem.kind === "section") {
+              const matches = sections.filter(
+                (candidate) => candidate.selector === region.selector,
+              );
+              if (matches.length === 0) {
+                return { ok: false, code: "STATE_TARGET_MISSING" };
+              }
+              if (matches.length > 1) {
+                return { ok: false, code: "STATE_TARGET_AMBIGUOUS" };
+              }
+              const current = matches[0]!;
+              if (
+                current.nodeKey !== region.nodeKey ||
+                normalizeStateText(current.tag) !==
+                  normalizeStateText(region.tag)
+              ) {
+                return { ok: false, code: "STATE_TARGET_CHANGED" };
+              }
+              const fingerprint = sectionFingerprint(
+                current.selector,
+                current.heading,
+                current.text,
+              );
+              if (fingerprint !== region.fingerprint) {
+                return { ok: false, code: "STATE_TARGET_CHANGED" };
+              }
+              return { ok: true };
+            }
+            const matches = discoverComponents(rescanned)
+              .map((candidate) => {
+                const withSection = {
+                  ...candidate,
+                  sectionKey: region.sectionKey ?? null,
+                };
+                return {
+                  ...withSection,
+                  patternKey: componentPatternKey(
+                    withSection,
+                    rescanned.components?.[candidate.scanIndex] ?? null,
+                    patternScope,
+                  ),
+                };
+              })
+              .filter((candidate) => candidate.selector === region.selector);
+            if (matches.length === 0) {
+              return { ok: false, code: "STATE_TARGET_MISSING" };
+            }
+            if (matches.length > 1) {
+              return { ok: false, code: "STATE_TARGET_AMBIGUOUS" };
+            }
+            const current = matches[0]!;
+            if (
+              current.nodeKey !== region.nodeKey ||
+              (current.sectionNodeKey ?? null) !==
+                (region.sectionNodeKey ?? null) ||
+              normalizeStateText(current.tag) !==
+                normalizeStateText(region.tag) ||
+              normalizeStateText(current.label) !==
+                normalizeStateText(region.heading) ||
+              normalizeStateText(current.type) !==
+                normalizeStateText(targetItem.componentType)
+            ) {
+              return { ok: false, code: "STATE_TARGET_CHANGED" };
+            }
+            if (
+              componentFingerprint(
+                current.selector,
+                current.type,
+                current.patternKey,
+              ) !== region.fingerprint
+            ) {
+              return { ok: false, code: "STATE_TARGET_CHANGED" };
+            }
+            return { ok: true };
+          };
+          const resetStateBaseline = async (): Promise<void> => {
+            try {
+              await page.mouse.move(0, 0);
+            } catch {
+              /* pointer reset is best effort; focus and scroll still reset */
+            }
+            await page.evaluate(ATLAS_STATE_PROBE, {
+              op: "blur",
+              selector: "",
+              scrollRoot: null,
+              scrollIntoView: false,
+            });
+            const scrolled = await scrollTo(page, scan.scrollRoot, 0);
+            if (scrolled?.found === false || scrolled?.unique === false) {
+              throw new AtlasCollectionError(
+                "STATE_RESET_FAILED",
+                "The state scroll baseline could not be restored",
+              );
+            }
+          };
+          let stateOutcomes: Awaited<ReturnType<typeof captureAtlasStates>> = [];
+          try {
+            stateOutcomes = await captureAtlasStates(
+              page,
+              viewportStateTargets,
+              {
+                viewport,
+                scrollRoot: scan.scrollRoot,
+                checkpoint: 0,
+                deadline,
+                now,
+                reset: resetStateBaseline,
+                resolveRegion,
+                revalidateRegion,
+              },
+            );
+          } catch {
+            // A state failure must never lose the default capture that already
+            // succeeded; every request becomes explicitly inconclusive.
+            limitations.push("STATE_PROBE_FAILED");
+            stateOutcomes = viewportStateTargets.map((targetItem) => ({
+              action: targetItem.request.action,
+              targetRegionId: targetItem.request.targetRegionId,
+              status: "inconclusive" as const,
+              code: "STATE_PROBE_FAILED",
+              sample: null,
+              evidence: null,
+              claimValue: null,
+            }));
+          }
+          for (const [stateIndex, outcome] of stateOutcomes.entries()) {
+            if (outcome.status === "inconclusive" || !outcome.sample || !outcome.evidence) {
+              const code = outcome.code ?? "STATE_PROBE_FAILED";
+              limitations.push(code);
+              stateResults.push({
+                action: outcome.action,
+                targetRegionId: outcome.targetRegionId,
+                status: "inconclusive",
+                code,
+              });
+              continue;
+            }
+            const evidenceBytes = Buffer.byteLength(
+              JSON.stringify(outcome.evidence),
+              "utf8",
+            );
+            if (artifactBytes + evidenceBytes > MAX_SCREENSHOT_BYTES) {
+              limitations.push("STATE_ARTIFACT_LIMIT");
+              stateResults.push({
+                action: outcome.action,
+                targetRegionId: outcome.targetRegionId,
+                status: "inconclusive",
+                code: "STATE_ARTIFACT_LIMIT",
+              });
+              continue;
+            }
+            const stored = writeJsonArtifactSync(deps.cache.rootDir, outcome.evidence);
+            artifactBytes += stored.bytes;
+            const artifactKey = `state-${viewport}-${stateIndex}-${outcome.action}`;
+            const artifact: AtlasStoredArtifact = {
+              key: artifactKey,
+              kind: "raw_observation",
+              storagePath: stored.storagePath,
+              sha256: stored.sha256,
+              bytes: stored.bytes,
+              mimeType: "application/json",
+              regionKey: outcome.regionKey!,
+            };
+            stateArtifacts.push(artifact);
+            artifacts.push(artifact);
+            const sampleKey = outcome.sampleKey!;
+            const targetComponent =
+              outcome.sample && outcome.regionKey
+                ? components.find(
+                    (component) => component.key === outcome.regionKey,
+                  )
+                : undefined;
+            if (targetComponent && outcome.claimValue) {
+              // Only a type that was candidate solely for default visibility
+              // becomes observed here. An unresolved aria relationship stays
+              // candidate however visible the control is, and inferred
+              // structural types stay candidate.
+              const visibilityOnly =
+                targetComponent.typeDecision === "candidate" &&
+                targetComponent.typeClassification !== "inferred" &&
+                (targetComponent.typeRuleId === "component.visibility.hidden" ||
+                  (targetComponent.typeRuleId ===
+                    "component.aria.navigation-trigger.resolved" &&
+                    (!targetComponent.visible || targetComponent.offscreen)));
+              const promoted = visibilityOnly && outcome.sample.visible;
+              const typeDecision = promoted
+                ? "accepted"
+                : targetComponent.typeClassification === "inferred"
+                  ? "candidate"
+                  : targetComponent.typeDecision;
+              const typeClaim: AtlasClaim = {
+                regionKey: targetComponent.key,
+                field: "component.type",
+                value: targetComponent.type,
+                decision: typeDecision,
+                classification: targetComponent.typeClassification,
+                basis: targetComponent.typeBasis,
+                ruleId: promoted
+                  ? "component.visibility.observed-in-state"
+                  : targetComponent.typeRuleId,
+                ruleVersion: ATLAS_COMPONENT_RULE_VERSION,
+                sampleKey,
+                state: outcome.action,
+                evidence: [
+                  {
+                    artifactId: scanKey,
+                    pointer: `/scan/components/${targetComponent.scanIndex}`,
+                    sampleKey,
+                  },
+                  ...(promoted
+                    ? [{ artifactId: artifactKey, pointer: "/state", sampleKey }]
+                    : []),
+                ],
+              };
+              const typeId = `${typeClaim.regionKey}|${typeClaim.field}|${typeClaim.value}|${typeClaim.basis}|${sampleKey}`;
+              if (!claimSeen.has(typeId)) {
+                claimSeen.add(typeId);
+                claims.push(typeClaim);
+              }
+            }
+            const behaviorClaim: AtlasClaim = {
+              regionKey: outcome.regionKey!,
+              field: "behavior",
+              value: outcome.claimValue!,
+              decision: "accepted",
+              classification: "observed",
+              basis: "interaction_observation",
+              ruleId: `behavior.state.${outcome.action}`,
+              ruleVersion: ATLAS_STATE_RULE_VERSION,
+              sampleKey,
+              state: outcome.action,
+              evidence: [
+                {
+                  artifactId: artifactKey,
+                  pointer: "/state",
+                  sampleKey,
+                },
+              ],
+            };
+            const behaviorId = `${behaviorClaim.regionKey}|${behaviorClaim.field}|${behaviorClaim.value}|${behaviorClaim.basis}|${sampleKey}`;
+            if (!claimSeen.has(behaviorId)) {
+              claimSeen.add(behaviorId);
+              claims.push(behaviorClaim);
+            }
+            // Purpose evidence already accepted/candidate in the default sample
+            // is re-emitted under this state's sample key, so state search by
+            // purpose is reachable without fabricating a new purpose. No
+            // source purpose means no purpose claim for this state.
+            const sourcePurposeField = targetComponent
+              ? "context.section_purpose"
+              : "section.purpose";
+            const purposeSources = claims.filter(
+              (claim) =>
+                claim.regionKey === outcome.regionKey &&
+                claim.field === sourcePurposeField &&
+                claim.value !== "unknown" &&
+                claim.classification !== "proposed" &&
+                claim.decision !== "rejected" &&
+                (claim.state ?? "default") === "default" &&
+                claim.sampleKey !== sampleKey,
+            );
+            for (const source of purposeSources) {
+              const purposeClaim: AtlasClaim = {
+                ...source,
+                sampleKey,
+                state: outcome.action,
+                evidence: source.evidence.map((ref) => ({ ...ref, sampleKey })),
+                ...(source.checkpointKeys ? { checkpointKeys: [...source.checkpointKeys] } : {}),
+              };
+              const purposeId = `${purposeClaim.regionKey}|${purposeClaim.field}|${purposeClaim.value}|${purposeClaim.basis}|${sampleKey}`;
+              if (claimSeen.has(purposeId)) continue;
+              claimSeen.add(purposeId);
+              claims.push(purposeClaim);
+            }
+            observations.push({
+              key: `state-${viewport}-${stateIndex}-${outcome.action}`,
+              checkpoint: 0,
+              scrollY: outcome.sample.scrollY,
+              scrollRoot: scan.scrollRoot,
+              state: outcome.action,
+              coordinateSpace: outcome.sample.coordinateSpace,
+              scrollX: outcome.sample.scrollX,
+              viewport,
+              regionKeys: [outcome.sample.key],
+              regions: [
+                {
+                  key: outcome.sample.key,
+                  sampleKey,
+                  targetRegionId: outcome.targetRegionId,
+                  visible: outcome.sample.visible,
+                  coordinateSpace: outcome.sample.coordinateSpace,
+                  inScrollRoot: outcome.sample.inScrollRoot,
+                  scrollX: outcome.sample.scrollX,
+                  selector: outcome.sample.selector,
+                  tag: outcome.sample.tag,
+                  heading: outcome.sample.heading,
+                  text: outcome.sample.text,
+                  rect: outcome.sample.rect,
+                },
+              ],
+              screenshotKey: "",
+              scanArtifactKey: scanKey,
+              stateArtifactKey: artifactKey,
+            });
+            stateResults.push({
+              action: outcome.action,
+              targetRegionId: outcome.targetRegionId,
+              status: "observed",
+              sampleKey,
+              regionKey: outcome.regionKey,
+            });
+          }
+        }
         if (viewportPolicyBlocked) limitations.push("POLICY_BLOCKED");
         const published = new Set(publishedRegions.map((region) => regionStableKey(region)));
         for (const section of scan.sections) {
@@ -1352,13 +2197,19 @@ export async function collectAtlasPage(
           Math.max(0, (scan.rawSectionCount ?? scan.sections.length) - scan.sections.length),
         );
         const viewportLimitations = [...new Set(limitations)];
-        const status = viewportLimitations.length === 0 ? "complete" : "partial";
+        const status =
+          viewportLimitations.length === 0
+            ? ("complete" as const)
+            : ("partial" as const);
+        const coverageLimitations = componentInitialScanOnly
+          ? [...viewportLimitations, "COMPONENT_INITIAL_SCAN_ONLY"]
+          : viewportLimitations;
         const coverage = {
           status,
-          collected: publishedRegions.length,
+          collected: publishedRegions.length + components.length,
           excluded: checkpointExcludedKeys.size + normalizationDropped,
-          limitations: viewportLimitations,
-        } as const;
+          limitations: coverageLimitations,
+        };
         ensureTarget();
         viewports.push({
           viewport,
@@ -1375,10 +2226,18 @@ export async function collectAtlasPage(
           loadingFailures: popups,
           scan,
           regions: publishedRegions,
+          components,
           claims,
           screenshots,
           observations,
-          artifacts: [scanStored, ...screenshots, ...checkpointArtifacts],
+          states: stateResults,
+          artifacts: [
+            scanStored,
+            ...screenshots,
+            ...checkpointArtifacts,
+            ...componentArtifacts,
+            ...stateArtifacts,
+          ],
         });
       } finally {
         try {
@@ -1407,6 +2266,7 @@ export async function collectAtlasPage(
       limitations: [...attemptLimitations, code],
       viewports,
       artifacts,
+      states: stateRequests,
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
@@ -1424,6 +2284,12 @@ export async function collectAtlasPage(
       ...viewports.flatMap((item) => item.limitations),
     ]),
   ];
+  const coverageLimitations = [
+    ...new Set([
+      ...limitations,
+      ...viewports.flatMap((item) => item.coverage.limitations),
+    ]),
+  ];
   return {
     cache: deps.cache,
     target,
@@ -1433,13 +2299,17 @@ export async function collectAtlasPage(
     status: complete && limitations.length === 0 ? "complete" : viewports.length > 0 ? "partial" : "failed",
     coverage: {
       status: limitations.length === 0 && complete ? "complete" : "partial",
-      collected: viewports.reduce((sum, item) => sum + item.regions.length, 0),
+      collected: viewports.reduce(
+        (sum, item) => sum + item.regions.length + (item.components?.length ?? 0),
+        0,
+      ),
       excluded: viewports.reduce((sum, item) => sum + item.coverage.excluded, 0),
-      limitations,
+      limitations: coverageLimitations,
     },
     limitations,
     viewports,
     artifacts,
+    states: stateRequests,
   };
 }
 

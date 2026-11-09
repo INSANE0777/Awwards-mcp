@@ -17,7 +17,12 @@ import { writeJsonArtifactSync } from "../src/atlas/artifacts.js";
 import { classifySections } from "../src/atlas/classification.js";
 import { publishCapture } from "../src/atlas/publish.js";
 import { segmentRegions } from "../src/atlas/segmentation.js";
-import type { AtlasCaptureAttempt, AtlasStoredArtifact } from "../src/atlas/live-types.js";
+import type {
+  AtlasCaptureAttempt,
+  AtlasPageScan,
+  AtlasStoredArtifact,
+  ComponentCandidate,
+} from "../src/atlas/live-types.js";
 import { atlasSearchStore, compilePredicates, queryAtlasDatabase, searchAtlas } from "../src/atlas/search.js";
 import { bumpAtlasRevision, rebuildAtlasSearchProjections } from "../src/atlas/search-projections.js";
 import type { SearchAtlasData, SearchAtlasResult } from "../src/atlas/search-types.js";
@@ -160,6 +165,398 @@ describe("Atlas search projection lifecycle", () => {
     const data = searchCache(cache, NOW + 1_000);
     expect(data.revision).toBe(1);
     expect(data.total).toBe(published.regionCount);
+  });
+
+  it("excludes non-default state claims from default projections, tiers and facets", async () => {
+    const cache = new Cache(tmpDir(), () => NOW, { atlas: true });
+    const scan: AtlasPageScan = {
+      title: "State projection fixture",
+      url: "https://fixture.example/",
+      totalHeight: 720,
+      scrollRoot: null,
+      sections: [
+        {
+          nodeKey: "section-node",
+          selector: "main > section#a",
+          tag: "section",
+          role: null,
+          landmark: null,
+          heading: "A",
+          headingLevel: 2,
+          text: "A",
+          visible: true,
+          articleNested: false,
+          landmarkNested: false,
+          paragraphCount: 0,
+          linkCount: 0,
+          mediaCount: 0,
+          repeatedItems: 0,
+          orderedItems: 0,
+          quoteCount: 0,
+          citationCount: 0,
+          numericPairs: 0,
+          formCount: 0,
+          emailInputCount: 0,
+          buttonCount: 0,
+          buttonLabels: [],
+          rect: { x: 0, y: 0, width: 800, height: 400 },
+          viewport: { width: 1280, height: 720 },
+          backgroundColor: "rgb(255, 255, 255)",
+          fixed: false,
+          depth: 1,
+          parentKey: null,
+        },
+      ],
+      technologies: [],
+      canvasCount: 0,
+      webglObserved: false,
+    };
+    const regions = segmentRegions(scan);
+    const section = regions[0]!;
+    const scanArtifact = writeJsonArtifactSync(cache.rootDir, {
+      schemaVersion: "awwwards-atlas-live-scan-v1",
+      viewport: "desktop",
+      scan,
+    });
+    const stored: AtlasStoredArtifact = {
+      key: "scan-desktop",
+      kind: "raw_observation",
+      storagePath: scanArtifact.storagePath,
+      sha256: scanArtifact.sha256,
+      bytes: scanArtifact.bytes,
+      mimeType: "application/json",
+      regionKey: null,
+    };
+    const target = {
+      siteSlug: "fixture-live",
+      requestedUrl: "https://fixture.example/",
+      urlKey: "https://fixture.example/",
+      path: "/",
+    };
+    const attempt: AtlasCaptureAttempt = {
+      cache,
+      target,
+      attemptId: `state-projection-${++sequence}`,
+      startedAt: NOW - 1_000,
+      finishedAt: NOW,
+      status: "complete",
+      coverage: { status: "complete", collected: 1, excluded: 0, limitations: [] },
+      limitations: [],
+      artifacts: [stored],
+      viewports: [
+        {
+          viewport: "desktop",
+          profileKey: "live-desktop",
+          status: "complete",
+          coverage: { status: "complete", collected: 1, excluded: 0, limitations: [] },
+          limitations: [],
+          finalUrl: target.requestedUrl,
+          browserVersion: "fixture",
+          dpr: 1,
+          reducedMotion: "no-preference",
+          scrollRoot: null,
+          overlayState: "none",
+          loadingFailures: [],
+          scan,
+          regions,
+          claims: [],
+          screenshots: [],
+          artifacts: [stored],
+        },
+      ],
+    };
+    const viewport = attempt.viewports[0]!;
+    const defaultSample = "desktop:section:default";
+    const hoverSample = "desktop:section:state-hover";
+    const ref = (sampleKey: string) => [
+      { artifactId: "scan-desktop", pointer: `/scan/sections/${section.scanIndex}`, sampleKey },
+    ];
+    viewport.claims.push(
+      {
+        regionKey: section.key,
+        field: "section.purpose",
+        value: "pricing",
+        decision: "accepted",
+        classification: "observed",
+        basis: "native_semantics",
+        ruleId: "test.default",
+        ruleVersion: "test",
+        sampleKey: defaultSample,
+        evidence: ref(defaultSample),
+      },
+      {
+        regionKey: section.key,
+        field: "section.purpose",
+        value: "faq",
+        decision: "accepted",
+        classification: "observed",
+        basis: "native_semantics",
+        ruleId: "test.state",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+    );
+    const component: ComponentCandidate = {
+      key: "component-default-state",
+      ordinal: 0,
+      scanIndex: 0,
+      nodeKey: "component-default-state-node",
+      selector: "main > section#a > button#open",
+      tag: "button",
+      role: null,
+      type: "button",
+      typeClassification: "observed",
+      typeBasis: "native_semantics",
+      typeDecision: "accepted",
+      typeRuleId: "component.native_semantics.button",
+      label: "Open",
+      visible: true,
+      offscreen: false,
+      sectionNodeKey: null,
+      sectionKey: null,
+      patternKey: "pattern-default-state",
+      rect: { x: 0, y: 0, width: 40, height: 20 },
+      depth: 1,
+      pack: null,
+    };
+    viewport.components = [component];
+    viewport.claims.push(
+      {
+        regionKey: component.key,
+        field: "component.type",
+        value: "button",
+        decision: "accepted",
+        classification: "observed",
+        basis: "native_semantics",
+        ruleId: "component.native_semantics.button",
+        ruleVersion: "test",
+        sampleKey: defaultSample,
+        evidence: ref(defaultSample),
+      },
+      {
+        regionKey: component.key,
+        field: "component.type",
+        value: "drawer",
+        decision: "accepted",
+        classification: "observed",
+        basis: "native_semantics",
+        ruleId: "component.structure.drawer.offcanvas",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+      {
+        regionKey: component.key,
+        field: "context.section_purpose",
+        value: "pricing",
+        decision: "accepted",
+        classification: "inferred",
+        basis: "rule_derivation",
+        ruleId: "context.section_purpose.accepted",
+        ruleVersion: "test",
+        sampleKey: defaultSample,
+        evidence: ref(defaultSample),
+      },
+      {
+        regionKey: component.key,
+        field: "context.section_purpose",
+        value: "faq",
+        decision: "accepted",
+        classification: "inferred",
+        basis: "rule_derivation",
+        ruleId: "context.section_purpose.accepted",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+      {
+        regionKey: component.key,
+        field: "behavior",
+        value: "hover_change_observed",
+        decision: "accepted",
+        classification: "observed",
+        basis: "interaction_observation",
+        ruleId: "behavior.state.hover",
+        ruleVersion: "test",
+        sampleKey: hoverSample,
+        state: "hover",
+        evidence: ref(hoverSample),
+      },
+    );
+    viewport.states = [
+      {
+        action: "hover",
+        targetRegionId: "component-request",
+        status: "observed",
+        sampleKey: hoverSample,
+        regionKey: component.key,
+      },
+    ];
+    attempt.states = [{ action: "hover", targetRegionId: "component-request" }];
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+
+    // Each of the five `state = 'default'` projection filters owns one table:
+    // a state-only value in any of them would leak into default search.
+    const rows = cache.withAtlasDb((db) => {
+      const pick = (table: string, column: string, value: string) =>
+        Boolean(
+          db
+            .prepare(`SELECT 1 FROM ${table} WHERE ${column} = ?`)
+            .get(value),
+        );
+      return {
+        capturePurposeDefault: pick("atlas_capture_features", "value", "pricing"),
+        capturePurposeState: pick("atlas_capture_features", "value", "faq"),
+        capturePurposesDefault: pick("atlas_capture_purposes", "value", "pricing"),
+        capturePurposesState: pick("atlas_capture_purposes", "value", "faq"),
+        regionPurposesDefault: pick("atlas_region_purposes", "value", "pricing"),
+        regionPurposesState: pick("atlas_region_purposes", "value", "faq"),
+        captureTypeDefault: pick("atlas_capture_features", "value", "button"),
+        captureTypeState: pick("atlas_capture_features", "value", "drawer"),
+        regionTypeDefault: pick("atlas_region_features", "value", "button"),
+        regionTypeState: pick("atlas_region_features", "value", "drawer"),
+        siteTypeDefault: pick("atlas_site_features", "value", "button"),
+        siteTypeState: pick("atlas_site_features", "value", "drawer"),
+        siteContextState: pick(
+          "atlas_site_features",
+          "value",
+          "faq",
+        ),
+        siteTypeTier: (
+          db
+            .prepare(
+              "SELECT accepted_tier AS tier FROM atlas_site_features WHERE field = 'component.type' AND value = 'button'",
+            )
+            .get() as { tier: number }
+        ).tier,
+        sitePurposeTier: (
+          db
+            .prepare(
+              "SELECT accepted_tier AS tier FROM atlas_site_features WHERE field = 'section.purpose' AND value = 'pricing'",
+            )
+            .get() as { tier: number }
+        ).tier,
+      };
+    });
+    expect(rows).toEqual({
+      capturePurposeDefault: true,
+      capturePurposeState: false,
+      capturePurposesDefault: true,
+      capturePurposesState: false,
+      regionPurposesDefault: true,
+      regionPurposesState: false,
+      captureTypeDefault: true,
+      captureTypeState: false,
+      regionTypeDefault: true,
+      regionTypeState: false,
+      siteTypeDefault: true,
+      siteTypeState: false,
+      siteContextState: false,
+      siteTypeTier: 1,
+      sitePurposeTier: 1,
+    });
+
+    const store = atlasSearchStore(cache);
+    const button = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "components",
+          scope: "site",
+          evidenceMode: "accepted",
+          predicates: [{ field: "component.type", values: ["button"] }],
+        },
+        store,
+        NOW + 1_000,
+      ),
+    );
+    expect(button.total).toBe(1);
+    const sectionDefault = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "sections",
+          scope: "site",
+          evidenceMode: "accepted",
+          predicates: [{ field: "section.purpose", values: ["pricing"] }],
+        },
+        store,
+        NOW + 1_000,
+      ),
+    );
+    expect(sectionDefault.total).toBe(1);
+    for (const predicate of [
+      { field: "component.type" as const, values: ["drawer"] },
+      { field: "context.section_purpose" as const, values: ["faq"] },
+    ]) {
+      const data = dataOrThrow(
+        searchAtlas(
+          { kind: "components", scope: "site", evidenceMode: "accepted", predicates: [predicate] },
+          store,
+          NOW + 1_000,
+        ),
+      );
+      expect(data.total).toBe(0);
+    }
+    const sectionPurpose = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "sections",
+          scope: "site",
+          evidenceMode: "accepted",
+          predicates: [{ field: "section.purpose", values: ["faq"] }],
+        },
+        store,
+        NOW + 1_000,
+      ),
+    );
+    expect(sectionPurpose.total).toBe(0);
+
+    const componentFacets = dataOrThrow(
+      searchAtlas(
+        {
+          kind: "components",
+          scope: "site",
+          facets: ["component.type", "context.section_purpose"],
+        },
+        store,
+        NOW + 1_000,
+      ),
+    );
+    const typeFacet = componentFacets.facets.find(
+      (facet) => facet.field === "component.type",
+    )!;
+    expect(typeFacet.values.find((value) => value.value === "button")!.count).toBe(1);
+    expect(
+      typeFacet.values.find((value) => value.value === "drawer")?.count ?? 0,
+    ).toBe(0);
+    const contextFacet = componentFacets.facets.find(
+      (facet) => facet.field === "context.section_purpose",
+    )!;
+    expect(
+      contextFacet.values.find((value) => value.value === "pricing")!.count,
+    ).toBe(1);
+    expect(
+      contextFacet.values.find((value) => value.value === "faq")?.count ?? 0,
+    ).toBe(0);
+
+    const sectionFacets = dataOrThrow(
+      searchAtlas(
+        { kind: "sections", scope: "page", facets: ["section.purpose"] },
+        store,
+        NOW + 1_000,
+      ),
+    );
+    const purposeFacet = sectionFacets.facets[0]!;
+    expect(
+      purposeFacet.values.find((value) => value.value === "pricing")!.count,
+    ).toBe(1);
+    expect(
+      purposeFacet.values.find((value) => value.value === "faq")?.count ?? 0,
+    ).toBe(0);
   });
 
   it("bumps the revision when an identical recapture advances confirmation", async () => {
@@ -470,9 +867,9 @@ describe("Atlas search projection lifecycle", () => {
       db.prepare(
         `INSERT INTO atlas_capture_summary
            (capture_id, page_id, site_slug, profile_key, source_kind, status,
-            observed, fresh, regions)
+            observed, fresh, regions, components)
          VALUES ('retired-capture', 'retired-page', 'retired-site', 'live-desktop',
-                 'live_page', 'complete', ?, ?, 1)`,
+                 'live_page', 'complete', ?, ?, 1, 0)`,
       ).run(NOW, NOW);
       db.prepare(
         "INSERT INTO atlas_region_purposes (region_id, value, profile_key, fresh, candidate_tier) VALUES (?, 'pricing', 'live-desktop', ?, 3)",

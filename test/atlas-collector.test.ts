@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
-import { collectAtlasPage } from "../src/atlas/collector.js";
+import { collectAtlasPage, scrollTo } from "../src/atlas/collector.js";
+import { componentPatternKey } from "../src/atlas/components.js";
 import { acquireAtlasCaptureLease } from "../src/atlas/lease.js";
 import { publishCapture } from "../src/atlas/publish.js";
 import { loadPhase2Fixture } from "./helpers/phase2-fixture.js";
+import type {
+  AtlasPageScan,
+  AtlasScanComponent,
+  AtlasScanSection,
+} from "../src/atlas/live-types.js";
 import type { SiteSummary } from "../src/types.js";
 
 const dirs: string[] = [];
@@ -108,6 +114,123 @@ function fakeBrowser(scan: any) {
     contexts: () => contexts,
     closed: () => closed,
   };
+}
+
+function scanSection(overrides: Partial<AtlasScanSection> = {}): AtlasScanSection {
+  return {
+    nodeKey: "section-header",
+    selector: "main > header",
+    tag: "header",
+    role: null,
+    landmark: "header",
+    heading: "Header",
+    headingLevel: 1,
+    text: "Demo",
+    visible: true,
+    articleNested: false,
+    landmarkNested: false,
+    paragraphCount: 0,
+    linkCount: 1,
+    mediaCount: 0,
+    repeatedItems: 0,
+    orderedItems: 0,
+    quoteCount: 0,
+    citationCount: 0,
+    numericPairs: 0,
+    formCount: 0,
+    emailInputCount: 0,
+    buttonCount: 0,
+    buttonLabels: [],
+    rect: { x: 0, y: 0, width: 1_200, height: 200 },
+    viewport: { width: 1_200, height: 800 },
+    backgroundColor: "rgb(255, 255, 255)",
+    fixed: false,
+    depth: 1,
+    parentKey: null,
+    ...overrides,
+  };
+}
+
+function scanComponent(overrides: Partial<AtlasScanComponent> = {}): AtlasScanComponent {
+  return {
+    nodeKey: "component-1",
+    selector: "header a.cta",
+    tag: "a",
+    role: null,
+    hint: "link",
+    hintBasis: "native_semantics",
+    label: "CTA",
+    visible: true,
+    offscreen: false,
+    offCanvas: false,
+    fullyClipped: false,
+    sectionNodeKey: "section-header",
+    childCount: 0,
+    descendantCount: 0,
+    hasHeading: false,
+    hasMedia: false,
+    hasIcon: false,
+    inNavigation: false,
+    ariaHasPopup: false,
+    ariaExpanded: null,
+    ariaControlsResolved: false,
+    ariaLabel: null,
+    overflowX: "visible",
+    scrollableX: false,
+    position: "static",
+    transformed: false,
+    shape: "span",
+    childCounts: "1,0,0",
+    display: "inline",
+    gap: "normal",
+    padding: "0px/0px/0px/0px",
+    radius: "0px",
+    fontFamily: "Inter",
+    fontSize: "16px",
+    fontWeight: "400",
+    lineHeight: "24px",
+    rect: { x: 0, y: 0, width: 200, height: 40 },
+    depth: 1,
+    pack: { nodes: [{ tag: "a", role: null, depth: 0, childCount: 0 }], truncated: false },
+    ...overrides,
+  };
+}
+
+function componentScan(
+  components: AtlasScanComponent[],
+  sections: AtlasScanSection[] = [scanSection()],
+): AtlasPageScan {
+  return {
+    title: "Component collector fixture",
+    url: "https://fixture.example/",
+    totalHeight: 800,
+    scrollRoot: null,
+    sections,
+    components,
+    technologies: [],
+    canvasCount: 0,
+    webglObserved: false,
+  };
+}
+
+async function collectWithScan(
+  scan: AtlasPageScan,
+): Promise<{ attempt: Awaited<ReturnType<typeof collectAtlasPage>>; cache: Cache }> {
+  const { origin } = await fixtureServer();
+  const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+  cache.upsertSites([site(`${origin}/`)]);
+  const attempt = await collectAtlasPage(
+    { siteSlug: "fixture-live", viewports: ["desktop"] },
+    {
+      cache,
+      allowPrivateOrigins: [origin],
+      loader: async () => ({ chromium: { launch: async () => fakeBrowser(scan).browser } }),
+      settle: async () => undefined,
+      scanPage: async () => ({ ...scan, url: `${origin}/` }),
+      totalBudgetMs: 30_000,
+    },
+  );
+  return { attempt, cache };
 }
 
 describe("Atlas collector lifecycle", () => {
@@ -317,7 +440,7 @@ describe("Atlas collector lifecycle", () => {
         {
           cache,
           allowPrivateOrigins: [origin],
-          totalBudgetMs: 20,
+          totalBudgetMs: 500,
           loader: () => new Promise(() => undefined),
         },
       ),
@@ -799,5 +922,277 @@ describe("Atlas collector lifecycle", () => {
         },
       ),
     ).rejects.toMatchObject({ code: "PRIVATE_DESTINATION" });
+  });
+
+  it("collects components with section context, scoped patterns, packs and caps", async () => {
+    const pricingSection = scanSection({
+      nodeKey: "section-pricing",
+      selector: "main > section.pricing",
+      tag: "section",
+      landmark: null,
+      heading: "Pricing",
+      headingLevel: 2,
+      text: "$10 per seat and $20 per team",
+      numericPairs: 2,
+      rect: { x: 0, y: 400, width: 1_200, height: 300 },
+    });
+    const hero = scanComponent({
+      nodeKey: "hero-cta",
+      selector: "header a.hero",
+      label: "Start now",
+      rect: { x: 100, y: 40, width: 320, height: 120 },
+    });
+    const pricingCta = scanComponent({
+      nodeKey: "pricing-cta",
+      selector: "section.pricing a.buy",
+      label: "Buy",
+      sectionNodeKey: "section-pricing",
+      rect: { x: 100, y: 450, width: 200, height: 40 },
+    });
+    const navLinks = Array.from({ length: 121 }, (_, index) =>
+      scanComponent({
+        nodeKey: `nav-${index}`,
+        selector: `header a.nav-${index}`,
+        label: `Nav ${index}`,
+        rect: { x: index * 4, y: 150, width: 10, height: 10 },
+        pack: null,
+      }),
+    );
+    const scan = componentScan(
+      [hero, pricingCta, ...navLinks],
+      [scanSection(), pricingSection],
+    );
+    const { attempt } = await collectWithScan(scan);
+    const viewport = attempt.viewports[0]!;
+    const section = viewport.regions.find((region) => region.nodeKey === "section-header")!;
+    const component = viewport.components!.find((candidate) => candidate.nodeKey === "hero-cta")!;
+    expect(component.sectionKey).toBe(section.key);
+    expect(component.patternKey).toBe(
+      componentPatternKey(
+        component,
+        hero,
+        `${attempt.target.siteSlug}|${attempt.target.urlKey}|desktop`,
+      ),
+    );
+    const acceptedPurposes = new Set(
+      viewport.claims
+        .filter((claim) => claim.field === "section.purpose" && claim.decision === "accepted")
+        .map((claim) => claim.value),
+    );
+    const contextClaims = viewport.claims.filter(
+      (claim) =>
+        claim.regionKey === component.key && claim.field === "context.section_purpose",
+    );
+    // Context is sourced only from accepted section purposes. This branch
+    // publishes every section purpose as candidate, so no context claim may be
+    // produced; the invariant still holds when calibration promotes classes.
+    expect(acceptedPurposes.size).toBe(0);
+    expect(contextClaims).toEqual([]);
+    const pricingComponent = viewport.components!.find(
+      (candidate) => candidate.nodeKey === "pricing-cta",
+    )!;
+    expect(
+      viewport.claims.filter(
+        (claim) =>
+          claim.regionKey === pricingComponent.key &&
+          claim.field === "context.section_purpose",
+      ),
+    ).toEqual([]);
+    expect(
+      viewport.artifacts.some(
+        (artifact) =>
+          artifact.kind === "component_pack" && artifact.regionKey === component.key,
+      ),
+    ).toBe(true);
+    expect(viewport.limitations.some((value) => value.startsWith("COMPONENT_CAP"))).toBe(true);
+  });
+
+  it("bounds pack nodes and depth and reports pack truncation", async () => {
+    const nodes = [
+      ...Array.from({ length: 200 }, (_, index) => ({
+        tag: "span",
+        role: null,
+        depth: index % 13,
+        childCount: 0,
+      })),
+      { tag: "span", role: null, depth: 20, childCount: 0 },
+    ];
+    const scan = componentScan(
+      Array.from({ length: 13 }, (_, index) =>
+        scanComponent({
+          nodeKey: `packed-${index}`,
+          selector: `header a.packed-${index}`,
+          label: `Packed ${index}`,
+          rect: { x: 0, y: index, width: 200, height: 40 },
+          pack: { nodes, truncated: false },
+        }),
+      ),
+    );
+    const { attempt } = await collectWithScan(scan);
+    const viewport = attempt.viewports[0]!;
+    const pack = viewport.scan.components![0]!.pack!;
+    expect(pack.nodes).toHaveLength(150);
+    expect(Math.max(...pack.nodes.map((node) => node.depth))).toBeLessThanOrEqual(12);
+    expect(pack.truncated).toBe(true);
+    expect(viewport.limitations).toContain("COMPONENT_PACK_TRUNCATED");
+    expect(viewport.limitations).toContain("COMPONENT_PACK_CAP");
+    expect(viewport.coverage.status).toBe("partial");
+  });
+
+  it("keeps a hero CTA when navigation links exhaust the component cap", async () => {
+    const hero = scanComponent({
+      nodeKey: "hero-cta",
+      label: "Hero CTA",
+      rect: { x: 40, y: 20, width: 320, height: 120 },
+    });
+    const links = Array.from({ length: 130 }, (_, index) =>
+      scanComponent({
+        nodeKey: `nav-${index}`,
+        selector: `nav a.nav-${index}`,
+        label: `Nav ${index}`,
+        sectionNodeKey: "section-nav",
+        rect: { x: index, y: 0, width: 12, height: 12 },
+      }),
+    );
+    const scan = componentScan(
+      [...links, hero],
+      [
+        scanSection(),
+        scanSection({
+          nodeKey: "section-nav",
+          selector: "main > nav",
+          tag: "nav",
+          landmark: "navigation",
+          heading: "Nav",
+          headingLevel: 2,
+          rect: { x: 0, y: 200, width: 1_200, height: 100 },
+        }),
+      ],
+    );
+    const { attempt } = await collectWithScan(scan);
+    const viewport = attempt.viewports[0]!;
+    expect(viewport.components).toHaveLength(120);
+    expect(viewport.components![0]!.label).toBe("Hero CTA");
+    expect(viewport.components!.some((candidate) => candidate.label === "Hero CTA")).toBe(true);
+    expect(viewport.scan.componentLimitHit).toBe(true);
+    expect(viewport.scan.componentDroppedCount).toBe(11);
+    expect(viewport.limitations).toContain("COMPONENT_CAP:11");
+  });
+
+  it("preserves the scan's own dropped count instead of recomputing it from the capped array", async () => {
+    const components = Array.from({ length: 120 }, (_, index) =>
+      scanComponent({
+        nodeKey: `capped-${index}`,
+        selector: `main a.capped-${index}`,
+        label: `Capped ${index}`,
+        sectionNodeKey: null,
+        pack: null,
+        rect: { x: index, y: 0, width: 10, height: 10 },
+      }),
+    );
+    const scan = componentScan(components);
+    const { attempt } = await collectWithScan({
+      ...scan,
+      componentLimitHit: true,
+      componentDroppedCount: 11,
+    });
+    const viewport = attempt.viewports[0]!;
+    expect(viewport.components).toHaveLength(120);
+    expect(viewport.scan.componentDroppedCount).toBe(11);
+    expect(viewport.limitations).toContain("COMPONENT_CAP:11");
+    // Attempt coverage includes components, exactly like viewport coverage.
+    expect(attempt.coverage.collected).toBe(viewport.coverage.collected);
+    expect(attempt.coverage.collected).toBe(viewport.regions.length + 120);
+  });
+
+  it("passes components:false to checkpoint scans and records no components in them", async () => {
+    const { origin } = await fixtureServer();
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const scan = componentScan([scanComponent()]);
+    const calls: Array<{ components?: boolean } | undefined> = [];
+    const attempt = await collectAtlasPage(
+      { siteSlug: "fixture-live", viewports: ["desktop"] },
+      {
+        cache,
+        allowPrivateOrigins: [origin],
+        loader: async () => ({ chromium: { launch: async () => fakeBrowser(scan).browser } }),
+        settle: async () => undefined,
+        scanPage: async (_page, _viewport, options) => {
+          calls.push(options);
+          return { ...scan, url: `${origin}/` };
+        },
+        totalBudgetMs: 30_000,
+      },
+    );
+    expect(calls[0]).toBeUndefined();
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls.slice(1).every((options) => options?.components === false)).toBe(true);
+    const viewport = attempt.viewports[0]!;
+    const checkpoints = viewport.artifacts.filter((artifact) =>
+      artifact.key.startsWith("checkpoint-"),
+    );
+    expect(checkpoints.length).toBeGreaterThan(0);
+    for (const checkpoint of checkpoints) {
+      const payload = JSON.parse(
+        readFileSync(join(cache.rootDir, checkpoint.storagePath), "utf8"),
+      ) as { scan: AtlasPageScan };
+      expect(payload.scan.components ?? []).toEqual([]);
+      expect(payload.scan.componentLimitHit).toBe(false);
+    }
+  });
+
+  it("discovers components only on the initial scan", async () => {
+    const scan = componentScan([scanComponent()]);
+    const { attempt, cache } = await collectWithScan(scan);
+    const viewport = attempt.viewports[0]!;
+    expect(viewport.components).toHaveLength(1);
+    expect(viewport.coverage.limitations).toContain("COMPONENT_INITIAL_SCAN_ONLY");
+    expect(viewport.limitations).not.toContain("COMPONENT_INITIAL_SCAN_ONLY");
+    expect(attempt.coverage.limitations).toContain("COMPONENT_INITIAL_SCAN_ONLY");
+    const checkpoint = viewport.artifacts.find((artifact) =>
+      artifact.key.startsWith("checkpoint-"),
+    )!;
+    const payload = JSON.parse(
+      readFileSync(join(cache.rootDir, checkpoint.storagePath), "utf8"),
+    ) as { scan: { components?: unknown[] } };
+    expect(payload.scan.components).toEqual([]);
+  });
+
+  it("resets an inner scroll root horizontally and vertically", async () => {
+    const calls: Array<{ left: number; top: number }> = [];
+    const element = {
+      scrollLeft: 120,
+      scrollTop: 40,
+      style: {
+        getPropertyValue: () => "",
+        getPropertyPriority: () => "",
+        setProperty: () => undefined,
+        removeProperty: () => undefined,
+      },
+      scrollTo(options: { left: number; top: number }) {
+        calls.push(options);
+        this.scrollLeft = options.left;
+        this.scrollTop = options.top;
+      },
+    };
+    const page = {
+      evaluate: async (fn: (input: unknown) => unknown, input: unknown) => {
+        const globals = globalThis as Record<string, unknown>;
+        const previousDocument = globals.document;
+        const previousWindow = globals.window;
+        globals.document = { querySelectorAll: () => [element] };
+        globals.window = {};
+        try {
+          return fn(input);
+        } finally {
+          globals.document = previousDocument;
+          globals.window = previousWindow;
+        }
+      },
+    };
+    const result = await scrollTo(page as never, "div#pane", 0);
+    expect(calls[0]).toMatchObject({ left: 0, top: 0 });
+    expect(result).toMatchObject({ unique: true, scrollX: 0, scrollY: 0 });
   });
 });

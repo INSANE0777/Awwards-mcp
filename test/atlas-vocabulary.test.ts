@@ -18,7 +18,8 @@ describe("atlas vocabulary", () => {
     expect(isSearchableVocabulary("section.purpose", "hero")).toBe(true);
     expect(isSearchableVocabulary("section.purpose", "announcement")).toBe(false);
     expect(isSearchableVocabulary("section.purpose", "unknown")).toBe(false);
-    expect(isSearchableVocabulary("component.type", "carousel")).toBe(false);
+    expect(isSearchableVocabulary("component.type", "carousel")).toBe(true);
+    expect(isSearchableVocabulary("component.type", "drawer")).toBe(true);
     expect(isSearchableVocabulary("component.type", "button")).toBe(true);
   });
 

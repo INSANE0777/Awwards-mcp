@@ -16,7 +16,8 @@ export const SEARCH_PROJECTION_SCHEMA = `
     status TEXT NOT NULL,
     observed INTEGER,
     fresh INTEGER,
-    regions INTEGER NOT NULL
+    regions INTEGER NOT NULL,
+    components INTEGER NOT NULL
   ) WITHOUT ROWID;
 
   CREATE INDEX IF NOT EXISTS atlas_capture_summary_scope_idx
@@ -84,6 +85,9 @@ export const SEARCH_PROJECTION_SCHEMA = `
     region_id TEXT NOT NULL,
     profile_key TEXT NOT NULL,
     fresh INTEGER NOT NULL,
+    candidate_tier INTEGER,
+    accepted_tier INTEGER,
+    observed_tier INTEGER,
     PRIMARY KEY (field, value, region_id)
   ) WITHOUT ROWID;
 
@@ -140,6 +144,67 @@ export function claimTierSql(alias: string): string {
   END`;
 }
 
+export type AtlasStateEvidence = "hover" | "focus";
+
+/** Exact claim-state predicate; the state value is validated search input. */
+export function claimStateSql(alias: string, state: string): string {
+  return `${alias}.state = '${state}'`;
+}
+
+/**
+ * Materializes the eligible regions that carry at least one claim for the
+ * requested state. The `(state, region_id, sample_key)` index drives this, so
+ * state search never scans `samples_json` for the whole corpus.
+ */
+export function buildStateRegionTable(
+  db: DatabaseSync,
+  options: {
+    captureTable: string;
+    kind: "section" | "component";
+    state: AtlasStateEvidence;
+    mode: "accepted" | "observed_only" | "candidate";
+    componentTypeEligible?: boolean;
+    table?: string;
+  },
+): number {
+  const table = options.table ?? "atlas_search_state_regions";
+  db.exec(`DROP TABLE IF EXISTS temp.${table}`);
+  db.exec(`CREATE TEMP TABLE ${table} (
+    region_id TEXT PRIMARY KEY
+  ) WITHOUT ROWID`);
+  const typeEligibility = options.componentTypeEligible
+    ? `AND EXISTS (
+         SELECT 1 FROM atlas_claims ct INDEXED BY atlas_claims_region_state_idx
+         WHERE ct.region_id = r.id
+           AND ct.field = 'component.type'
+           AND ${claimStateSql("ct", options.state)}
+           AND ${claimEligibilitySql("ct", options.mode)}
+       )`
+    : "";
+  const insertSql = `INSERT OR IGNORE INTO temp.${table} (region_id)
+     SELECT DISTINCT cl.region_id
+     FROM atlas_claims cl INDEXED BY atlas_claims_state_region_idx
+     JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+     JOIN temp.${options.captureTable} cm ON cm.capture_id = r.capture_id
+     WHERE r.kind = :kind
+       AND ${claimStateSql("cl", options.state)}
+       AND ${claimEligibilitySql("cl", options.mode)}
+       ${typeEligibility}`;
+  db.prepare(insertSql).run({ kind: options.kind });
+  return (
+    db.prepare(`SELECT COUNT(*) AS regions FROM temp.${table}`).get() as {
+      regions: number;
+    }
+  ).regions;
+}
+
+export function stateRegionEligibilitySql(
+  regionExpr: string,
+  table = "atlas_search_state_regions",
+): string {
+  return `${regionExpr} IN (SELECT region_id FROM temp.${table})`;
+}
+
 /**
  * Exact structural expressions shared by the migrations, indexes and queries.
  * Every expression here must match the corresponding index definition
@@ -194,6 +259,7 @@ const PROJECTION_COLUMNS: Record<(typeof PROJECTION_TABLES)[number], readonly st
     "observed",
     "fresh",
     "regions",
+    "components",
   ],
   atlas_capture_features: [
     "field",
@@ -229,7 +295,16 @@ const PROJECTION_COLUMNS: Record<(typeof PROJECTION_TABLES)[number], readonly st
     "role",
     "landmark",
   ],
-  atlas_region_features: ["field", "value", "region_id", "profile_key", "fresh"],
+  atlas_region_features: [
+    "field",
+    "value",
+    "region_id",
+    "profile_key",
+    "fresh",
+    "candidate_tier",
+    "accepted_tier",
+    "observed_tier",
+  ],
   atlas_capture_purposes: [
     "capture_id",
     "value",
@@ -278,6 +353,16 @@ const PROJECTION_LOCAL_INDEXES: ReadonlyArray<{ name: string; sql: string }> = [
             value, candidate_tier, accepted_tier, observed_tier
           )`,
   },
+  {
+    // Component type/context facets read claim tiers from the region feature
+    // projection, keyed by field/value/profile.
+    name: "atlas_region_features_claim_idx",
+    sql: `CREATE INDEX IF NOT EXISTS atlas_region_features_claim_idx
+          ON atlas_region_features(
+            field, value, profile_key, fresh,
+            candidate_tier, accepted_tier, observed_tier
+          )`,
+  },
 ];
 
 /**
@@ -294,6 +379,16 @@ const SUPPORT_INDEXES: ReadonlyArray<{ name: string; sql: string }> = [
     name: "atlas_claims_facet_idx",
     sql: `CREATE INDEX IF NOT EXISTS atlas_claims_facet_idx
           ON atlas_claims(field, decision, classification, region_id, value)`,
+  },
+  {
+    name: "atlas_claims_state_region_idx",
+    sql: `CREATE INDEX IF NOT EXISTS atlas_claims_state_region_idx
+          ON atlas_claims(state, region_id, sample_key, decision, classification, value)`,
+  },
+  {
+    name: "atlas_claims_region_state_idx",
+    sql: `CREATE INDEX IF NOT EXISTS atlas_claims_region_state_idx
+          ON atlas_claims(region_id, state, sample_key, field, value, decision, classification)`,
   },
   {
     name: "atlas_regions_lookup_idx",
@@ -438,12 +533,14 @@ export function rebuildAtlasSearchProjections(db: DatabaseSync, revision: number
   db.exec(
     `INSERT INTO atlas_capture_summary
        (capture_id, page_id, site_slug, profile_key, source_kind, status,
-        observed, fresh, regions)
+        observed, fresh, regions, components)
      SELECT c.id, c.page_id, p.site_slug, c.profile_key, c.source_kind, c.status,
             COALESCE(c.observed_at, c.last_confirmed_at),
             COALESCE(c.last_confirmed_at, c.observed_at),
             (SELECT COUNT(*) FROM atlas_regions r
-             WHERE r.capture_id = c.id AND r.kind = 'section')
+             WHERE r.capture_id = c.id AND r.kind = 'section'),
+            (SELECT COUNT(*) FROM atlas_regions r
+             WHERE r.capture_id = c.id AND r.kind = 'component')
      FROM atlas_heads h
      JOIN atlas_captures c
        ON c.id = h.capture_id AND c.page_id = h.page_id AND c.profile_key = h.profile_key
@@ -501,6 +598,7 @@ export function rebuildAtlasSearchProjections(db: DatabaseSync, revision: number
      JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
      JOIN atlas_capture_summary cm ON cm.capture_id = r.capture_id
      WHERE cl.field = 'section.purpose' AND r.kind = 'section'
+       AND cl.state = 'default'
      GROUP BY cl.value, r.capture_id`,
   );
   db.exec(
@@ -522,6 +620,7 @@ export function rebuildAtlasSearchProjections(db: DatabaseSync, revision: number
      JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
      JOIN atlas_capture_summary cm ON cm.capture_id = r.capture_id
      WHERE cl.field = 'section.purpose' AND r.kind = 'section'
+       AND cl.state = 'default'
      GROUP BY cl.region_id, cl.value`,
   );
   db.exec(
@@ -552,7 +651,54 @@ export function rebuildAtlasSearchProjections(db: DatabaseSync, revision: number
      JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
      JOIN atlas_capture_summary cm ON cm.capture_id = r.capture_id
      WHERE cl.field = 'section.purpose' AND r.kind = 'section'
+       AND cl.state = 'default'
      GROUP BY r.capture_id, cl.value`,
+  );
+  // Component type/context claims are claim evidence (not structural), so the
+  // per-mode tiers travel with the value into both capture and region rows.
+  db.exec(
+    `INSERT INTO atlas_capture_features
+       (field, value, capture_id, candidate_tier, accepted_tier, observed_tier, regions)
+     SELECT cl.field, cl.value, r.capture_id,
+            MIN(CASE WHEN cl.value <> 'unknown' AND cl.classification <> 'proposed'
+                       AND cl.decision IN ('accepted','candidate')
+                     THEN ${claimTierSql("cl")} END),
+            MIN(CASE WHEN cl.value <> 'unknown' AND cl.classification <> 'proposed'
+                       AND cl.decision = 'accepted'
+                     THEN ${claimTierSql("cl")} END),
+            MIN(CASE WHEN cl.value <> 'unknown' AND cl.classification <> 'proposed'
+                       AND cl.decision = 'accepted' AND cl.classification = 'observed'
+                     THEN ${claimTierSql("cl")} END),
+            COUNT(DISTINCT cl.region_id)
+     FROM atlas_claims cl INDEXED BY atlas_claims_field_idx
+     JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+     JOIN atlas_capture_summary cm ON cm.capture_id = r.capture_id
+     WHERE cl.field IN ('component.type','context.section_purpose')
+       AND cl.state = 'default'
+       AND r.kind = 'component'
+     GROUP BY cl.field, cl.value, r.capture_id`,
+  );
+  db.exec(
+    `INSERT OR REPLACE INTO atlas_region_features
+       (field, value, region_id, profile_key, fresh,
+        candidate_tier, accepted_tier, observed_tier)
+     SELECT cl.field, cl.value, cl.region_id, cm.profile_key, cm.fresh,
+            MIN(CASE WHEN cl.value <> 'unknown' AND cl.classification <> 'proposed'
+                       AND cl.decision IN ('accepted','candidate')
+                     THEN ${claimTierSql("cl")} END),
+            MIN(CASE WHEN cl.value <> 'unknown' AND cl.classification <> 'proposed'
+                       AND cl.decision = 'accepted'
+                     THEN ${claimTierSql("cl")} END),
+            MIN(CASE WHEN cl.value <> 'unknown' AND cl.classification <> 'proposed'
+                       AND cl.decision = 'accepted' AND cl.classification = 'observed'
+                     THEN ${claimTierSql("cl")} END)
+     FROM atlas_claims cl INDEXED BY atlas_claims_field_idx
+     JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+     JOIN atlas_capture_summary cm ON cm.capture_id = r.capture_id
+     WHERE cl.field IN ('component.type','context.section_purpose')
+       AND cl.state = 'default'
+       AND r.kind = 'component'
+     GROUP BY cl.field, cl.value, cl.region_id`,
   );
   // Site rows are keyed by profile so a desktop query never sees mobile
   // evidence. `fresh` is the newest confirmation among captures carrying the

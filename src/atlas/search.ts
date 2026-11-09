@@ -2,11 +2,15 @@ import { DatabaseSync } from "node:sqlite";
 import type { Cache } from "../cache.js";
 import { stableHash } from "./identity.js";
 import { migrateAtlas } from "./schema.js";
+import { queryComponentAtlas } from "./search-components.js";
 import {
+  buildStateRegionTable,
   claimEligibilitySql,
+  claimStateSql,
   claimTierSql,
   deriveRegionTag,
   rebuildAtlasSearchProjections,
+  stateRegionEligibilitySql,
   structuralSql,
   tagFallbackSql,
 } from "./search-projections.js";
@@ -14,6 +18,7 @@ export { deriveRegionTag } from "./search-projections.js";
 import type { EvidenceCoverage } from "./types.js";
 import {
   CANONICAL_LANDMARKS,
+  COMPONENT_TYPES,
   SECTION_PURPOSES,
   canonicalLandmark,
   isSearchableVocabulary,
@@ -177,16 +182,27 @@ export const REGION_ROLES: ReadonlySet<string> = new Set([
   "treeitem",
 ]);
 
-/** Phase 3 search only publishes section evidence. */
-const REGION_KINDS: ReadonlySet<string> = new Set(["section"]);
-
-const PREDICATE_FIELDS: ReadonlySet<string> = new Set([
+const SECTION_PREDICATE_FIELDS: ReadonlySet<string> = new Set([
   "section.purpose",
   "region.kind",
   "region.tag",
   "region.role",
   "region.landmark",
 ]);
+
+const COMPONENT_PREDICATE_FIELDS: ReadonlySet<string> = new Set([
+  "component.type",
+  "context.section_purpose",
+  "region.kind",
+]);
+
+function predicateFields(kind: InterpretedSearchInput["kind"]): ReadonlySet<string> {
+  return kind === "components" ? COMPONENT_PREDICATE_FIELDS : SECTION_PREDICATE_FIELDS;
+}
+
+function regionKindFor(kind: InterpretedSearchInput["kind"]): "section" | "component" {
+  return kind === "components" ? "component" : "section";
+}
 
 function errorResult(
   code: AtlasSearchErrorCode,
@@ -209,12 +225,21 @@ export function toFtsQuery(tokens: string[]): string | null {
   return tokens.map((token) => `"${token.replaceAll('"', '""')}"*`).join(" ");
 }
 
-function canonicalValues(field: SearchField): readonly string[] {
+function canonicalValues(
+  field: SearchField,
+  kind: InterpretedSearchInput["kind"],
+): readonly string[] {
   switch (field) {
     case "section.purpose":
       return SECTION_PURPOSES.filter((value) => isSearchableVocabulary("section.purpose", value));
+    case "component.type":
+      return COMPONENT_TYPES.filter((value) => isSearchableVocabulary("component.type", value));
+    case "context.section_purpose":
+      return SECTION_PURPOSES.filter((value) =>
+        isSearchableVocabulary("context.section_purpose", value),
+      );
     case "region.kind":
-      return ["section"];
+      return [regionKindFor(kind)];
     case "region.tag":
       return [...REGION_TAGS].sort(cmp);
     case "region.role":
@@ -224,12 +249,20 @@ function canonicalValues(field: SearchField): readonly string[] {
   }
 }
 
-function valueSupported(field: SearchField, value: string): boolean {
+function valueSupported(
+  field: SearchField,
+  value: string,
+  kind: InterpretedSearchInput["kind"],
+): boolean {
   switch (field) {
     case "section.purpose":
       return isSearchableVocabulary("section.purpose", value);
+    case "component.type":
+      return isSearchableVocabulary("component.type", value);
+    case "context.section_purpose":
+      return isSearchableVocabulary("context.section_purpose", value);
     case "region.kind":
-      return REGION_KINDS.has(value);
+      return value === regionKindFor(kind);
     case "region.tag":
       return REGION_TAGS.has(value);
     case "region.role":
@@ -243,15 +276,23 @@ function valueSupported(field: SearchField, value: string): boolean {
  * The single canonicalization gate for predicate values and facet candidates.
  * A facet value that fails here could never be sent back as a predicate.
  */
-function canonicalFacetValue(field: SearchField, raw: unknown): string | null {
+function canonicalFacetValue(
+  field: SearchField,
+  raw: unknown,
+  kind: InterpretedSearchInput["kind"],
+): string | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) return null;
   const value = field === "region.landmark" ? canonicalLandmark(trimmed) : trimmed;
-  return value && valueSupported(field, value) ? value : null;
+  return value && valueSupported(field, value, kind) ? value : null;
 }
 
-function normalizeValues(field: SearchField, raw: unknown): string[] | null {
+function normalizeValues(
+  field: SearchField,
+  raw: unknown,
+  kind: InterpretedSearchInput["kind"],
+): string[] | null {
   if (!Array.isArray(raw)) return null;
   const values: string[] = [];
   for (const item of raw) {
@@ -259,7 +300,7 @@ function normalizeValues(field: SearchField, raw: unknown): string[] | null {
     const trimmed = item.trim().toLowerCase();
     if (!trimmed) return null;
     const value = field === "region.landmark" ? canonicalLandmark(trimmed) : trimmed;
-    if (!value || !valueSupported(field, value)) return null;
+    if (!value || !valueSupported(field, value, kind)) return null;
     if (!values.includes(value)) values.push(value);
   }
   return values.length > 0 && values.length <= 8 ? values : null;
@@ -273,17 +314,11 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
   const invalid = (message: string): CompiledSearch =>
     ({ ok: false, error: { code: "INVALID_INPUT", message, retryable: false } });
   if (!input || typeof input !== "object") return invalid("input must be an object");
-  if (input.kind === "components") {
-    return {
-      ok: false,
-      error: {
-        code: "UNSUPPORTED_KIND",
-        message: "Component search arrives in Phase 4; use kind sections",
-        retryable: false,
-      },
-    };
+  if (input.kind !== "sections" && input.kind !== "components") {
+    return invalid("kind must be sections or components");
   }
-  if (input.kind !== "sections") return invalid("kind must be sections or components");
+  const kind = input.kind;
+  const allowedFields = predicateFields(kind);
 
   let query: string | undefined;
   let tokens: string[] = [];
@@ -306,7 +341,7 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
   for (const predicate of rawPredicates) {
     if (!predicate || typeof predicate !== "object") return invalid("predicate must be an object");
     const field = predicate.field as SearchField;
-    if (!PREDICATE_FIELDS.has(field)) {
+    if (!allowedFields.has(field)) {
       return {
         ok: false,
         error: {
@@ -316,7 +351,7 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
         },
       };
     }
-    const values = normalizeValues(field, predicate.values);
+    const values = normalizeValues(field, predicate.values, kind);
     if (!values) {
       return {
         ok: false,
@@ -339,17 +374,9 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
     return invalid("viewport must be desktop or mobile");
   }
   const state = input.state ?? "default";
-  if (state === "hover" || state === "focus") {
-    return {
-      ok: false,
-      error: {
-        code: "UNSUPPORTED_STATE",
-        message: "Only default-state evidence is published in Phase 3",
-        retryable: false,
-      },
-    };
+  if (state !== "default" && state !== "hover" && state !== "focus") {
+    return invalid("state must be default, hover or focus");
   }
-  if (state !== "default") return invalid("state must be default, hover or focus");
 
   const evidenceMode = input.evidenceMode ?? "candidate";
   if (evidenceMode !== "accepted" && evidenceMode !== "observed_only" && evidenceMode !== "candidate") {
@@ -380,16 +407,16 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
     return invalid("maxAgeDays must be an integer from 1 to 3650");
   }
 
-  const groupBy = input.groupBy ?? "instance";
+  const groupBy = input.groupBy ?? (kind === "components" ? "pattern" : "instance");
   if (groupBy !== "instance" && groupBy !== "pattern") {
     return invalid("groupBy must be instance or pattern");
   }
-  if (groupBy === "pattern") {
+  if (kind === "sections" && groupBy === "pattern") {
     return {
       ok: false,
       error: {
         code: "UNSUPPORTED_GROUPING",
-        message: "Pattern grouping arrives in Phase 4; sections count region instances",
+        message: "Pattern grouping applies to components; sections count region instances",
         retryable: false,
       },
     };
@@ -404,7 +431,7 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
   const facets: SearchField[] = [];
   for (const value of rawFacets) {
     const field = value as SearchField;
-    if (!PREDICATE_FIELDS.has(field)) {
+    if (!allowedFields.has(field)) {
       return {
         ok: false,
         error: {
@@ -446,7 +473,7 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
   const queryHash = stableHash(
     "atlas-search-v1",
     JSON.stringify({
-      kind: "sections",
+      kind,
       query: tokens.join(" "),
       predicates: canonicalPredicates,
       scope,
@@ -463,7 +490,7 @@ export function compilePredicates(input: SearchAtlasInput): CompiledSearch {
   );
 
   const interpreted: InterpretedSearchInput = {
-    kind: "sections",
+    kind,
     ...(query === undefined ? {} : { query }),
     predicates,
     scope,
@@ -739,11 +766,13 @@ function effectivePredicates(
 }
 
 function anchorTierSql(plan: SqlPlan): string {
+  const state = `AND ${claimStateSql("cl", plan.input.state)}`;
   return `COALESCE((
     SELECT MIN(${claimTierSql("cl")})
     FROM atlas_claims cl
     WHERE cl.region_id = r.id
       AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+      ${state}
   ), 2)`;
 }
 
@@ -855,7 +884,12 @@ function preparePurposeRegionMatches(
   purposes: EffectivePredicate[],
 ): string | null {
   if (purposes.length === 0) return null;
-  if (purposes.length === 1) {
+  const stateFilter = plan.input.state !== "default";
+  const claimState = (alias: string): string =>
+    `AND ${claimStateSql(alias, plan.input.state)}`;
+  // The projection path cannot prove which sample a purpose belongs to, so a
+  // state query always takes the claims path with its sample-key check.
+  if (purposes.length === 1 && !stateFilter) {
     const predicate = purposes[0]!;
     const table = "atlas_search_purpose_matches";
     db.exec(`DROP TABLE IF EXISTS temp.${table}`);
@@ -909,6 +943,25 @@ function preparePurposeRegionMatches(
         ? ""
         : `JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
            JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id`;
+    if (stateFilter) {
+      // The purpose projection is default-state only, so a state query reads
+      // the state claims directly and takes freshness from capture_meta.
+      delete params.profileKey;
+      delete params.cutoff;
+      db.prepare(
+        `INSERT INTO temp.${table} (region_id, tier)
+         SELECT cl.region_id, MIN(${claimTierSql("cl")})
+         FROM atlas_claims cl
+         JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+         JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+         WHERE cl.field = 'section.purpose'
+           AND cl.value IN ${placeholders}
+           AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+           AND ${claimStateSql("cl", plan.input.state)}
+         GROUP BY cl.region_id`,
+      ).run(params);
+      return;
+    }
     db.prepare(
       `INSERT INTO temp.${table} (region_id, tier)
        SELECT cl.region_id, MIN(${claimTierSql("cl")})
@@ -919,6 +972,7 @@ function preparePurposeRegionMatches(
        WHERE cl.field = 'section.purpose'
          AND cl.value IN ${placeholders}
          AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+         AND ${claimStateSql("cl", plan.input.state)}
          AND rp.profile_key = :profileKey AND rp.fresh >= :cutoff
        GROUP BY cl.region_id`,
     ).run(params);
@@ -965,7 +1019,8 @@ function preparePurposeRegionMatches(
      JOIN atlas_claims cl INDEXED BY atlas_claims_region_idx ON cl.region_id = pm.region_id
      WHERE cl.field = 'section.purpose'
        AND cl.value IN ${firstValues}
-       AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}`,
+       AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+       ${claimState("cl")}`,
   ).run(firstParams);
   purposes.slice(1).forEach((predicate) => {
     const params: Record<string, string> = {};
@@ -979,6 +1034,7 @@ function preparePurposeRegionMatches(
            AND cl.field = 'section.purpose'
            AND cl.value IN ${placeholders}
            AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+           ${claimState("cl")}
        )`,
     ).run(params);
   });
@@ -1010,8 +1066,29 @@ function prepareFeatureScopeSet(
   const tierValue = predicate.kind === "purpose" ? `MIN(${tierColumn})` : "1";
   const params: Record<string, string | number> = {};
   const placeholders = bindValues(params, "v", predicate.values);
+  // State-scoped structural witnesses come from the same eligible state
+  // regions the query will return, never from the default-state projections.
+  const stateStructuralExpression = (): string =>
+    predicate.field === "region.tag"
+      ? `COALESCE(${structuralSql("region.tag", "r")}, ${tagFallbackSql("r")})`
+      : structuralSql(predicate.field, "r")!;
   if (plan.input.scope === "page") {
     if (predicate.field === "section.purpose") {
+      if (plan.input.state !== "default") {
+        db.prepare(
+          `INSERT OR IGNORE INTO temp.${table} (scope_key, tier)
+           SELECT r.capture_id, MIN(${claimTierSql("cl")})
+           FROM atlas_claims cl INDEXED BY atlas_claims_state_region_idx
+           JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+           JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+           WHERE cl.field = 'section.purpose'
+             AND cl.value IN ${placeholders}
+             AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+             AND ${claimStateSql("cl", plan.input.state)}
+           GROUP BY r.capture_id`,
+        ).run(params);
+        return;
+      }
       db.prepare(
         `INSERT OR IGNORE INTO temp.${table} (scope_key, tier)
          SELECT p.capture_id, ${tierValue}
@@ -1019,6 +1096,19 @@ function prepareFeatureScopeSet(
          JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = p.capture_id
          WHERE p.value IN ${placeholders} AND p.${tierColumn} IS NOT NULL
          GROUP BY p.capture_id`,
+      ).run(params);
+      return;
+    }
+    if (plan.input.state !== "default") {
+      db.prepare(
+        `INSERT OR IGNORE INTO temp.${table} (scope_key, tier)
+         SELECT r.capture_id, 1
+         FROM temp.atlas_search_state_regions sr
+         JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = sr.region_id
+         JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+         WHERE r.kind = 'section'
+           AND ${stateStructuralExpression()} IN ${placeholders}
+         GROUP BY r.capture_id`,
       ).run(params);
       return;
     }
@@ -1034,6 +1124,21 @@ function prepareFeatureScopeSet(
     return;
   }
   if (predicate.field === "section.purpose") {
+    if (plan.input.state !== "default") {
+      db.prepare(
+        `INSERT OR IGNORE INTO temp.${table} (scope_key, tier)
+         SELECT cm.site_slug, MIN(${claimTierSql("cl")})
+         FROM atlas_claims cl INDEXED BY atlas_claims_state_region_idx
+         JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+         JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+         WHERE cl.field = 'section.purpose'
+           AND cl.value IN ${placeholders}
+           AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+           AND ${claimStateSql("cl", plan.input.state)}
+         GROUP BY cm.site_slug`,
+      ).run(params);
+      return;
+    }
     // Site membership and tier come from the eligible capture set only; a
     // stale desktop capture can never contribute the site's purpose tier.
     db.prepare(
@@ -1042,6 +1147,19 @@ function prepareFeatureScopeSet(
        FROM atlas_capture_purposes p
        JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = p.capture_id
        WHERE p.value IN ${placeholders} AND p.${tierColumn} IS NOT NULL
+       GROUP BY cm.site_slug`,
+    ).run(params);
+    return;
+  }
+  if (plan.input.state !== "default") {
+    db.prepare(
+      `INSERT OR IGNORE INTO temp.${table} (scope_key, tier)
+       SELECT cm.site_slug, 1
+       FROM temp.atlas_search_state_regions sr
+       JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = sr.region_id
+       JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+       WHERE r.kind = 'section'
+         AND ${stateStructuralExpression()} IN ${placeholders}
        GROUP BY cm.site_slug`,
     ).run(params);
     return;
@@ -1230,6 +1348,7 @@ interface ClaimRow {
   field: string;
   value: string;
   sample_key: string;
+  state: string;
   classification: AtlasSearchClaim["classification"];
   basis: AtlasSearchClaim["basis"];
   decision: AtlasSearchClaim["decision"];
@@ -1239,6 +1358,7 @@ function loadClaims(
   db: DatabaseSync,
   regionIds: string[],
   mode: InterpretedSearchInput["evidenceMode"],
+  state: InterpretedSearchInput["state"] = "default",
 ): Map<string, AtlasSearchClaim[]> {
   const result = new Map<string, AtlasSearchClaim[]>();
   if (regionIds.length === 0) return result;
@@ -1248,11 +1368,12 @@ function loadClaims(
   });
   const rows = db
     .prepare(
-      `SELECT cl.region_id, cl.field, cl.value, cl.sample_key,
+      `SELECT cl.region_id, cl.field, cl.value, cl.sample_key, cl.state,
               cl.classification, cl.basis, cl.decision
        FROM atlas_claims cl
        WHERE cl.region_id IN (${placeholderList("id", regionIds.length)})
          AND ${claimEligibilitySql("cl", mode)}
+         AND ${claimStateSql("cl", state)}
        ORDER BY cl.region_id, cl.field, cl.value, cl.sample_key, cl.id`,
     )
     .all(params) as unknown as ClaimRow[];
@@ -1264,6 +1385,7 @@ function loadClaims(
       field: row.field,
       value: row.value,
       sampleKey: row.sample_key,
+      state: row.state as AtlasSearchClaim["state"],
       classification: row.classification,
       basis: row.basis,
       decision: row.decision,
@@ -1450,6 +1572,7 @@ function witnessIdsFor(
                AND cl.field = 'section.purpose'
                AND cl.value IN (${predicateValues(predicate, index)})
                AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+               AND ${claimStateSql("cl", plan.input.state)}
              ORDER BY cl.sample_key
              LIMIT 3`,
           )
@@ -1481,6 +1604,7 @@ function witnessIdsFor(
            AND cl.field = 'section.purpose'
            AND cl.value IN (${predicateValues(predicate, index)})
            AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+           AND ${claimStateSql("cl", plan.input.state)}
          GROUP BY r.id
          ORDER BY r.ordinal, r.id
          LIMIT ${cap + 1}`,
@@ -1498,6 +1622,7 @@ function witnessIdsFor(
              AND cl.field = 'section.purpose'
              AND cl.value IN (${predicateValues(predicate, index)})
              AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+             AND ${claimStateSql("cl", plan.input.state)}
            ORDER BY cl.sample_key
            LIMIT 3`,
         )
@@ -1518,6 +1643,7 @@ function witnessIdsFor(
          WHERE r.kind = 'section'
            AND ${scopeWhere}
            AND ${match}
+           ${plan.input.state === "default" ? "" : `AND ${stateRegionEligibilitySql("r.id")}`}
          ORDER BY r.ordinal, r.id
          LIMIT ${cap + 1}`,
       )
@@ -1561,7 +1687,8 @@ function observationSpanFor(
            AND cm.site_slug = :siteSlug
            AND cl.field = 'section.purpose'
            AND cl.value IN (${predicateValues(predicate, index)})
-           AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}`,
+           AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+           AND ${claimStateSql("cl", plan.input.state)}`,
       );
       return;
     }
@@ -1580,7 +1707,8 @@ function observationSpanFor(
        JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
        WHERE r.kind = 'section'
          AND cm.site_slug = :siteSlug
-         AND ${structuralWitnessMatch(predicate.field, predicate.values, prefix)}`,
+         AND ${structuralWitnessMatch(predicate.field, predicate.values, prefix)}
+         ${plan.input.state === "default" ? "" : `AND ${stateRegionEligibilitySql("r.id")}`}`,
     );
   });
   const span = db
@@ -1633,6 +1761,7 @@ function matchedSampleKeyFor(
     ${where}
       AND cl.field = 'section.purpose'
       AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+      AND ${claimStateSql("cl", plan.input.state)}
     GROUP BY cl.region_id, cl.sample_key
     HAVING ${having}
   )`;
@@ -1706,6 +1835,7 @@ function toHit(
     pageUrl: clipNullable(row.public_url, MAX_URL_LENGTH),
     pagePath: clipNullable(row.path, MAX_PATH_LENGTH),
     kind: "section",
+    componentType: null,
     primaryLabel: clipNullable(row.primary_label ?? purpose, MAX_LABEL_LENGTH),
     viewport: plan.input.viewport,
     state: plan.input.state,
@@ -1738,7 +1868,7 @@ interface FacetCount {
 function facetFor(plan: SqlPlan, field: SearchField, rows: FacetCount[]): AtlasFacet {
   const counts = new Map<string, number>();
   for (const row of rows) {
-    const value = canonicalFacetValue(field, row.value);
+    const value = canonicalFacetValue(field, row.value, plan.input.kind);
     if (!value) continue;
     counts.set(value, (counts.get(value) ?? 0) + row.count);
   }
@@ -1747,7 +1877,7 @@ function facetFor(plan: SqlPlan, field: SearchField, rows: FacetCount[]): AtlasF
       .filter((predicate) => predicate.field === field)
       .flatMap((predicate) => predicate.values),
   );
-  const candidates = new Set<string>(canonicalValues(field));
+  const candidates = new Set<string>(canonicalValues(field, plan.input.kind));
   for (const value of counts.keys()) candidates.add(value);
   for (const value of selected) candidates.add(value);
   const ordered = [...candidates]
@@ -1767,7 +1897,10 @@ function facetFor(plan: SqlPlan, field: SearchField, rows: FacetCount[]): AtlasF
   return {
     field,
     disjunctive: true,
-    countUnit: "region_instance",
+    countUnit:
+      plan.input.kind === "components" && plan.input.groupBy === "pattern"
+        ? "component_pattern"
+        : "region_instance",
     values: top,
   };
 }
@@ -1828,6 +1961,11 @@ export function queryAtlasDatabase(
   request: AtlasSearchQuery,
   options: { ftsAvailable?: boolean; scores?: Record<string, number> } = {},
 ): AtlasSearchResult<AtlasSearchQueryData> {
+  if (request.input.kind === "components") {
+    const first = queryComponentAtlas(db, request, options);
+    if (first.ok || first.error.code !== "SEARCH_NOT_READY") return first;
+    return queryComponentAtlas(db, request, options);
+  }
   const first = queryAtlasSnapshot(db, request, options);
   if (first.ok || first.error.code !== "SEARCH_NOT_READY") return first;
   return queryAtlasSnapshot(db, request, options);
@@ -1918,6 +2056,17 @@ function queryAtlasSnapshot(
     const effective = effectivePredicates(plan.input.predicates, plan.input.scope);
     prepareCaptureMeta(db, plan);
     prepareScopeCounts(db, plan);
+    const stateFilter = plan.input.state !== "default";
+    const stateEvidence = stateFilter
+      ? buildStateRegionTable(db, {
+          captureTable: "atlas_search_capture_meta",
+          kind: "section",
+          state: plan.input.state === "hover" ? "hover" : "focus",
+          mode: plan.input.evidenceMode,
+        })
+      : 0;
+    const stateRegion = (regionExpr: string): string =>
+      stateFilter ? `AND ${stateRegionEligibilitySql(regionExpr)}` : "";
     const scopeCountTable =
       plan.input.scope === "page"
         ? "atlas_search_capture_meta"
@@ -1933,6 +2082,9 @@ function queryAtlasSnapshot(
     /** A structural value present in every capture never filters scopes. */
     const isUniversalStructural = (predicate: EffectivePredicate): boolean => {
       if (predicate.kind !== "structural") return false;
+      // `atlas_feature_totals` is built from default-state features; a state
+      // query must never inherit that universality and skip its witness set.
+      if (plan.input.state !== "default") return false;
       // Universality is corpus-wide; a site filter can make a globally
       // universal tag non-universal for the requested subset.
       if (plan.input.siteSlugs !== undefined && plan.input.siteSlugs !== null) return false;
@@ -2024,8 +2176,14 @@ function queryAtlasSnapshot(
         tier INTEGER NOT NULL
       ) WITHOUT ROWID`);
       db.exec(
+        // Section search must never seed from component FTS rows: components
+        // are a different anchor kind and a component-only text match is an
+        // honest no-match for kind=sections.
         `INSERT INTO temp.atlas_search_fts_regions (region_id, tier)
-         SELECT region_id, 0 FROM temp.atlas_search_scores`,
+         SELECT sc.region_id, 0
+         FROM temp.atlas_search_scores sc
+         JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = sc.region_id
+         WHERE r.kind = 'section'`,
       );
       db.exec(`DROP TABLE IF EXISTS temp.atlas_search_fts_anchors`);
       db.exec(`CREATE TEMP TABLE atlas_search_fts_anchors (
@@ -2101,11 +2259,39 @@ function queryAtlasSnapshot(
         };
         const placeholders = bindValues(params, `f${index}v`, predicate.values);
         if (index === 0) {
+          if (stateFilter) {
+            // The state region set is small; drive the feature scan from it
+            // instead of selecting the corpus-wide value set first.
+            db.prepare(
+              `INSERT OR IGNORE INTO temp.${target} (region_id, tier)
+               SELECT rf.region_id, 1
+               FROM temp.atlas_search_state_regions sr
+               JOIN atlas_region_features rf INDEXED BY atlas_region_features_region_idx
+                 ON rf.region_id = sr.region_id
+               WHERE rf.field = '${predicate.field}' AND rf.value IN ${placeholders}
+                 AND rf.profile_key = :profileKey AND rf.fresh >= :cutoff`,
+            ).run(params);
+            return;
+          }
           db.prepare(
             `INSERT OR IGNORE INTO temp.${target} (region_id, tier)
              SELECT region_id, 1 FROM atlas_region_features
              WHERE field = '${predicate.field}' AND value IN ${placeholders}
                AND profile_key = :profileKey AND fresh >= :cutoff`,
+          ).run(params);
+          return;
+        }
+        if (stateFilter) {
+          db.prepare(
+            `DELETE FROM temp.${target}
+             WHERE region_id NOT IN (
+               SELECT rf.region_id
+               FROM temp.atlas_search_state_regions sr
+               JOIN atlas_region_features rf INDEXED BY atlas_region_features_region_idx
+                 ON rf.region_id = sr.region_id
+               WHERE rf.field = '${predicate.field}' AND rf.value IN ${placeholders}
+                 AND rf.profile_key = :profileKey AND rf.fresh >= :cutoff
+             )`,
           ).run(params);
           return;
         }
@@ -2119,6 +2305,14 @@ function queryAtlasSnapshot(
         ).run(params);
       });
       restrictToSite(target);
+      if (stateFilter) {
+        db.exec(
+          `DELETE FROM temp.${target}
+           WHERE region_id NOT IN (
+             SELECT region_id FROM temp.atlas_search_state_regions
+           )`,
+        );
+      }
       return target;
     };
 
@@ -2228,6 +2422,14 @@ function queryAtlasSnapshot(
          SELECT region_id, tier FROM temp.${seed.table}`,
       );
       restrictToEligible(target);
+      if (stateFilter) {
+        db.exec(
+          `DELETE FROM temp.${target}
+           WHERE region_id NOT IN (
+             SELECT region_id FROM temp.atlas_search_state_regions
+           )`,
+        );
+      }
       return target;
     };
     const regionHits =
@@ -2254,8 +2456,16 @@ function queryAtlasSnapshot(
             .total;
         }
         if (ftsAnchors) {
-          return (db.prepare(`SELECT COUNT(*) AS total FROM temp.${ftsAnchors}`).get() as { total: number })
-            .total;
+          return (
+            db
+              .prepare(
+                `SELECT COUNT(*) AS total
+                 FROM temp.${ftsAnchors} fa
+                 JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = fa.region_id
+                 WHERE 1 = 1 ${stateRegion("r.id")}`,
+              )
+              .get() as { total: number }
+          ).total;
         }
         return (
           db
@@ -2264,7 +2474,7 @@ function queryAtlasSnapshot(
                FROM temp.atlas_search_capture_meta cm
                CROSS JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx
                  ON r.capture_id = cm.capture_id
-               WHERE r.kind = 'section'`,
+               WHERE r.kind = 'section' ${stateRegion("r.id")}`,
             )
             .get() as { total: number }
         ).total;      }
@@ -2274,7 +2484,22 @@ function queryAtlasSnapshot(
             .prepare(
               `SELECT COUNT(*) AS total
                FROM temp.${ftsAnchors} fa
-               JOIN temp.${matchedCaptures!} mc ON mc.capture_id = fa.capture_id`,
+               JOIN temp.${matchedCaptures!} mc ON mc.capture_id = fa.capture_id
+               ${stateFilter ? `JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = fa.region_id` : ""}
+               ${stateFilter ? `WHERE ${stateRegionEligibilitySql("r.id")}` : ""}`,
+            )
+            .get() as { total: number }
+        ).total;
+      }
+      if (stateFilter) {
+        return (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS total
+               FROM atlas_regions r
+               JOIN temp.${matchedCaptures!} mc ON mc.capture_id = r.capture_id
+               WHERE r.kind = 'section'
+                 AND ${stateRegionEligibilitySql("r.id")}`,
             )
             .get() as { total: number }
         ).total;
@@ -2324,6 +2549,7 @@ function queryAtlasSnapshot(
              ${from}
              ${queryJoin}
              WHERE r.kind = 'section'
+               ${stateRegion("r.id")}
            )
            SELECT * FROM filtered
            ${cursorWhere}
@@ -2356,6 +2582,7 @@ function queryAtlasSnapshot(
              ${from}
              ${queryJoin}
              WHERE r.kind = 'section'
+               ${stateRegion("r.id")}
            )
            SELECT * FROM filtered
            ${cursorWhere}
@@ -2434,7 +2661,9 @@ function queryAtlasSnapshot(
       ? []
       : new Set(plan.input.predicates.map((predicate) => predicate.field))) {
       if (field === "region.kind") {
-        predicatePresence[field] = corpusRow.regions > 0;
+        predicatePresence[field] = stateFilter
+          ? stateEvidence > 0
+          : corpusRow.regions > 0;
         continue;
       }
       const requested = [
@@ -2444,8 +2673,38 @@ function queryAtlasSnapshot(
             .flatMap((predicate) => predicate.values),
         ),
       ];
-      const present =
-        field === "section.purpose"
+      const present = stateFilter
+        ? field === "section.purpose"
+          ? db
+              .prepare(
+                `SELECT 1 AS present
+                 FROM atlas_claims cl INDEXED BY atlas_claims_facet_idx
+                 JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+                 JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+                 WHERE r.kind = 'section'
+                   AND cl.field = 'section.purpose'
+                   AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+                   AND ${claimStateSql("cl", plan.input.state)}
+                 LIMIT 1`,
+              )
+              .get()
+          : (() => {
+              const params: Record<string, string> = { presenceField: field };
+              const placeholders = bindValues(params, "presence", requested);
+              return db
+                .prepare(
+                  `SELECT 1 AS present
+                   FROM atlas_region_features f
+                   JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = f.region_id
+                   JOIN temp.atlas_search_capture_meta cm ON cm.capture_id = r.capture_id
+                   WHERE f.field = :presenceField AND f.value IN ${placeholders}
+                     AND r.kind = 'section'
+                     AND ${stateRegionEligibilitySql("r.id")}
+                   LIMIT 1`,
+                )
+                .get(params);
+            })()
+        : field === "section.purpose"
           ? // Purpose presence is field-level: a corpus with eligible purpose
             // evidence but no requested value is a genuine no-match. A stale,
             // mobile-only or candidate-only corpus is insufficient coverage.
@@ -2519,7 +2778,7 @@ function queryAtlasSnapshot(
                      FROM temp.atlas_search_capture_meta cm
                      CROSS JOIN atlas_regions r INDEXED BY atlas_regions_features_idx
                        ON r.capture_id = cm.capture_id
-                     WHERE r.kind = 'section'`,
+                     WHERE r.kind = 'section' ${stateRegion("r.id")}`,
                   )
                   .get() as { total: number }
               ).total;
@@ -2541,6 +2800,46 @@ function queryAtlasSnapshot(
                GROUP BY pf.${name}`,
             )
             .all(conditions.params) as unknown as FacetCount[];
+        }
+        if (field === "section.purpose" && stateFilter) {
+          // The purpose projection is default-state only. Count the requested
+          // state's claims over the state region set (already restricted to
+          // eligible captures and siteSlugs), applying the query's structural
+          // and text predicates per region. Only parameters the SQL actually
+          // uses are bound; no structural predicate means no profile/cutoff.
+          const params: Record<string, string | number> = { state: plan.input.state };
+          const conditions = structuralPredicates.map((predicate, index) => {
+            params.profileKey = `live-${plan.input.viewport}`;
+            params.cutoff = plan.cutoff;
+            const placeholders = bindValues(params, `sf${index}v`, predicate.values);
+            return `EXISTS (
+              SELECT 1 FROM atlas_region_features f INDEXED BY atlas_region_features_region_idx
+              WHERE f.region_id = r.id
+                AND f.field = '${predicate.field}'
+                AND f.value IN ${placeholders}
+                AND f.profile_key = :profileKey AND f.fresh >= :cutoff
+            )`;
+          });
+          if (ftsRegions) {
+            conditions.push(
+              `r.id IN (SELECT region_id FROM temp.${ftsRegions})`,
+            );
+          }
+          return db
+            .prepare(
+              `SELECT cl.value AS value, COUNT(DISTINCT cl.region_id) AS count
+               FROM temp.atlas_search_state_regions sr
+               CROSS JOIN atlas_claims cl INDEXED BY atlas_claims_region_state_idx
+                 ON cl.region_id = sr.region_id
+               JOIN atlas_regions r INDEXED BY atlas_regions_lookup_idx ON r.id = cl.region_id
+               WHERE cl.state = :state
+                 AND cl.field = 'section.purpose'
+                 AND r.kind = 'section'
+                 AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+                 ${conditions.map((condition) => `AND ${condition}`).join("\n                 ")}
+               GROUP BY cl.value`,
+            )
+            .all(params) as unknown as FacetCount[];
         }
         if (field === "section.purpose") {
           if (structuralPredicates.length > 0) {
@@ -2614,7 +2913,7 @@ function queryAtlasSnapshot(
                 .prepare(
                   `SELECT ${expression} AS value, COUNT(*) AS count
                    FROM atlas_regions r INDEXED BY atlas_regions_features_idx
-                   WHERE r.kind = 'section' AND ${expression} IS NOT NULL
+                   WHERE r.kind = 'section' AND ${expression} IS NOT NULL ${stateRegion("r.id")}
                    GROUP BY ${expression}`,
                 )
                 .all() as unknown as FacetCount[])
@@ -2623,7 +2922,7 @@ function queryAtlasSnapshot(
                   `SELECT ${expression} AS value, COUNT(*) AS count
                    FROM temp.atlas_search_capture_meta cm
                    CROSS JOIN atlas_regions r ON r.capture_id = cm.capture_id
-                   WHERE r.kind = 'section' AND ${expression} IS NOT NULL
+                   WHERE r.kind = 'section' AND ${expression} IS NOT NULL ${stateRegion("r.id")}
                    GROUP BY ${expression}`,
                 )
                 .all() as unknown as FacetCount[]);
@@ -2715,6 +3014,60 @@ function queryAtlasSnapshot(
         ).run();
         return table;
       };
+
+      if (stateFilter) {
+        // State evidence is a region sample, not a scope aggregate. Drive the
+        // facet from the state region set so the scan is bounded by state
+        // evidence, never by the whole eligible corpus.
+        const stateBase = `temp.atlas_search_state_regions sr
+          JOIN atlas_regions r INDEXED BY atlas_regions_features_idx ON r.id = sr.region_id`;
+        const source = plan.hasQuery
+          ? `${stateBase}
+             JOIN temp.${queryFacetRegions()} qr ON qr.region_id = r.id`
+          : allScopes
+            ? stateBase
+            : `${stateBase}
+               JOIN temp.${captures!} fc ON fc.capture_id = r.capture_id`;
+        if (field === "region.kind") {
+          return [
+            {
+              value: "section",
+              count: (
+                db
+                  .prepare(
+                    `SELECT COUNT(*) AS total FROM ${source}
+                     WHERE r.kind = 'section'`,
+                  )
+                  .get() as { total: number }
+              ).total,
+            },
+          ];
+        }
+        if (field === "section.purpose") {
+          return db
+            .prepare(
+              `SELECT cl.value AS value, COUNT(DISTINCT r.id) AS count
+               FROM ${source}
+               JOIN atlas_claims cl INDEXED BY atlas_claims_region_idx ON cl.region_id = r.id
+               WHERE r.kind = 'section'
+                 AND cl.field = 'section.purpose'
+                 AND ${claimEligibilitySql("cl", plan.input.evidenceMode)}
+                 AND ${claimStateSql("cl", plan.input.state)}
+               GROUP BY cl.value`,
+            )
+            .all() as unknown as FacetCount[];
+        }
+        const expression = structuralSql(field, "r")!;
+        return db
+          .prepare(
+            `SELECT ${expression} AS value, COUNT(DISTINCT r.id) AS count
+             FROM ${source}
+             WHERE r.kind = 'section'
+               AND ${expression} IS NOT NULL
+             GROUP BY ${expression}`,
+          )
+          .all() as unknown as FacetCount[];
+      }
 
       if (field === "region.kind") {
         if (plan.hasQuery) {
@@ -2843,7 +3196,12 @@ function queryAtlasSnapshot(
     );
 
     const anchorIds = pageRows.map((row) => row.region_id);
-    const claimsByRegion = loadClaims(db, anchorIds, plan.input.evidenceMode);
+    const claimsByRegion = loadClaims(
+      db,
+      anchorIds,
+      plan.input.evidenceMode,
+      plan.input.state,
+    );
     const screenshots = loadScreenshots(
       db,
       pageRows.map((row) => row.capture_id),
@@ -2891,6 +3249,7 @@ function queryAtlasSnapshot(
         facets,
         corpus: { sites: corpusRow.sites, pages: corpusRow.pages, captures: corpusRow.captures },
         hasEligibleRegions: corpusRow.regions > 0,
+        stateEvidence,
         predicatePresence,
       },
     });
@@ -3007,13 +3366,14 @@ function seedSnapshotDatabase(
       `INSERT INTO atlas_regions
          (id, capture_id, parent_id, kind, ordinal, locator_json, fingerprint, heading,
           text_excerpt, raw_title, primary_label, samples_json, pattern_key, coverage_json)
-       VALUES (?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const region of snapshot.regions) {
       regionInsert.run(
         region.id,
         region.captureId,
         `${region.captureId}:root`,
+        region.kind,
         region.ordinal,
         JSON.stringify({ selector: region.selector, tag: region.tag }),
         region.fingerprint,
@@ -3021,7 +3381,14 @@ function seedSnapshotDatabase(
         region.textExcerpt,
         region.rawTitle,
         region.primaryLabel,
-        JSON.stringify({ role: region.role, landmark: region.landmark }),
+        JSON.stringify({
+          role: region.role,
+          landmark: region.landmark,
+          observations: (region.samples ?? []).map((sample) => ({
+            state: sample.state,
+            regions: [{ sampleKey: sample.sampleKey }],
+          })),
+        }),
         region.patternKey,
         JSON.stringify(region.coverage),
       );
@@ -3029,8 +3396,8 @@ function seedSnapshotDatabase(
     const claimInsert = db.prepare(
       `INSERT INTO atlas_claims
          (id, region_id, field, value, sample_key, classification, basis, decision,
-          rule_id, rule_version, evidence_json, limitations_json, review_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '[]', '[]', NULL)`,
+          state, rule_id, rule_version, evidence_json, limitations_json, review_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '[]', '[]', NULL)`,
     );
     for (const claim of snapshot.claims) {
       claimInsert.run(
@@ -3042,6 +3409,7 @@ function seedSnapshotDatabase(
         claim.classification,
         claim.basis,
         claim.decision,
+        claim.state ?? "default",
         claim.ruleId,
       );
     }
@@ -3253,9 +3621,10 @@ export function searchAtlas(
   const predicatesPresent = search.predicates.every(
     (predicate) => result.data.predicatePresence[predicate.field] === true,
   );
-  const outcome: SearchAtlasData["outcome"] =
-    !result.data.hasEligibleRegions
-      ? "empty_corpus"
+  const outcome: SearchAtlasData["outcome"] = !result.data.hasEligibleRegions
+    ? "empty_corpus"
+    : search.state !== "default" && (result.data.stateEvidence ?? 0) === 0
+      ? "insufficient_coverage"
       : result.data.total > 0
         ? "matches"
         : predicatesPresent
@@ -3288,7 +3657,10 @@ export function searchAtlas(
     interpreted: search,
     results: boundedHits,
     total: result.data.total,
-    countUnit: "region_instance",
+    countUnit:
+      search.kind === "components" && search.groupBy === "pattern"
+        ? "component_pattern"
+        : "region_instance",
     nextCursor,
     facets: result.data.facets,
     corpus: {
@@ -3443,6 +3815,22 @@ export function loadAtlasSearchSnapshot(
         const landmark = canonicalLandmark(
           typeof samples?.landmark === "string" ? samples.landmark : null,
         );
+        const stateSamples: NonNullable<AtlasSearchRegion["samples"]> = [];
+        if (Array.isArray(samples?.observations)) {
+          for (const observation of samples.observations) {
+            if (!observation || typeof observation !== "object") continue;
+            const observationObject = observation as Record<string, unknown>;
+            const state = observationObject.state;
+            if (state !== "default" && state !== "hover" && state !== "focus") continue;
+            if (!Array.isArray(observationObject.regions)) continue;
+            for (const sample of observationObject.regions) {
+              if (!sample || typeof sample !== "object") continue;
+              const sampleKey = (sample as Record<string, unknown>).sampleKey;
+              if (typeof sampleKey !== "string") continue;
+              stateSamples.push({ sampleKey, state });
+            }
+          }
+        }
         regions.push({
           id: row.id,
           captureId: row.capture_id,
@@ -3460,12 +3848,13 @@ export function loadAtlasSearchSnapshot(
           textExcerpt: row.text_excerpt ?? "",
           fingerprint: row.fingerprint ?? null,
           coverage: parseCoverage(row.coverage_json),
+          samples: stateSamples,
         });
       }
 
       const rawClaims = db
         .prepare(
-          `SELECT cl.id, cl.region_id, cl.field, cl.value, cl.sample_key,
+          `SELECT cl.id, cl.region_id, cl.field, cl.value, cl.sample_key, cl.state,
                   cl.classification, cl.basis, cl.decision, cl.rule_id
            FROM atlas_claims cl
            JOIN atlas_regions r ON r.id = cl.region_id
@@ -3488,6 +3877,7 @@ export function loadAtlasSearchSnapshot(
         field: string;
         value: string;
         sample_key: string;
+        state: string;
         classification: AtlasSearchClaim["classification"];
         basis: AtlasSearchClaim["basis"];
         decision: AtlasSearchClaim["decision"];
@@ -3499,6 +3889,7 @@ export function loadAtlasSearchSnapshot(
         field: claim.field,
         value: claim.value,
         sampleKey: claim.sample_key,
+        state: claim.state as AtlasSearchClaim["state"],
         classification: claim.classification,
         basis: claim.basis,
         decision: claim.decision,
