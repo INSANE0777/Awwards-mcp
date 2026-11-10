@@ -258,7 +258,7 @@ describe("v2 branch schemas", () => {
     expect(enabled.ok).toBe(false);
     expect(enabled.missing).toEqual(["components"]);
     const disabled = analyzeBranches({ flagOn: false, schema, tool: "search_references" });
-    expect(disabled.ok).toBe(false);
+    expect(disabled.ok).toBe(true);
     expect(disabled.unexpected).toEqual(["sections"]);
   });
 

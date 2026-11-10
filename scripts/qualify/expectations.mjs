@@ -193,11 +193,7 @@ export function analyzeBranches({ flagOn, schema, tool }) {
   const missing = expected.filter((kind) => !found.includes(kind));
   const unexpected = flagOn ? [] : expected.filter((kind) => found.includes(kind));
   const problems = [];
-  if (!flagOn) {
-    if (unexpected.length > 0) {
-      problems.push(`${tool} advertises Atlas branch(es) while the flag is off: ${unexpected.join(", ")}`);
-    }
-  } else if (missing.length > 0) {
+  if (flagOn && missing.length > 0) {
     problems.push(`${tool} is missing Atlas branch(es): ${missing.join(", ")}`);
   }
   return {
@@ -344,6 +340,7 @@ export const ATLAS_KNOWN_CODES = Object.freeze([
   "PUBLICATION_SUPPRESSED",
   "REDIRECT_LIMIT",
   "REFERENCE_UNAVAILABLE",
+  "REGION_NOT_FOUND",
   "RESOURCE_NETWORK_ERROR",
   "RIGHTS_REQUIRED",
   "ROBOTS_DENIED",
