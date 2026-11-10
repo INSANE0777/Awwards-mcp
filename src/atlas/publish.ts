@@ -37,8 +37,11 @@ import type {
   ComponentCandidate,
 } from "./live-types.js";
 
-const EXTRACTOR_VERSION = "atlas-extractor-3";
-const CLASSIFIER_VERSION = "atlas-classifier-2";
+import {
+  ATLAS_LIVE_CLASSIFIER_VERSION,
+  ATLAS_LIVE_EXTRACTOR_VERSION,
+} from "./versions.js";
+
 const SOURCE_KIND = "live_page";
 /** Must match the search freshness window: 30 days. */
 const FRESH_WINDOW_MS = 30 * 86_400_000;
@@ -1031,8 +1034,8 @@ export async function publishCapture(
             browserVersion: viewport.browserVersion,
             dpr: viewport.dpr,
             reducedMotion: viewport.reducedMotion,
-            extractorVersion: EXTRACTOR_VERSION,
-            classifierVersion: CLASSIFIER_VERSION,
+            extractorVersion: ATLAS_LIVE_EXTRACTOR_VERSION,
+            classifierVersion: ATLAS_LIVE_CLASSIFIER_VERSION,
             vocabularyVersion: ATLAS_VOCABULARY_VERSION,
           };
           const digest = sha256Text(
@@ -1150,8 +1153,8 @@ export async function publishCapture(
             JSON.stringify(config),
             JSON.stringify({ robots: "allowed", publicOnly: true }),
             JSON.stringify(viewport.coverage),
-            EXTRACTOR_VERSION,
-            CLASSIFIER_VERSION,
+            ATLAS_LIVE_EXTRACTOR_VERSION,
+            ATLAS_LIVE_CLASSIFIER_VERSION,
             attempt.finishedAt,
           );
           const artifactIds = new Map<string, string>();

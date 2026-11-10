@@ -9,10 +9,12 @@ import {
   searchProjectionShapeCurrent,
 } from "./search-projections.js";
 import { ATLAS_VOCABULARY_VERSION } from "./vocabulary.js";
+import { ATLAS_CLASSIFIER_VERSION } from "./versions.js";
 
 export const ATLAS_SCHEMA_VERSION = 10;
 export const ATLAS_FTS_VERSION = 4;
-export const ATLAS_CLASSIFIER_VERSION = "atlas-classifier-2";
+// Single source: the live publisher and the schema stamp share one classifier version.
+export { ATLAS_CLASSIFIER_VERSION };
 
 const BASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS atlas_state (

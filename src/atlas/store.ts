@@ -28,8 +28,11 @@ import type {
   SitePageCommitResult,
 } from "./types.js";
 
-const EXTRACTOR_VERSION = "atlas-extractor-1";
-const CLASSIFIER_VERSION = "atlas-classifier-0";
+import {
+  ATLAS_STORE_CLASSIFIER_VERSION,
+  ATLAS_STORE_EXTRACTOR_VERSION,
+} from "./versions.js";
+
 const SOURCE_PROFILE = "source";
 const GALLERY_PROFILE = "gallery";
 const SLUG_PATTERN = /^[\w-]+$/;
@@ -266,8 +269,8 @@ export class AtlasStore {
       profile: SOURCE_PROFILE,
       sourceUrl: prepared.sourceUrl,
       sourceDigest: prepared.sourceDigest,
-      extractorVersion: EXTRACTOR_VERSION,
-      classifierVersion: CLASSIFIER_VERSION,
+      extractorVersion: ATLAS_STORE_EXTRACTOR_VERSION,
+      classifierVersion: ATLAS_STORE_CLASSIFIER_VERSION,
     });
     const capture = captureId(page, SOURCE_PROFILE, prepared.sourceDigest, configHash);
     const attemptId = randomUUID();
@@ -440,8 +443,8 @@ export class AtlasStore {
           }),
           JSON.stringify({ status: "not_evaluated" }),
           captureCoverage,
-          EXTRACTOR_VERSION,
-          CLASSIFIER_VERSION,
+          ATLAS_STORE_EXTRACTOR_VERSION,
+          ATLAS_STORE_CLASSIFIER_VERSION,
         );
         const newCapture = captureInsert.changes > 0;
 
@@ -759,8 +762,8 @@ export class AtlasStore {
       profile: GALLERY_PROFILE,
       sourceUrl,
       sourceDigest: digest,
-      extractorVersion: EXTRACTOR_VERSION,
-      classifierVersion: CLASSIFIER_VERSION,
+      extractorVersion: ATLAS_STORE_EXTRACTOR_VERSION,
+      classifierVersion: ATLAS_STORE_CLASSIFIER_VERSION,
     });
     const capture = captureId(page, GALLERY_PROFILE, digest, configHash);
     const now = this.now();
@@ -882,8 +885,8 @@ export class AtlasStore {
           }),
           JSON.stringify({ status: "not_evaluated" }),
           coverage,
-          EXTRACTOR_VERSION,
-          CLASSIFIER_VERSION,
+          ATLAS_STORE_EXTRACTOR_VERSION,
+          ATLAS_STORE_CLASSIFIER_VERSION,
         );
         const newCapture = captureInsert.changes > 0;
         if (newCapture && !writtenArtifact) {
