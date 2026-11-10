@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -26,6 +26,19 @@ describe("index CLI --atlas", () => {
     ["--atlas=import", "extra"],
     ["--pages", "1", "--atlas", "import"],
     ["--atlasfoo"],
+    ["--atlas", "capture"],
+    ["--atlas", "capture", "--slug", "alpha"],
+    ["--atlas=capture"],
+    ["--atlas", "capture", "--slug", "alpha", "--viewport", "tablet"],
+    ["--atlas", "capture", "--slug", "alpha", "--viewport", "desktop", "extra"],
+    ["--atlas", "capture", "--slug", "alpha", "--viewport", "desktop", "--pages", "1"],
+    ["--atlas", "reindex", "extra"],
+    ["--atlas", "verify", "--apply"],
+    ["--atlas", "prune"],
+    ["--atlas", "prune", "--older-than-days", "0"],
+    ["--atlas", "prune", "--older-than-days", "x"],
+    ["--atlas", "prune", "--older-than-days", "30", "extra"],
+    ["--pages", "1", "--atlas", "reindex"],
   ])("rejects unsupported form %s before cache construction", (...args: string[]) => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-cli-atlas-"));
     try {
@@ -39,13 +52,19 @@ describe("index CLI --atlas", () => {
     }
   });
 
-  it("requires AWWWARDS_MCP_ATLAS=1 before constructing the cache", () => {
+  it.each([
+    [["--atlas", "import"]],
+    [["--atlas", "capture", "--slug", "alpha", "--viewport", "desktop"]],
+    [["--atlas", "reindex"]],
+    [["--atlas", "verify"]],
+    [["--atlas", "prune", "--older-than-days", "30"]],
+  ])("requires AWWWARDS_MCP_ATLAS=1 for %s before constructing the cache", (args: string[]) => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-cli-atlas-"));
     try {
       const cacheDir = join(dir, "cache");
       const env = { ...process.env };
       delete env.AWWWARDS_MCP_ATLAS;
-      const result = run(["--atlas", "import"], env, cacheDir);
+      const result = run(args, env, cacheDir);
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("AWWWARDS_MCP_ATLAS=1");
       expect(existsSync(cacheDir)).toBe(false);
@@ -112,6 +131,64 @@ describe("index CLI --atlas", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    [["--atlas", "reindex"], "atlas reindex"],
+    [["--atlas", "verify"], "atlas verify"],
+    [["--atlas", "prune", "--older-than-days", "30"], "dry run"],
+    [["--atlas", "prune", "--older-than-days", "30", "--apply"], "apply"],
+  ])("runs %s against an empty cache", (args, expected) => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-cli-atlas-"));
+    try {
+      const cacheDir = join(dir, "cache");
+      const result = run(args, { ...process.env, AWWWARDS_MCP_ATLAS: "1" }, cacheDir);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain(expected);
+      expect(result.stderr).not.toContain("pages crawled");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("capture fails at target resolution without launching the crawler", () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-cli-atlas-"));
+    try {
+      const cacheDir = join(dir, "cache");
+      const result = run(
+        ["--atlas", "capture", "--slug", "missing-site", "--viewport", "desktop"],
+        { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
+        cacheDir,
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("capture desktop failed");
+      expect(result.stderr).not.toContain("pages crawled");
+      expect(result.stderr).not.toContain(cacheDir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform === "win32")(
+    "redacts a native-separator init error when AWWWARDS_CACHE_DIR uses slashes",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "awwwards-cli-atlas-"));
+      try {
+        const cacheDir = join(dir, "cache").replace(/\\/g, "/");
+        writeFileSync(cacheDir, "not a directory");
+        const result = run(
+          ["--atlas", "reindex"],
+          { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
+          cacheDir,
+        );
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("<cache>");
+        expect(result.stderr).not.toContain(cacheDir);
+        expect(result.stderr).not.toContain(cacheDir.replace(/\//g, "\\"));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("index CLI --elements retirement", () => {

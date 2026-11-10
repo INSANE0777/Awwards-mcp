@@ -3,44 +3,40 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { AwwwardsClient } from "./awwwards.js";
 import { Cache } from "./cache.js";
-import { importLegacyAtlas } from "./atlas/import.js";
 import { parseAtlasCliArgs } from "./atlas/cli.js";
+import { redactCachePath, runAtlasCommand } from "./atlas/cli-run.js";
 import { runIndexer, IndexLockError } from "./indexer.js";
 
 // --atlas is validated and dispatched before any cache/client construction.
 const atlasCommand = parseAtlasCliArgs(process.argv.slice(2));
-if (atlasCommand?.kind === "error") {
-  console.error(`awwwards-index: ${atlasCommand.message}`);
-  process.exit(2);
-}
-if (atlasCommand?.kind === "import") {
+if (atlasCommand) {
+  if (atlasCommand.kind === "error") {
+    console.error(`awwwards-index: ${atlasCommand.message}`);
+    process.exit(2);
+  }
   if (process.env.AWWWARDS_MCP_ATLAS !== "1") {
     console.error(
-      "awwwards-index: --atlas import requires AWWWARDS_MCP_ATLAS=1; no cache or network access was used.",
+      `awwwards-index: --atlas ${atlasCommand.kind} requires AWWWARDS_MCP_ATLAS=1; no cache or network access was used.`,
     );
     process.exit(2);
   }
   const atlasRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
   let atlasCache: Cache;
   try {
-    atlasCache = new Cache(atlasRoot);
+    atlasCache = new Cache(atlasRoot, Date.now, { atlas: true });
   } catch (err) {
-    console.error(
-      `awwwards-index: cannot initialize cache at ${atlasRoot}: ${err instanceof Error ? err.message : String(err)}`,
+    const detail = redactCachePath(
+      err instanceof Error ? err.message : String(err),
+      atlasRoot,
     );
+    console.error(`awwwards-index: cannot initialize the Atlas cache: ${detail}`);
     process.exit(1);
   }
-  const report = await importLegacyAtlas(atlasCache);
-  console.error(
-    `awwwards-index: atlas import — ${report.processed} processed ` +
-      `(${report.sitePages} site pages, ${report.galleryItems} gallery items), ` +
-      `${report.published} published, ${report.unpublished} unpublished, ` +
-      `${report.failures.length} failures`,
-  );
-  for (const failure of report.failures) {
-    console.error(`awwwards-index: ${failure.slug}: ${failure.error}`);
-  }
-  process.exit(report.failures.length > 0 ? 1 : 0);
+  const code = await runAtlasCommand(atlasCommand, {
+    cache: atlasCache,
+    log: (line) => console.error(line),
+  });
+  process.exit(code);
 }
 
 // npm run index              — sites crawl (default)

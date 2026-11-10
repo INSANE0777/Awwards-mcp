@@ -16,6 +16,8 @@ import {
   artifactPointerResolves,
   isPngStoredArtifact,
   readStoredArtifactJson,
+  resolveArtifactPath,
+  withArtifactLocks,
 } from "./artifacts.js";
 import { primaryPurpose } from "./classification.js";
 import { regionStableKey } from "./segmentation.js";
@@ -769,6 +771,23 @@ export async function publishCapture(
       claimCount: 0,
     };
   }
+  const artifactPaths = [
+    ...new Set(
+      publishableViewports.flatMap((viewport) =>
+        viewport.artifacts.map((artifact) => artifact.storagePath),
+      ),
+    ),
+  ]
+    .filter((storagePath) => {
+      try {
+        resolveArtifactPath(cache.rootDir, storagePath);
+        return true;
+      } catch {
+        // Unsafe paths are rejected by the typed artifact validation below.
+        return false;
+      }
+    })
+    .sort();
   for (const viewport of publishableViewports) {
     const components = viewport.components ?? [];
     const regionIds = [
@@ -971,11 +990,37 @@ export async function publishCapture(
   }
 
   try {
-    return cache.withAtlasDb((db) => {
+    return withArtifactLocks(cache.rootDir, artifactPaths, () =>
+      cache.withAtlasDb((db) => {
     let inTransaction = false;
     try {
       db.exec("BEGIN IMMEDIATE");
       inTransaction = true;
+      // The pre-flight check ran before the locks were held; recheck inside
+      // them so a prune that unlinked a shared file cannot leave a dangling row.
+      for (const viewport of publishableViewports) {
+        for (const artifact of viewport.artifacts) {
+          if (
+            validateStoredArtifact(cache.rootDir, {
+              storagePath: artifact.storagePath,
+              sha256: artifact.sha256,
+              bytes: artifact.bytes,
+            }) !== null
+          ) {
+            db.exec("ROLLBACK");
+            inTransaction = false;
+            return {
+              published: false,
+              code: "ARTIFACT_INVALID",
+              captureIds: [],
+              pageId: pageIdValue,
+              regionCount: 0,
+              componentCount: 0,
+              claimCount: 0,
+            };
+          }
+        }
+      }
       for (const viewport of publishableViewports) {
           const head = db
             .prepare(
@@ -1217,7 +1262,8 @@ export async function publishCapture(
         claimCount: 0,
       };
     }
-    });
+      }),
+    );
   } catch (error) {
     if (isBusyError(error)) {
       return {

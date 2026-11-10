@@ -24,7 +24,12 @@ import { inflateSync } from "node:zlib";
 
 const ARTIFACT_DIR = join("atlas", "artifacts");
 const ARTIFACT_COMPONENTS = ["atlas", ARTIFACT_DIR] as const;
-const LOCK_TIMEOUT_MS = 10_000;
+// Publish holds each per-path lock from artifact validation through COMMIT,
+// and a 100k-region projection rebuild was measured at 17.7 s inside the 90 s
+// capture budget. The wait therefore covers a whole publish but stays bounded:
+// a lock still held after 120 s fails closed with "Atlas artifact lock timeout"
+// and the caller retries (no deletion or publication has happened yet).
+const LOCK_TIMEOUT_MS = 120_000;
 
 export interface ArtifactIdentity {
   storagePath: string;
@@ -382,12 +387,24 @@ export function artifactPointerResolves(  cacheRoot: string,
   return true;
 }
 
-export function removeArtifactFileSync(cacheRoot: string, storagePath: string): void {  const target = resolveArtifactPath(cacheRoot, storagePath);
-  try {
-    rmSync(target, { force: true });
-  } catch {
-    /* best-effort cleanup */
+/**
+ * Remove one artifact file. Returns false only when the file is already gone;
+ * unsafe, non-regular and permission failures throw so callers can report them.
+ */
+export function removeArtifactFileSync(cacheRoot: string, storagePath: string): boolean {
+  const target = resolveArtifactPath(cacheRoot, storagePath);
+  const info = lstatSync(target, { throwIfNoEntry: false });
+  if (!info) return false;
+  if (info.isSymbolicLink() || !info.isFile()) {
+    throw new Error("artifact path is not a file");
   }
+  try {
+    rmSync(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  return true;
 }
 
 function ensureArtifactDirSync(cacheRoot: string): void {
@@ -465,6 +482,31 @@ async function acquireLockFile(
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
+}
+
+/**
+ * Hold several artifact locks for one operation. Targets are resolved before
+ * deduplication so two spellings of one file (separator style or case) cannot
+ * self-deadlock, then acquired in sorted order so concurrent publishers cannot
+ * deadlock each other.
+ */
+export async function withArtifactLocks<T>(
+  cacheRoot: string,
+  storagePaths: readonly string[],
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  await ensureArtifactDir(cacheRoot);
+  const unique = new Map<string, string>();
+  for (const storagePath of storagePaths) {
+    const target = resolveArtifactPath(cacheRoot, storagePath);
+    if (!unique.has(target)) unique.set(target, storagePath);
+  }
+  const ordered = [...unique.keys()].sort().map((target) => unique.get(target)!);
+  const acquire = async (index: number): Promise<T> =>
+    index >= ordered.length
+      ? fn()
+      : withArtifactLock(cacheRoot, ordered[index]!, () => acquire(index + 1));
+  return acquire(0);
 }
 
 /**

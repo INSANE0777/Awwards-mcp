@@ -240,12 +240,36 @@ Residual risks:
 - The immutable fallback is a snapshot read by construction: it ignores any `-wal` or `-journal` that appears after the sidecar check and assumes the file cannot change. That is sound for read-only media and ACL-denied directories; if a writer can still reach the same path, readers keep the last checkpointed content until they reconnect. The fallback refuses whenever a sidecar is present at open, and is never used on a normal writable cache.
 - Immutable media caveat: the connection reports `journal_mode = delete`, takes no locks and rejects writes with `SQLITE_READONLY`; replacing the database file behind an open handle is not observed. If the platform's SQLite build cannot open URI filenames, the fallback fails and search returns the typed `SEARCH_NOT_READY`.
 
+## Phase 6B CLI maintenance
+
+The existing `awwwards-index` executable exposes explicit Atlas actions. There is no new binary, and no automatic capture after an import.
+
+```bash
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas import
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas capture --slug <slug> [--path /] --viewport desktop|mobile|both
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas reindex
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas verify
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas prune --older-than-days <N>
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas prune --older-than-days <N> --apply
+```
+
+- Every action requires `AWWWARDS_MCP_ATLAS=1`. A missing flag or a malformed argument exits `2` before the cache directory, cache database or network client is created.
+- Atlas actions are mutually exclusive with the normal site crawl. `--elements` keeps its existing refusal before cache construction.
+- `capture` resolves the cached Awwwards slug to its known live origin, refuses arbitrary URLs, and never follows a failed target into the crawler. The documented spec form includes `--path /`: `--slug <slug> --path / --viewport desktop|mobile|both`. `--path` may be omitted and then defaults to `/`. `--viewport both` runs the desktop capture and publish, then the mobile capture and publish, sequentially.
+- `reindex` is offline: it validates active heads, repairs the canonical FTS documents and rebuilds the revision-keyed search projections. A repaired head set or changed FTS document set bumps the revision once; a projection-only rebuild does not bump it, and an identical rerun leaves the revision unchanged.
+- `verify` is offline and reports stored artifact integrity (`missing`, size, hash, not-a-file and unsafe-path counts). It prints the artifact ID and kind of up to ten issues (plus a remaining-issue count) and exits `1` when any artifact fails.
+- `prune` is a dry run by default. `--apply` is required to delete. It never removes active-head evidence, captures pinned by an `atlas_packs` registration, running captures, captures younger than the cutoff, or any capture with an artifact path that resolves outside `<cache>/atlas/artifacts`. Unsafe-path and non-regular-file captures are classified independently of artifact row order: a capture with both is skipped once, still counts as one unsafe capture and one not-file capture, never becomes eligible, and makes the command exit `1`. A non-regular artifact path always counts as a file failure, so `--apply` never reports that evidence as removed. Shared content-addressed files stay while any remaining artifact references them. Files are unlinked under the artifact lock, after deletion, and only when still unreferenced; publication holds the same per-path lock from artifact write or validation through COMMIT, so prune cannot unlink bytes under an uncommitted reference.
+- The artifact lock wait is bounded at 120 s, longer than a full publish (the 100k-region projection rebuild was measured at 7.6-17.7 s and runs inside the publish transaction) but not unbounded. A wait that exceeds it fails closed with `Atlas artifact lock timeout`; prune counts it as a file failure and exits `1` without unlinking, so the caller retries.
+- A prune that removes a shared file before an in-flight capture publishes makes that capture fail artifact validation instead of leaving a dangling reference. The publish pre-flight withdraws heads whose artifacts are already invalid, but the recheck inside the publish transaction returns `ARTIFACT_INVALID` without withdrawing a head; `verify` reports the missing file and the next successful publish replaces the head.
+- The unlink pass runs after COMMIT and is not transactional. A crash between the commit and the unlink leaves an unreferenced artifact file behind. `verify` walks database rows and does not report it, and no reclaim command exists; the file is inert because no row references it, and a later identical artifact write reuses the same content-addressed path.
+- Output is counts, typed codes, verify artifact IDs/kinds and redacted failure messages; stack traces and absolute cache paths are never printed.
+
 ## Next phase
 
-Phase 6A tool surfaces are implemented locally; the remaining Phase 6 work is review, CLI maintenance operations and release qualification, not new tool behavior:
+Phase 6A tool surfaces and Phase 6B CLI maintenance actions are implemented locally; the remaining Phase 6 work is review, installed-artifact/browser qualification and release approval, not new tool behavior:
 
-- optional CLI maintenance actions (`--atlas import|capture|reindex|verify|prune`) in the existing index executable
 - installed-artifact and browser qualification reports
+- optional CLI entry point for local pack creation (not implemented; no pack CLI exists, and `export_evidence_pack` is the only pack surface)
 - human review of generated DESIGN.md/brief/handoff from a permitted pilot pack
 - real-page density and rights checks on the held-out corpus
 - component-pack and screenshot copy policy sign-off before any public distribution

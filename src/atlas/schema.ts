@@ -3,6 +3,7 @@ import { removeHead } from "./heads.js";
 import {
   SEARCH_PROJECTION_SCHEMA,
   atlasSupportIndexesCurrent,
+  bumpAtlasRevision,
   ensureAtlasSupportIndexes,
   ensureSearchProjectionShape,
   rebuildAtlasSearchProjections,
@@ -646,6 +647,44 @@ export function migrateAtlas(
     }
     db.exec("COMMIT");
     return { schemaVersion: version, ftsVersion, revision };
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* already rolled back */
+    }
+    throw error;
+  }
+}
+
+export interface AtlasReindexResult {
+  revision: number;
+  /** True when invalid heads or the active FTS document set changed. */
+  changed: boolean;
+}
+
+/**
+ * Offline reindex: validate active heads, rebuild the canonical FTS projection
+ * and rebuild the revision-keyed search projections. A repaired FTS or head
+ * set bumps the revision once; an identical rerun is revision-stable.
+ */
+export function reindexAtlas(db: DatabaseSync, now: number): AtlasReindexResult {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const ftsAvailable =
+      db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'atlas_regions_fts'")
+        .get() !== undefined;
+    const changed = reconcileActiveProjection(db, ftsAvailable, now);
+    const current = (
+      db.prepare("SELECT revision FROM atlas_state WHERE singleton = 1").get() as {
+        revision: number;
+      }
+    ).revision;
+    const revision = changed ? bumpAtlasRevision(db, now) : current;
+    if (!changed) rebuildAtlasSearchProjections(db, revision);
+    db.exec("COMMIT");
+    return { revision, changed };
   } catch (error) {
     try {
       db.exec("ROLLBACK");
