@@ -47,6 +47,7 @@
     "smoke:browser": "node scripts/browser-smoke.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "protocol:smoke": "node scripts/protocol-smoke.mjs",
+    "qualify:installed": "node scripts/qualify-installed.mjs",
     "registry:gate": "node scripts/registry-gate.mjs",
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",

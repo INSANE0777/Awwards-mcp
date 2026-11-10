@@ -526,6 +526,23 @@ browser-smoke: capture_live_site -> image/png 17.5 KB inline, saved capture-38f7
 browser-smoke: PASS
 ```
 
+`npm run qualify:installed` is the release-artifact qualification. It packs
+this checkout, installs the tarball into a throwaway prefix, gives every child
+server/CLI an isolated `HOME`/`USERPROFILE`/`APPDATA` and throwaway caches, then
+runs the profile surfaces (41/13/15 with the flag off, 45/13/16 with
+`AWWWARDS_MCP_ATLAS=1`), both protocol eras, Atlas branch schemas, annotations,
+CLI refusals and a real-Chromium fixture over MCP stdio. The machine-readable
+report goes to `.qualification/installed-report.json`.
+
+Exit 0 means every required check passed **and** browser qualification was
+exercised (`qualificationScope: "full"`). An offline or `--no-browser` run is
+`qualificationScope: "offline-installed"` and is never PASS: with no failures
+it is INCOMPLETE (exit 2), and real failures still exit 1. Because a positive
+Atlas capture needs a permitted non-loopback fixture, a fully offline machine
+reports INCOMPLETE even when every other check passes. `--skip-build` refuses a
+`dist` older than `src` and reports INCOMPLETE (exit 2), so an existing build
+cannot qualify stale code.
+
 ### Resource limits and diagnostics
 
 All optional and read at startup:
