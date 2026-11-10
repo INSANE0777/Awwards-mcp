@@ -526,13 +526,15 @@ browser-smoke: capture_live_site -> image/png 17.5 KB inline, saved capture-38f7
 browser-smoke: PASS
 ```
 
+That run predates Atlas; with `AWWWARDS_MCP_ATLAS=1` the same check reports 45 tools.
+
 ### Resource limits and diagnostics
 
 All optional and read at startup:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 41 (45 with `AWWWARDS_MCP_ATLAS=1`); `v2` (beta) replaces the list with the 15-tool consolidated surface (16 with Atlas). The old → new v2 mapping is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). |
+| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 41 (45 with `AWWWARDS_MCP_ATLAS=1`); `v2` (beta) replaces the list with the 15-tool consolidated surface (16 with `AWWWARDS_MCP_ATLAS=1`). The old → new v2 mapping is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). |
 | `AWWWARDS_MCP_ATLAS` | off | `1` adds the experimental Atlas tools and v2 branches; `full` = 45 and `v2` = 16, `core` stays 13. Read once at startup. See [ATLAS.md](./ATLAS.md). |
 | `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Full serialized tool-result bytes (text, inline images and `structuredContent`). Larger responses replace `content` with a `{truncated:true, tool, bytes, limit, note}` JSON block; a truncated structured payload is dropped and reported as `isError: true`. |
 | `AWWWARDS_MCP_DEBUG_MEMORY` | unset | `1` logs one JSON line per tool call (duration, rss, heap) to stderr - never stdout. |
@@ -541,7 +543,7 @@ All optional and read at startup:
 
 The v1.14.0 `AWARDS_MCP_*` spellings (one fewer W) are still accepted as a one-release fallback; the `AWWWARDS_MCP_*` name wins when both are set.
 
-`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools, never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup — `full` = 41, `core` = 13, `v2` = 15 — so changing the value requires a server restart. With `AWWWARDS_MCP_ATLAS=1` the Atlas tools and branches raise those counts to `full` = 45 and `v2` = 16; `core` stays 13. The complete 1.x → v2 mapping for all 36 replaced names is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills).
+`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools (16 with `AWWWARDS_MCP_ATLAS=1`), never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup - `full` = 41, `core` = 13, `v2` = 15 (45 / 13 / 16 with `AWWWARDS_MCP_ATLAS=1`) - so changing the value requires a server restart. The complete 1.x → v2 mapping for all 36 replaced names is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills).
 
 `capture_live_site` also accepts `inline: false` to skip the base64 preview and `maxInlineBytes` to change the budget; captures whose base64 would exceed the budget (default 2.5 MB) are saved without an inline image, decided from the raw PNG size before conversion. Inline images from `capture_pose_3d` and `capture_component` count toward the same `AWWWARDS_MCP_MAX_RESPONSE_BYTES` budget. `analyze_network_capture` reads HAR files up to 20 MB (re-checked after reading) and 2000 entries. The `analyze_bundle` import graph supports import/reexport declarations up to 8 KB each.
 
@@ -596,7 +598,8 @@ npx skills add INSANE0777/awwwards-skills
 ```
 
 Tested pairing: **`awwwards-mcp@1.18.0` + `skills-v2026.11.07`**. The 1.18
-release keeps the same **41 / 13 / 15** tool surface, but rerun the
+release keeps the same **41 / 13 / 15** tool surface (**45 / 13 / 16** with
+`AWWWARDS_MCP_ATLAS=1`), but rerun the
 compatibility check before a later release changes either side.
 
 The CLI detects your agents and lets you choose a project or user-level
@@ -679,6 +682,106 @@ for 7 days. Awwwards page and CDN requests have a 10-second deadline per
 attempt, including response-body reading; transient page failures are retried
 once, while blocks (403/429) and CDN failures are not retried.
 
+## Atlas (experimental, opt-in)
+
+Atlas is a local, section-level evidence layer over the existing SQLite cache.
+It is off by default and enabled with one flag, read once at startup:
+
+```bash
+AWWWARDS_MCP_ATLAS=1
+```
+
+| Profile | Flag off | Flag on |
+|---|---:|---:|
+| `full` (default) | 41 | 45 |
+| `core` | 13 | 13 |
+| `v2` | 15 | 16 |
+
+Flag on adds four full-profile tools: `search_atlas`, `get_atlas`,
+`capture_atlas` and `export_evidence_pack`. In the v2 surface the same
+operations are branches of existing tools (`search_references`
+`kind:sections|components`, `get_reference`
+`kind:atlas_region|atlas_highlight|atlas_taxonomy`, `get_index`
+`kind:atlas_status`, `capture_page` `kind:atlas`) plus the one new flat tool
+`export_evidence_pack`. Flag off, the four tools are not registered, the v2
+branches return `FEATURE_DISABLED`, and the historical 41 / 13 / 15 surface is
+unchanged. Atlas tables and files are additive and survive turning the flag
+off.
+
+Search is local only. It returns sections or components with witness claims,
+artifact descriptors, coverage and a cursor; it never fetches a page and never
+refreshes a capture. Scopes are explicit — same region, same page or same site
+— so traits from different regions do not silently combine. `hover` and
+`focus` queries read only evidence captured for that exact state.
+`empty_corpus` and `insufficient_coverage` mean **not observed**, never proven
+absent.
+
+```json
+{
+  "kind": "sections",
+  "predicates": [
+    { "field": "section.purpose", "values": ["pricing"] },
+    { "field": "region.landmark", "values": ["main"] }
+  ],
+  "scope": "region",
+  "viewport": "desktop"
+}
+```
+
+Component types are the weak spot. `card`, `drawer`, `carousel`,
+`icon_button` and `tooltip` are inferred, **candidate-only** hints and never
+satisfy `accepted` or `observed_only` search. The spec's F9 gate — accepted
+native/declared component-type precision ≥95% against held-out human labels —
+is **not met**; no held-out human component labels exist yet. Search therefore
+defaults to `evidenceMode: "candidate"`, marks every candidate hit
+`candidateOnly: true`, and adds `CLASSIFICATION_AMBIGUOUS`. Pass
+`evidenceMode: "accepted"` for accepted labels only. Section classification is
+also uncalibrated (candidate precision 0.787, recall 0.147 on the held-out
+review), so no label is advertised as validated taxonomy.
+
+Retrieval stays local too. `get_atlas` reads `status`, `taxonomy`, one `region`
+or one `highlight`. A region carries capture conditions, up to 128 claims,
+availability-checked artifact descriptors and bounded parent/child summaries;
+it does **not** embed the raw component tree by default — use the pack artifact
+path and hash. A highlight resolves an existing element id through stored aliases and
+never fetches the old gallery page; an ambiguous id returns `AMBIGUOUS_ALIAS`
+with candidate regions.
+
+`capture_atlas` accepts a known site slug only (plus an optional path on its
+known live origin), one viewport per call, components on by default and at most
+three hover/focus requests on the current active head. Click, type, submit,
+drag, keyboard navigation and route transitions are never performed.
+`refresh:false` reuses a matching usable head up to seven days old. A capture
+may return **partial evidence without publication**; `published` always states
+the actual result, `cached:true` means no new capture ran, and a failed or
+partial attempt leaves the previous head in place. Capture is still subject to
+robots and destination policy and one capture per cache at a time.
+
+`export_evidence_pack` builds a validated pack for 1–12 selected regions of one
+cached site. `includeMedia:"references"` (default) copies only derived
+summaries and references component packs and screenshots by artifact id, path
+and hash. `includeMedia:"permitted"` copies only stored artifacts with a caller
+rights assertion (`owned`, `licensed` or `permission`, `export_copy` scope, a
+non-empty reference); unknown or restricted artifacts are excluded with a
+reason. Assertions are recorded, not verified legal conclusions, and no
+assertion overrides a robots or destination refusal. There is no arbitrary
+output path, overwrite switch, asset downloader, public-sharing or publish
+operation; an identical selection returns the existing pack with `cached:true`.
+
+The Atlas CLI uses the existing `awwwards-index` executable:
+`--atlas import`, `--atlas capture --slug <slug> [--path /] --viewport
+desktop|mobile|both`, `--atlas reindex`, `--atlas verify` and
+`--atlas prune --older-than-days <N>` (dry-run unless `--apply`). Every action
+requires the flag, is mutually exclusive with the normal crawl, and validates
+its arguments before constructing a cache or client. There is no automatic
+capture after import and no new binary.
+
+Atlas is experimental: the classification gates are open, the tool release
+qualification is still pending, and captured page content remains its
+creators' property — this repository's MIT license does not cover it. See
+[ATLAS.md](./ATLAS.md) for the tool table, branch shapes, CLI rules, error
+codes, limits, unsupported operations and worked examples.
+
 ## Limitations
 
 Honest limits, so a result is not read as more than it measured.
@@ -710,8 +813,9 @@ Re-run before treating a delta as a regression; the score is evidence for a
 diff, not a grade.
 
 **`v2` is opt-in, not the default and not a 2.0 release.**
-`AWWWARDS_MCP_PROFILE=v2` replaces the default 41-tool surface with the
-15-tool consolidated surface described in
+`AWWWARDS_MCP_PROFILE=v2` replaces the default 41-tool surface (45 with
+`AWWWARDS_MCP_ATLAS=1`) with the 15-tool consolidated surface (16 with
+`AWWWARDS_MCP_ATLAS=1`) described in
 [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). The default stays `full`; there
 are no aliases between the surfaces, and switching requires a server restart.
 
