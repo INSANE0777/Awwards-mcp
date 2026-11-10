@@ -3,6 +3,7 @@
 // is strict so cross-branch fields fail validation instead of being silently
 // ignored.
 import { z } from "zod";
+import { ATLAS_ID } from "../atlas/tool-limits.js";
 import { detailArgsSchema } from "../detail-schema.js";
 import type { Handlers, ToolResponse } from "../server.js";
 import { asMcpResult, type ToolContext } from "../tools/shared.js";
@@ -70,6 +71,30 @@ export const getReferenceRequestSchema = z.discriminatedUnion("kind", [
         .describe("Page N of that collection"),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("atlas_region"),
+      regionId: z
+        .string()
+        .regex(ATLAS_ID)
+        .describe("Stored Atlas region id (64 lowercase hex characters)"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("atlas_highlight"),
+      elementId: z
+        .string()
+        .min(1)
+        .max(400)
+        .describe("Existing element id resolved through Atlas aliases; no legacy gallery fetch"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("atlas_taxonomy"),
+    })
+    .strict(),
 ]);
 
 export type GetReferenceRequest = z.infer<typeof getReferenceRequestSchema>;
@@ -101,6 +126,12 @@ export async function runGetReference(
       return handlers.compare_sites({ slugs: request.slugs });
     case "collection":
       return handlers.get_collections({ slug: request.slug, page: request.page });
+    case "atlas_region":
+      return handlers.get_atlas({ kind: "region", regionId: request.regionId });
+    case "atlas_highlight":
+      return handlers.get_atlas({ kind: "highlight", elementId: request.elementId });
+    case "atlas_taxonomy":
+      return handlers.get_atlas({ kind: "taxonomy" });
     default: {
       const exhaustive: never = request;
       throw new Error(`unhandled get_reference request: ${JSON.stringify(exhaustive)}`);
@@ -111,7 +142,7 @@ export async function runGetReference(
 export function registerGetReference(ctx: ToolContext): void {
   ctx.tool(
     "get_reference",
-    "Retrieve reference evidence for one known target. Choose exactly one request.kind: site_details (one site slug, or a batch of 1–10 distinct slugs, optional compact), site_elements (one site's element highlights), element (one element id), comparison (2–3 distinct site slugs side by side) or collection (one collection page by required slug). Use search_references first to find slugs and ids. There is no all mode: exactly one kind per call.",
+    "Retrieve reference evidence for one known target. Choose exactly one request.kind: site_details (one site slug, or a batch of 1–10 distinct slugs, optional compact), site_elements (one site's element highlights), element (one element id), comparison (2–3 distinct site slugs side by side), collection (one collection page by required slug), or — when AWWWARDS_MCP_ATLAS=1 — atlas_region (one stored Atlas region: capture conditions, up to 128 claims, availability-checked artifacts, parent/child summaries and current/historical head status), atlas_highlight (resolve an existing element id through Atlas aliases; ambiguous ids return AMBIGUOUS_ALIAS with candidates and no gallery fetch) or atlas_taxonomy (registry version, values, aliases, evidence bases, scopes/states and unsupported operations). Atlas retrieval returns its own envelope. Use search_references first to find slugs, element ids and Atlas regions. There is no all mode: exactly one kind per call.",
     getReferenceInputSchema,
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: { request: GetReferenceRequest }) =>

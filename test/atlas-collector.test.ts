@@ -1142,11 +1142,41 @@ describe("Atlas collector lifecycle", () => {
     }
   });
 
+  it("passes components:false to the initial scan and records no components", async () => {
+    const { origin } = await fixtureServer();
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const scan = componentScan([scanComponent()]);
+    const calls: Array<{ components?: boolean } | undefined> = [];
+    const attempt = await collectAtlasPage(
+      { siteSlug: "fixture-live", viewports: ["desktop"], components: false },
+      {
+        cache,
+        allowPrivateOrigins: [origin],
+        loader: async () => ({ chromium: { launch: async () => fakeBrowser(scan).browser } }),
+        settle: async () => undefined,
+        scanPage: async (_page, _viewport, options) => {
+          calls.push(options);
+          return {
+            ...scan,
+            url: `${origin}/`,
+            components: options?.components === false ? [] : scan.components,
+          };
+        },
+        totalBudgetMs: 30_000,
+      },
+    );
+    expect(calls[0]).toEqual({ components: false });
+    expect(attempt.viewports[0]!.components ?? []).toEqual([]);
+    expect(attempt.components).toBe(false);
+  });
+
   it("discovers components only on the initial scan", async () => {
     const scan = componentScan([scanComponent()]);
     const { attempt, cache } = await collectWithScan(scan);
     const viewport = attempt.viewports[0]!;
     expect(viewport.components).toHaveLength(1);
+    expect(viewport.scan.components ?? []).toHaveLength(1);
     expect(viewport.coverage.limitations).toContain("COMPONENT_INITIAL_SCAN_ONLY");
     expect(viewport.limitations).not.toContain("COMPONENT_INITIAL_SCAN_ONLY");
     expect(attempt.coverage.limitations).toContain("COMPONENT_INITIAL_SCAN_ONLY");

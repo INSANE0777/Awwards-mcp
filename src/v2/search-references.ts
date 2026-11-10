@@ -5,6 +5,7 @@
 import { z } from "zod";
 import type { Handlers, ToolResponse } from "../server.js";
 import { asMcpResult, type ToolContext } from "../tools/shared.js";
+import { atlasSearchFilterShape } from "../atlas/tool-contracts.js";
 
 export const searchReferencesRequestSchema = z.discriminatedUnion("kind", [
   z
@@ -115,6 +116,18 @@ export const searchReferencesRequestSchema = z.discriminatedUnion("kind", [
       page: z.number().int().min(1).max(100).default(1).describe("Collections index page"),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("sections"),
+      ...atlasSearchFilterShape,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("components"),
+      ...atlasSearchFilterShape,
+    })
+    .strict(),
 ]);
 
 export type SearchReferencesRequest = z.infer<typeof searchReferencesRequestSchema>;
@@ -168,6 +181,11 @@ export async function runSearchReferences(
       });
     case "collections":
       return handlers.get_collections({ page: request.page });
+    case "sections":
+    case "components": {
+      const { kind, ...filters } = request;
+      return handlers.search_atlas({ kind, ...filters });
+    }
     default: {
       const exhaustive: never = request;
       throw new Error(`unhandled search_references request: ${JSON.stringify(exhaustive)}`);
@@ -178,7 +196,7 @@ export async function runSearchReferences(
 export function registerSearchReferences(ctx: ToolContext): void {
   ctx.tool(
     "search_references",
-    "One entry point for finding Awwwards references. Choose exactly one request.kind: sites (award-winning site index with query, color, tag, technology and award filters; color searches always fetch the live filter page, a failed top-up keeps the requested cached page window, and only a failed cold fetch falls back to stale cached page 1), elements (cached gallery records plus source:\"site\" records from new winners' own site pages; the /elements/* gallery is not crawled), directory (agencies/studios; country/category/budget are path-based, so only one applies per call, in that priority), motion (cached Motion DNA corpus only) or collections (curated moodboards; the index is live for pages 1-4, page > 4 is rejected). collections lists collections only - use get_reference with kind=collection for one collection's sites. There is no all mode: exactly one kind per call.",
+    "One entry point for finding Awwwards references. Choose exactly one request.kind: sites (award-winning site index with query, color, tag, technology and award filters; color searches always fetch the live filter page, a failed top-up keeps the requested cached page window, and only a failed cold fetch falls back to stale cached page 1), elements (cached gallery records plus source:\"site\" records from new winners' own site pages; the /elements/* gallery is not crawled), directory (agencies/studios; country/category/budget are path-based, so only one applies per call, in that priority), motion (cached Motion DNA corpus only), collections (curated moodboards; the index is live for pages 1-4, page > 4 is rejected), sections or components (local Atlas evidence when AWWWARDS_MCP_ATLAS=1; region/page/site scopes, conjunctive predicates, disjunctive facets, accepted/observed/candidate evidence modes and hover/focus states; default candidate mode returns uncalibrated hints; the result is the Atlas envelope with interpreted input, witnesses, coverage and an optional next cursor; empty_corpus/insufficient_coverage mean not observed). collections lists collections only - use get_reference with kind=collection for one collection's sites. There is no all mode: exactly one kind per call.",
     searchReferencesInputSchema,
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: { request: SearchReferencesRequest }) =>

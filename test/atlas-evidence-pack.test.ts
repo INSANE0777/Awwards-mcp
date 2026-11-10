@@ -3732,13 +3732,16 @@ describe("Atlas evidence packs", () => {
     expect(validateEvidencePack(built.directory).ok).toBe(true);
   });
 
-  it("keeps the public surfaces at 41 full, 13 core and 15 v2", () => {
+  it("keeps the public surfaces at 41 full, 13 core and 15 v2 when Atlas is off", () => {
     const registrations: string[] = [];
-    registerAllTools({
-      handlers: {} as any,
-      tool: ((...args: any[]) => registrations.push(String(args[0]))) as any,
-      registerTool: ((...args: any[]) => registrations.push(String(args[0]))) as any,
-    });
+    registerAllTools(
+      {
+        handlers: {} as any,
+        tool: ((...args: any[]) => registrations.push(String(args[0]))) as any,
+        registerTool: ((...args: any[]) => registrations.push(String(args[0]))) as any,
+      },
+      { atlas: false },
+    );
     expect(registrations).toHaveLength(41);
     expect(new Set(registrations).size).toBe(41);
     expect(CORE_TOOL_NAMES).toHaveLength(13);

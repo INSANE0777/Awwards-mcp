@@ -341,6 +341,8 @@ export interface AtlasCaptureAttempt {
   artifacts: AtlasStoredArtifact[];
   /** Explicit state requests this attempt was asked to observe. */
   states?: AtlasStateRequest[];
+  /** Component candidates and packs; default true. */
+  components?: boolean;
   error?: string;
 }
 
@@ -348,6 +350,8 @@ export interface AtlasCollectInput {
   siteSlug: string;
   path?: string;
   viewports?: AtlasViewportProfile[];
+  /** Component candidates and packs; default true. */
+  components?: boolean;
   /** At most three explicit hover/focus observations on current head regions. */
   states?: AtlasStateRequest[];
 }

@@ -34,7 +34,9 @@ describe("tool annotations", () => {
     // cannot be expressed as a raw parameter shape. All registrations go
     // through the guarded tool()/registerTool() wrappers in server-instance.ts.
     const calls = src.match(/^\s*(?:ctx\.)?(?:tool|registerTool)\(/gm) ?? [];
-    expect(calls.length).toBe(41);
+    // 41 historical tools + 4 Phase 6A Atlas tools (registered only when the
+    // runtime flag is on; the source contract is still four hints each).
+    expect(calls.length).toBe(45);
 
     // Slice out each balanced-parens registration block and require the
     // four hint keys with explicit boolean values inside it.
@@ -94,6 +96,31 @@ describe("tool annotations", () => {
     expect(block).toContain("idempotentHint: false");
     expect(block).toContain("openWorldHint: true");
     expect(block).toContain("No screenshots");
+  });
+
+  it("registers the Atlas tools with the spec annotations", () => {
+    const search = registrationBlock("tool", "search_atlas");
+    for (const hint of [
+      "readOnlyHint: true",
+      "destructiveHint: false",
+      "idempotentHint: true",
+      "openWorldHint: false",
+    ]) {
+      expect(search).toContain(hint);
+    }
+    const get = registrationBlock("tool", "get_atlas");
+    expect(get).toContain("readOnlyHint: true");
+    expect(get).toContain("openWorldHint: false");
+    const capture = registrationBlock("tool", "capture_atlas");
+    expect(capture).toContain("readOnlyHint: false");
+    expect(capture).toContain("idempotentHint: false");
+    expect(capture).toContain("openWorldHint: true");
+    expect(capture).toContain("destructiveHint: false");
+    const exportPack = registrationBlock("tool", "export_evidence_pack");
+    expect(exportPack).toContain("readOnlyHint: false");
+    expect(exportPack).toContain("idempotentHint: true");
+    expect(exportPack).toContain("openWorldHint: false");
+    expect(exportPack).toContain("destructiveHint: false");
   });
 
   it("registers recording as non-read-only because it clicks and submits", () => {

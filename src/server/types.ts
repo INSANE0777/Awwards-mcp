@@ -33,6 +33,13 @@ import type { AuditCompact, AuditUrlResult } from "../audit-url.js";
 import type { FlowReport, VerifyFlowArgs } from "../verify-flow.js";
 import type { VerifyBuildFn, VerifyReport } from "../verify-build.js";
 import type { ViewportName } from "../viewport.js";
+import type {
+  CaptureAtlasInput,
+  ExportEvidencePackInput,
+  GetAtlasInput,
+  SearchAtlasToolInput,
+} from "../atlas/tool-contracts.js";
+import type { AtlasEnvelope } from "../atlas/tool-contracts.js";
 
 export const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -229,6 +236,29 @@ export type AnalyzeAccessibilityFn = (args: {
   limit?: number;
 }) => Promise<AccessibilityResult | { error: string }>;
 export type IndexStatsFn = (args: IndexStatsArgs) => Promise<IndexStatsResult>;
+
+// Phase 6A Atlas seams. Each op returns a typed Atlas envelope, never a raw
+// payload, so handler tests can inject evidence without a cache or browser.
+export type AtlasSearchFn = (
+  cache: Cache,
+  input: SearchAtlasToolInput,
+  now: number,
+) => AtlasEnvelope<unknown>;
+export type AtlasGetFn = (
+  cache: Cache,
+  input: GetAtlasInput,
+  now: number,
+) => AtlasEnvelope<unknown>;
+export type AtlasCaptureFn = (
+  cache: Cache,
+  input: CaptureAtlasInput,
+  options: { now: () => number; signal?: AbortSignal },
+) => Promise<AtlasEnvelope<unknown>>;
+export type AtlasExportFn = (
+  cache: Cache,
+  input: ExportEvidencePackInput,
+  now: number,
+) => Promise<AtlasEnvelope<unknown>>;
 
 // C3 token-diet helpers (plan Task C3): pure compaction for the `compact`
 // flag on get_site_details / capture_component. Heavy per-element detail →
@@ -627,6 +657,10 @@ export interface Handlers {
     award?: "sotd" | "developer" | "honorable";
     note?: string;
   }): Promise<ToolResponse>;
+  search_atlas(args: SearchAtlasToolInput): Promise<ToolResponse>;
+  get_atlas(args: GetAtlasInput): Promise<ToolResponse>;
+  capture_atlas(args: CaptureAtlasInput, signal?: AbortSignal): Promise<ToolResponse>;
+  export_evidence_pack(args: ExportEvidencePackInput): Promise<ToolResponse>;
 }
 
 // Freshness window for cached Motion DNA rows; records older than this are
@@ -666,6 +700,10 @@ export interface CreateHandlersDeps {
   auditUrlFn?: AuditUrlFn;
   analyzeAccessibilityFn?: AnalyzeAccessibilityFn;
   indexStatsFn?: IndexStatsFn;
+  atlasSearchFn?: AtlasSearchFn;
+  atlasGetFn?: AtlasGetFn;
+  atlasCaptureFn?: AtlasCaptureFn;
+  atlasExportFn?: AtlasExportFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;

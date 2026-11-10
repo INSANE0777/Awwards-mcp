@@ -160,10 +160,31 @@ function parse(line, label) {
 
 function toolNames(result, label) {
   const names = (result?.tools ?? []).map((tool) => tool.name);
-  if (names.length !== 41) throw new Error(`${label}: expected 41 tools, got ${names.length}`);
+  const atlas = process.env.AWWWARDS_MCP_ATLAS === "1";
+  const core =
+    (process.env.AWWWARDS_MCP_PROFILE ?? process.env.AWARDS_MCP_PROFILE) === "core";
+  const expected = core ? 13 : atlas ? 45 : 41;
+  if (names.length !== expected) {
+    throw new Error(
+      `${label}: expected ${expected} tools (AWWWARDS_MCP_ATLAS=${atlas ? "1" : "off"}, profile=${core ? "core" : "full"}), got ${names.length}`,
+    );
+  }
   if (new Set(names).size !== names.length) throw new Error(`${label}: duplicate tool names`);
-  if (!names.includes("capture_scene_3d") || !names.includes("verify_build")) {
-    throw new Error(`${label}: expected scene and verify tools`);
+  if (
+    !names.includes("verify_build") ||
+    (!core && !names.includes("capture_scene_3d"))
+  ) {
+    throw new Error(`${label}: missing expected ${core ? "core" : "scene and verify"} tools`);
+  }
+  const atlasTools = ["search_atlas", "get_atlas", "capture_atlas", "export_evidence_pack"];
+  if (core && names.some((name) => atlasTools.includes(name))) {
+    throw new Error(`${label}: Atlas tools are present in the core profile`);
+  }
+  if (!core && atlas && !atlasTools.every((name) => names.includes(name))) {
+    throw new Error(`${label}: Atlas is enabled but an Atlas tool is missing`);
+  }
+  if (!core && !atlas && atlasTools.some((name) => names.includes(name))) {
+    throw new Error(`${label}: Atlas tools are present while the flag is off`);
   }
 }
 
@@ -213,7 +234,13 @@ async function modern() {
 try {
   await legacy();
   await modern();
-  console.log("protocol-smoke: legacy 2025-06-18 + modern 2026-07-28 PASS (41 tools each)");
+  const atlas = process.env.AWWWARDS_MCP_ATLAS === "1" ? 45 : 41;
+  const core =
+    (process.env.AWWWARDS_MCP_PROFILE ?? process.env.AWARDS_MCP_PROFILE) === "core";
+  const count = core ? 13 : atlas;
+  console.log(
+    `protocol-smoke: legacy 2025-06-18 + modern 2026-07-28 PASS (${count} tools each${core ? ", core" : ""})`,
+  );
 } catch (error) {
   console.error(`protocol-smoke: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);

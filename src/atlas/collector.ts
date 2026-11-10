@@ -1100,14 +1100,26 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
           throw new AtlasCollectionError(settledRedirect.code, settledRedirect.message);
         }
         if (cancelled) break;
+        const includeComponents = input.components !== false;
         const rawScan = deps.scanPage
-          ? await withTimeout(
-              deps.scanPage(page, viewport),
-              Math.max(1, deadline - now()),
-              "CAPTURE_DEADLINE_EXCEEDED",
-            )
+          ? includeComponents
+            ? await withTimeout(
+                deps.scanPage(page, viewport),
+                Math.max(1, deadline - now()),
+                "CAPTURE_DEADLINE_EXCEEDED",
+              )
+            : await withTimeout(
+                deps.scanPage(page, viewport, { components: false }),
+                Math.max(1, deadline - now()),
+                "CAPTURE_DEADLINE_EXCEEDED",
+              )
           : await withTimeout(
-              page.evaluate(ATLAS_SECTION_SCAN, ATLAS_COMPONENT_HINTS) as Promise<AtlasPageScan>,
+              page.evaluate(
+                ATLAS_SECTION_SCAN,
+                includeComponents
+                  ? ATLAS_COMPONENT_HINTS
+                  : { ...ATLAS_COMPONENT_HINTS, components: false },
+              ) as Promise<AtlasPageScan>,
               Math.max(1, deadline - now()),
               "CAPTURE_DEADLINE_EXCEEDED",
             );
@@ -2310,6 +2322,7 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
     viewports,
     artifacts,
     states: stateRequests,
+    components: input.components !== false,
   };
 }
 

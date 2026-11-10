@@ -53,6 +53,12 @@ import {
   get_motion_dna,
   search_motion,
 } from "./handlers/motion.js";
+import {
+  capture_atlas,
+  export_evidence_pack,
+  get_atlas,
+  search_atlas,
+} from "./handlers/atlas.js";
 import type { CreateHandlersDeps, Handlers } from "./types.js";
 
 /** Composes the full Handlers surface from the domain modules. */
@@ -101,5 +107,9 @@ export function createHandlers(deps: CreateHandlersDeps): Handlers {
     search_motion: (args) => search_motion(ctx, args),
     new_winners: (args) => new_winners(ctx, args),
     watch_site: (args) => watch_site(ctx, args),
+    search_atlas: (args) => search_atlas(ctx, args),
+    get_atlas: (args) => get_atlas(ctx, args),
+    capture_atlas: (args, signal) => capture_atlas(ctx, args, signal),
+    export_evidence_pack: (args) => export_evidence_pack(ctx, args),
   };
 }

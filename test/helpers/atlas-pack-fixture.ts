@@ -28,6 +28,8 @@ function componentScan(
   viewport: AtlasViewportProfile,
   sections: Array<{ selector: string; backgroundColor: string | null }>,
   variant: "a" | "b" = "a",
+  sectionCount = 0,
+  componentCount = 0,
 ): { scan: AtlasPageScan; components: AtlasScanComponent[] } {
   const { scan: baseScan } = loadPhase2Fixture();
   const sectionsViewport =
@@ -45,6 +47,17 @@ function componentScan(
       viewport: sectionsViewport,
     })),
   };
+  if (sectionCount > scan.sections.length) {
+    const templates = [...scan.sections];
+    for (let index = templates.length; index < sectionCount; index += 1) {
+      const template = templates[index % templates.length]!;
+      scan.sections.push({
+        ...template,
+        nodeKey: `${template.nodeKey}-extra-${index}`,
+        selector: `${template.selector}-extra-${index}`,
+      });
+    }
+  }
   const styles =
     variant === "a"
       ? {
@@ -145,6 +158,18 @@ function componentScan(
       },
     },
   ];
+  if (componentCount > components.length) {
+    const templates = [...components];
+    for (let index = templates.length; index < componentCount; index += 1) {
+      const template = templates[index % templates.length]!;
+      components.push({
+        ...template,
+        nodeKey: `${template.nodeKey}-extra-${index}`,
+        selector: `${template.selector}-extra-${index}`,
+        rect: { ...template.rect, y: template.rect.y + index * 8 },
+      });
+    }
+  }
   scan.components = components;
   return { scan, components };
 }
@@ -157,6 +182,18 @@ export interface PackFixtureOptions {
   viewport?: AtlasViewportProfile;
   /** Capture-level coverage limitations that are not region limitations. */
   coverageLimitations?: string[];
+  /** Stored status; default complete. */
+  status?: "complete" | "partial";
+  /** Total screenshot artifacts (default 1). */
+  screenshotCount?: number;
+  /** Total component-pack artifacts (default: one per discovered pack). */
+  componentPackCount?: number;
+  /** Total scan sections; default is the phase2 fixture's own count. */
+  sectionCount?: number;
+  /** Total scan components; default is the two built-in components. */
+  componentCount?: number;
+  /** Collect component candidates and packs; default true. */
+  components?: boolean;
 }
 
 export interface PackFixtureResult {
@@ -167,19 +204,24 @@ export interface PackFixtureResult {
   pageRootId: string;
 }
 
-export async function publishPackFixture(
+export async function buildPackAttempt(
   cache: Cache,
   options: PackFixtureOptions = {},
-): Promise<PackFixtureResult> {
+): Promise<AtlasCaptureAttempt> {
   const siteSlug = options.siteSlug ?? "pack-fixture";
   const viewport = options.viewport ?? "desktop";
   const fetchedAt = options.fetchedAt ?? PACK_NOW;
   const coverageLimitations = options.coverageLimitations ?? [];
+  const status = options.status ?? "complete";
+  const componentsEnabled = options.components !== false;
   const { scan, components: rawComponents } = componentScan(
     viewport,
     [],
     options.variant ?? "a",
+    options.sectionCount ?? 0,
+    options.componentCount ?? 0,
   );
+  if (!componentsEnabled) scan.components = [];
   scan.url = `https://${siteSlug}.example/`;
   const regions = segmentRegions(scan);
   const purposesByKey = new Map<string, string[]>();
@@ -222,6 +264,10 @@ export async function publishPackFixture(
     mimeType: "image/png",
     regionKey: null,
   };
+  const screenshots: AtlasStoredArtifact[] = [screenshotStored];
+  for (let index = 1; index < (options.screenshotCount ?? 1); index += 1) {
+    screenshots.push({ ...screenshotStored, key: `screenshot-${viewport}-${index}` });
+  }
 
   const sectionKeyByNode = new Map(regions.map((region) => [region.nodeKey, region.key]));
   const candidates = discoverComponents(scan).map((candidate) => {
@@ -265,6 +311,14 @@ export async function publishPackFixture(
     packKeys.set(candidate.key, key);
   });
 
+  const packTarget = options.componentPackCount ?? packArtifacts.length;
+  while (packArtifacts.length > 0 && packArtifacts.length < packTarget) {
+    packArtifacts.push({
+      ...packArtifacts[0]!,
+      key: `component-pack-extra-${packArtifacts.length}`,
+    });
+  }
+
   const claims = [...sectionClaims];
   for (const candidate of candidates) {
     const sampleKey = `${viewport}:${candidate.key}:observation-${viewport}-initial`;
@@ -287,7 +341,7 @@ export async function publishPackFixture(
     }
   }
 
-  const artifacts: AtlasStoredArtifact[] = [scanStored, screenshotStored, ...packArtifacts];
+  const artifacts: AtlasStoredArtifact[] = [scanStored, ...screenshots, ...packArtifacts];
   let stateArtifact: AtlasStoredArtifact | null = null;
   if (options.includeState) {
     const stored = writeJsonArtifactSync(cache.rootDir, {
@@ -348,22 +402,23 @@ export async function publishPackFixture(
     attemptId: `pack-attempt-${siteSlug}-${options.variant ?? "a"}-${viewport}-${options.includeState ? "state" : "plain"}`,
     startedAt: fetchedAt,
     finishedAt: fetchedAt + 1000,
-    status: "complete",
+    status,
     coverage: {
-      status: "complete",
+      status,
       collected: regions.length,
       excluded: 0,
       limitations: coverageLimitations,
     },
     limitations: [],
     artifacts,
+    components: componentsEnabled,
     viewports: [
       {
         viewport,
         profileKey: `live-${viewport}`,
-        status: "complete",
+        status,
         coverage: {
-          status: "complete",
+          status,
           collected: regions.length,
           excluded: 0,
           limitations: coverageLimitations,
@@ -380,11 +435,20 @@ export async function publishPackFixture(
         regions,
         components: candidates,
         claims,
-        screenshots: [screenshotStored],
+        screenshots,
         artifacts,
       },
     ],
   };
+  return attempt;
+}
+
+/** Offline publication of one fixture attempt; returns the stored region ids. */
+export async function publishPackFixture(
+  cache: Cache,
+  options: PackFixtureOptions = {},
+): Promise<PackFixtureResult> {
+  const attempt = await buildPackAttempt(cache, options);
   const result = await publishCapture(attempt);
   if (!result.published) throw new Error(`fixture publish failed: ${result.code ?? "unknown"}`);
   const ids = cache.withAtlasDb((db) => {

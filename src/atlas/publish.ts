@@ -1037,6 +1037,7 @@ export async function publishCapture(
             extractorVersion: ATLAS_LIVE_EXTRACTOR_VERSION,
             classifierVersion: ATLAS_LIVE_CLASSIFIER_VERSION,
             vocabularyVersion: ATLAS_VOCABULARY_VERSION,
+            components: attempt.components !== false,
           };
           const digest = sha256Text(
             JSON.stringify({

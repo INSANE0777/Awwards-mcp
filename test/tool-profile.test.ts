@@ -31,7 +31,7 @@ function cliToolNames(): string[] {
     handlers: {} as any,
     tool: server.tool as any,
     registerTool: server.registerTool as any,
-  });
+  }, { atlas: false });
   return regs.map((r) => r.name);
 }
 

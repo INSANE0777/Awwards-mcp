@@ -6,11 +6,11 @@ Atlas is the section-level evidence layer for awwwards-mcp. It is **opt-in** and
 AWWWARDS_MCP_ATLAS=1
 ```
 
-It adds capture, segmentation, checkpoint evidence, publication, candidate section labels and local search to the existing SQLite cache. It does **not** add or change MCP tools; tool exposure belongs to a later phase.
+It adds capture, segmentation, checkpoint evidence, publication, candidate section labels, local search and evidence packs to the existing SQLite cache. With `AWWWARDS_MCP_ATLAS=1` it also adds four experimental MCP tools (`search_atlas`, `get_atlas`, `capture_atlas`, `export_evidence_pack`) and their v2 branches. With the flag off, the surfaces stay the historical **41 full / 13 core / 15 v2**.
 
 ## Status
 
-Phase 4B explicit hover/focus state capture and state-aware search are implemented locally and pass their focused test gates. Phase 5 evidence packs are implemented locally and pass their focused test gates; they are an internal export path, not an MCP tool. Classification is still **not calibrated** and is not advertised as accepted.
+Phase 4B explicit hover/focus state capture and state-aware search are implemented locally and pass their focused test gates. Phase 5 evidence packs are implemented locally and pass their focused test gates. Phase 6A wires the four MCP tools and v2 branches behind the flag; they are experimental. Classification is still **not calibrated** and is not advertised as accepted.
 
 - Held-out corpus: 50 usable pages
 - Scored: 49 pages, 1,883 sections
@@ -114,7 +114,7 @@ Schema v10 adds the additive `atlas_claims.state` column (existing rows default 
 
 ## Phase 5 evidence packs
 
-Implemented locally, with no MCP tool registration and no change to the 41/13/15 surfaces or the schema (v10 already has `atlas_packs`):
+Implemented locally in Phase 5 as an internal export path; Phase 6A adds the `export_evidence_pack` tool. No change to the 41/13/15 surfaces with the flag off or the schema (v10 already has `atlas_packs`):
 
 - Public internal interfaces: `buildEvidencePack(input, store)`, `validateEvidencePack(path)`, `renderDesignMd(selection)` and `renderRebuildHandoff(selection, goal)`.
 - Input: `siteSlug`, a required bounded goal (1,000 characters), 1-200 region ids, optional capture ids, `inclusionMode: "references" | "permitted"` (default `references`) and up to 24 rights assertions.
@@ -135,7 +135,41 @@ Implemented locally, with no MCP tool registration and no change to the 41/13/15
 - Policy refusal is fail-closed: only an explicit affirmative policy (`robots: "allowed"`, `status: "allowed"` or `publicOnly: true`) allows a copy; a missing, empty or malformed capture `policy_json` yields `POLICY_UNKNOWN`, and no permission assertion can override either refusal.
 - Caps: 200 selected regions, 1,000-character goal, 24 rights assertions, 24 copied artifacts, 8 MiB per artifact, 32 MiB total copies, 24 KiB DESIGN.md, 256 KiB design-evidence/sidecar and other documents, 1 MiB selection artifact. These are enforced before the final directory is published.
 - No network: build and validation read only the SQLite cache and local artifact files; they never refresh captures, fetch assets or resolve a URL.
-- Known gaps: this phase is an internal export path, not an MCP tool or CLI command; `permitted` mode cannot acquire missing payloads or override robots/destination refusals; raw `external_media` artifacts are never copied; elevation/border/motion values are omitted unless a future capture stores default-state evidence; component styles depend on the stored initial scan and are omitted when the scan artifact is unavailable; selected regions may span multiple active captures/pages of one site (narrowed by an optional `captureIds` filter), and the documents separate them by capture. A process killed mid-write can leave a `.tmp-*` directory (never a final pack); a database failure after the atomic rename leaves a complete but unregistered pack that the next build adopts and registers.
+- Known gaps: Phase 5 shipped as an internal export path; Phase 6A exposes it as a tool. `permitted` mode cannot acquire missing payloads or override robots/destination refusals; raw `external_media` artifacts are never copied; elevation/border/motion values are omitted unless a future capture stores default-state evidence; component styles depend on the stored initial scan and are omitted when the scan artifact is unavailable; selected regions may span multiple active captures/pages of one site (narrowed by an optional `captureIds` filter), and the documents separate them by capture. A process killed mid-write can leave a `.tmp-*` directory (never a final pack); a database failure after the atomic rename leaves a complete but unregistered pack that the next build adopts and registers.
+
+## Phase 6A tool surface
+
+Implemented locally behind `AWWWARDS_MCP_ATLAS=1`; off by default. The flag is read once at server start, so changing it requires a restart.
+
+| Profile | Flag off | Flag on |
+|---|---:|---:|
+| `full` (default) | 41 | 45 |
+| `core` | 13 | 13 |
+| `v2` | 15 | 16 |
+
+| Tool | Read-only | Idempotent | Open world | Notes |
+|---|---:|---:|---:|---|
+| `search_atlas` | yes | yes | no | Sections or components; region/page/site scopes; conjunctive predicates, disjunctive facets, cursors; accepted/observed_only/candidate modes; hover/focus states |
+| `get_atlas` | yes | yes | no | `status`, `taxonomy`, one `region` or one `highlight` |
+| `capture_atlas` | no | no | yes | Known slug only; one viewport; components default true; up to 3 hover/focus states; 7-day reuse unless `refresh:true` |
+| `export_evidence_pack` | no | yes | no | 1-12 regions from one site; fixed cache directory; references or permitted copies |
+
+v2 branches: `search_references` `kind:sections|components`, `get_reference` `kind:atlas_region|atlas_highlight|atlas_taxonomy`, `get_index` `kind:atlas_status`, `capture_page` `kind:atlas`, plus `export_evidence_pack` as one additional tool. Old branches keep their exact shapes. Mixed v2 groups keep conservative annotations; `capture_page` is already non-read-only because of its recording branch.
+
+All four tools return the spec's Atlas envelope (`schemaVersion: "awwwards-atlas-v1"`, `operation`, `status`, `data`, `coverage`, `warnings`, `error`). `blocked` and `error` are returned as `isError` with no success-shaped `structuredContent`. Error messages never include stacks or local paths.
+
+Behaviour that callers must know:
+
+- **Unknowns stay unknown.** `empty_corpus` and `insufficient_coverage` mean *not observed*, never proven absent. Missing versions, artifacts and evidence degrade explicitly rather than being invented.
+- **Candidate labels are hints.** Default search mode is `candidate`; every candidate hit is marked `candidateOnly`. `accepted` mode never includes candidate labels. Classification remains uncalibrated (see the gate above).
+- **Scopes never combine.** A trait combination is satisfied inside the same region, the same page or the same site — never across regions that merely share a site.
+- **No raw component tree.** `get_atlas` region returns the stored pack artifact path/hash and bounded child summaries; it does not embed the component tree.
+- **Highlights are local.** `get_atlas` highlight resolves an existing element id through `atlas_aliases`. Ambiguity returns `AMBIGUOUS_ALIAS` with candidate region ids. The legacy gallery is never fetched.
+- **Capture is bounded and guarded.** `capture_atlas` resolves the live URL from cached site metadata, refuses arbitrary URLs, query strings, fragments and credentials, uses the existing robots/destination policy and one-per-cache lease, and performs no click/type/submit. `refresh:false` reuses a usable active head up to seven days old when the requested states match. A partial attempt may return without publication; `published` always states the actual result and `captureId` is empty when nothing was stored. The components option is recorded in the capture config hash, but reuse is matched on the requested state set: a `components:true` request that reuses a head captured with components off returns `partial` with `COMPONENTS_NOT_COLLECTED`, while `components:false` only omits component summaries and leaves an otherwise complete capture `ok`.
+- **Export rights.** `includeMedia:"references"` copies only derived summaries. `permitted` copies a stored artifact only with a caller assertion (`owned`, `licensed` or `permission`, `scope:"export_copy"`, non-empty reference) and never overrides a robots or destination refusal. Assertions are recorded, not verified legal conclusions. No third-party payload is downloaded, and there is no arbitrary output path, overwrite switch or sharing operation. Captured page content remains its creators' property and is not covered by this repository's MIT license; unknown rights stay unknown. Capture uses fresh anonymous browser contexts, rejects meaningful query strings before launch, redacts credentials/query/fragment from exposed provenance, and never sends captured content to an external model.
+- **Status scope.** `get_atlas status` reads the SQLite cache only; it never scans the filesystem. Counts, deduplicated artifact bytes and fresh/stale live captures describe the locally cached subset. Publication and failed-attempt entries carry aggregate identifiers only (page, capture and profile ids) and never a site slug. `latestFailedAttempt` comes from blocked/failed/abandoned/unknown capture rows; collection errors that happen before publication are returned by the capture call itself and are not persisted as capture rows.
+
+## Search
 
 Search pushes eligibility, predicate matching, ordering, pagination, facet counting and the requested anchor page into SQLite. The JavaScript layer receives only the requested page of anchors, its page-capped witnesses, claims and artifact descriptors. The query path is **read-only**.
 
@@ -208,14 +242,15 @@ Residual risks:
 
 ## Next phase
 
-Phase 5 evidence packs are implemented locally; the remaining Phase 5 work is review and release qualification, not new export behavior:
+Phase 6A tool surfaces are implemented locally; the remaining Phase 6 work is review, CLI maintenance operations and release qualification, not new tool behavior:
 
-- optional CLI entry point for local pack creation (no MCP tool until Phase 6)
+- optional CLI maintenance actions (`--atlas import|capture|reindex|verify|prune`) in the existing index executable
+- installed-artifact and browser qualification reports
 - human review of generated DESIGN.md/brief/handoff from a permitted pilot pack
 - real-page density and rights checks on the held-out corpus
 - component-pack and screenshot copy policy sign-off before any public distribution
 
-Phase 6 remains the MCP surface: `get_atlas`, `capture_atlas`, `export_evidence_pack` and the v2 branches. Until then the surfaces stay 41 full / 13 core / 15 v2.
+Until the flag is enabled, the surfaces stay 41 full / 13 core / 15 v2. With `AWWWARDS_MCP_ATLAS=1` they are 45 / 13 / 16.
 
 ## Verification
 
@@ -223,7 +258,10 @@ Phase 6 remains the MCP surface: `get_atlas`, `capture_atlas`, `export_evidence_
 npm run typecheck
 npm test -- --maxWorkers=2
 npm run build
+npm run protocol:smoke
+AWWWARDS_MCP_ATLAS=1 npm run protocol:smoke
 npm run atlas:search:bench
+npx vitest run test/atlas-tool-surface.test.ts test/atlas-tool-contracts.test.ts test/atlas-tool-capture.test.ts
 npx vitest run test/atlas-evidence-pack.test.ts
 npx vitest run test/atlas-collector.chromium.test.ts
 ```

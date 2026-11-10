@@ -79,7 +79,7 @@ describe("export_design_tokens handler", () => {
   it("is registered once with non-idempotent open-world annotations", () => {
     const regs: any[][] = [];
     const tool = (...args: any[]) => regs.push(args);
-    registerAllTools({ handlers: {} as any, tool, registerTool: tool });
+    registerAllTools({ handlers: {} as any, tool, registerTool: tool }, { atlas: false });
 
     const matches = regs.filter((args) => args[0] === "export_design_tokens");
     expect(matches).toHaveLength(1);

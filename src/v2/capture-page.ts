@@ -11,6 +11,7 @@ import {
   sceneHttpUrlSchema,
   sceneRightsSchema,
 } from "../tools/scene.js";
+import { captureAtlasInputSchema } from "../atlas/tool-contracts.js";
 
 const SCENE_CAPTURE_ONLY = [
   "url",
@@ -195,6 +196,12 @@ export const capturePageRequestSchema = z.discriminatedUnion("kind", [
       viewport: viewportSchema,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("atlas"),
+      ...captureAtlasInputSchema.shape,
+    })
+    .strict(),
 ]);
 
 export type CapturePageRequest = z.infer<typeof capturePageRequestSchema>;
@@ -272,6 +279,10 @@ export async function runCapturePage(
         waitStrategy: request.waitStrategy,
         viewport: request.viewport,
       });
+    case "atlas": {
+      const { kind: _kind, ...args } = request;
+      return handlers.capture_atlas(args, signal);
+    }
     default: {
       const exhaustive: never = request;
       throw new Error(`unhandled capture_page request: ${JSON.stringify(exhaustive)}`);
@@ -282,7 +293,7 @@ export async function runCapturePage(
 export function registerCapturePage(ctx: ToolContext): void {
   ctx.tool(
     "capture_page",
-    "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), scene (two strict ops: op:\"capture\" records passive scene evidence - checkpoint frames, canvas geometry and a redacted response inventory, with no scene graph, camera, shader or geometry recovery unless the experimental adapters opt in: \"three\" adds a bounded evidence.three summary from reachable window objects (no heap crawl), and \"spector\" installs the optional spectorjs bundle before load and adds a bounded evidence.spector summary of one WebGL frame (command names/counts, context attributes, analyses and capped shader source; no command arguments, state or memory); op:\"download_assets\" downloads up to 32 inventory assetIds and requires rights.basis (owned|licensed|permission) plus rights.evidence because downloading is a licensing decision, recorded in provenance.json; caps are 16 MiB/file, 64 MiB/run, 5 redirects, 1 req/s, 15s body and 120s overall, and only observed URLs without query, fragment or credentials are fetched), or recording (motion filmstrip video of preloader, scroll and hover). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all five need the optional Playwright dependency, except scene op:\"download_assets\" which uses plain Node http(s); recording also needs ffmpeg-static. This tool is not read-only: the recording branch can click interactive elements and submit their forms to expose hover/click motion, and scene op:\"download_assets\" writes asset files.",
+    "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), scene (two strict ops: op:\"capture\" records passive scene evidence - checkpoint frames, canvas geometry and a redacted response inventory, with no scene graph, camera, shader or geometry recovery unless the experimental adapters opt in: \"three\" adds a bounded evidence.three summary from reachable window objects (no heap crawl), and \"spector\" installs the optional spectorjs bundle before load and adds a bounded evidence.spector summary of one WebGL frame (command names/counts, context attributes, analyses and capped shader source; no command arguments, state or memory); op:\"download_assets\" downloads up to 32 inventory assetIds and requires rights.basis (owned|licensed|permission) plus rights.evidence because downloading is a licensing decision, recorded in provenance.json; caps are 16 MiB/file, 64 MiB/run, 5 redirects, 1 req/s, 15s body and 120s overall, and only observed URLs without query, fragment or credentials are fetched), or recording (motion filmstrip video of preloader, scroll and hover), or — when AWWWARDS_MCP_ATLAS=1 — atlas (capture and publish local Atlas evidence for one known site slug; one viewport, components default true, up to 3 hover/focus states, refresh=false reuses a matching usable head up to 7 days old; partial evidence may return without publication). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all five need the optional Playwright dependency, except scene op:\"download_assets\" which uses plain Node http(s); recording also needs ffmpeg-static. This tool is not read-only: the recording branch can click interactive elements and submit their forms to expose hover/click motion, scene op:\"download_assets\" writes asset files, and the atlas branch writes an active head.",
     capturePageInputSchema,
     { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     (args: { request: CapturePageRequest }, sdkCtx?: { mcpReq?: { signal?: AbortSignal } }) =>

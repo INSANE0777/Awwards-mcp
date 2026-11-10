@@ -148,7 +148,7 @@ function fullToolNames(): string[] {
     tool: (name: string) => names.push(name),
     registerTool: (name: string) => names.push(name),
   };
-  registerAllTools(ctx as never);
+  registerAllTools(ctx as never, { atlas: false });
   return names;
 }
 const FULL_TOOL_NAMES = fullToolNames();

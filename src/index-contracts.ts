@@ -3,6 +3,7 @@
 // either branch. MCP requires an object root, so the v2 contract is the merged
 // field set with every branch field optional rather than a union.
 import { z } from "zod";
+import { atlasStatusEnvelopeSchema } from "./atlas/tool-contracts.js";
 
 const coverageSchema = z.object({
   sitesTotal: z.number().int().nonnegative(),
@@ -111,18 +112,50 @@ const statusKeys = Object.keys(indexStatusOutputSchema.shape) as Array<
 const statsKeys = Object.keys(indexStatsOutputSchema.shape) as Array<
   keyof z.infer<typeof indexStatsOutputSchema>
 >;
+const atlasKeys = Object.keys(atlasStatusEnvelopeSchema.shape);
 
 export const indexGetOutputSchema = z
-  .object({ ...indexStatusOutputSchema.shape, ...indexStatsOutputSchema.shape })
+  .object({
+    ...indexStatusOutputSchema.shape,
+    ...indexStatsOutputSchema.shape,
+    ...atlasStatusEnvelopeSchema.shape,
+  })
   .partial()
+  .strict()
   .superRefine((value, ctx) => {
+    const isAtlas = value.schemaVersion === "awwwards-atlas-v1";
     const hasStatus = "sitesCount" in value;
     const hasStats = "sites" in value;
-    if (hasStatus === hasStats) {
+    if (Number(isAtlas) + Number(hasStatus) + Number(hasStats) !== 1) {
       ctx.addIssue({
         code: "custom",
-        message: "Expected exactly one get_index branch: status or stats",
+        message: "Expected exactly one get_index branch: status, stats or atlas_status",
       });
+      return;
+    }
+    if (isAtlas) {
+      const keys = new Set(Object.keys(value));
+      for (const key of atlasKeys) {
+        if (!keys.has(key)) {
+          ctx.addIssue({ code: "custom", message: `Missing ${key} for the selected branch` });
+        }
+      }
+      for (const key of [...statusKeys, ...statsKeys]) {
+        if (keys.has(key)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Unexpected ${String(key)} from another branch`,
+          });
+        }
+      }
+      const parsed = atlasStatusEnvelopeSchema.safeParse(value);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        ctx.addIssue({
+          code: "custom",
+          message: `atlas_status envelope is invalid: ${issue?.path.join(".") || "<root>"}: ${issue?.message ?? "unknown"}`,
+        });
+      }
       return;
     }
     const required = hasStatus ? statusKeys : statsKeys;
@@ -136,6 +169,11 @@ export const indexGetOutputSchema = z
     for (const key of forbidden) {
       if (keys.has(key)) {
         ctx.addIssue({ code: "custom", message: `Unexpected ${String(key)} from the other branch` });
+      }
+    }
+    for (const key of atlasKeys) {
+      if (keys.has(key)) {
+        ctx.addIssue({ code: "custom", message: `Unexpected ${key} from the atlas_status branch` });
       }
     }
   });
