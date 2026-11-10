@@ -92,7 +92,7 @@ describe("Phase 0 benchmark and compatibility artifacts", () => {
     for (const entry of matrix.cli) {
       const parsed = parseAtlasCliArgs(entry.form.split(" "));
       if (entry.supported) {
-        expect(parsed, entry.form).toEqual({ kind: "import" });
+        expect(parsed?.kind, entry.form).toBe(entry.action);
       } else {
         expect(parsed?.kind, entry.form).toBe("error");
       }

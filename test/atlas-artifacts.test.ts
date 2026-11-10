@@ -18,6 +18,7 @@ import {
   removeArtifactFile,
   resolveArtifactPath,
   withArtifactLock,
+  withArtifactLocks,
   writeArtifactBytesSync,
   writeJsonArtifact,
 } from "../src/atlas/artifacts.js";
@@ -221,6 +222,20 @@ describe("atlas artifacts", () => {
         async () => undefined,
       );
     }
+    expect(localArtifactLockCount()).toBe(0);
+  });
+
+  it("deduplicates two spellings of one target before locking", async () => {
+    const root = tmpDir();
+    const storagePath = join("atlas", "artifacts", `${HASH}.json`);
+    const spellings = [storagePath, storagePath.replaceAll("\\", "/")];
+    let entered = 0;
+    const result = await withArtifactLocks(root, spellings, () => {
+      entered += 1;
+      return "locked";
+    });
+    expect(result).toBe("locked");
+    expect(entered).toBe(1);
     expect(localArtifactLockCount()).toBe(0);
   });
 

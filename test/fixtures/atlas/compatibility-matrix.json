@@ -40,6 +40,12 @@
   "cli": [
     { "form": "--atlas import", "action": "import", "supported": true },
     { "form": "--atlas=import", "action": "import", "supported": true },
+    { "form": "--atlas capture --slug alpha --path / --viewport both", "action": "capture", "supported": true },
+    { "form": "--atlas=capture --slug=alpha --viewport=mobile", "action": "capture", "supported": true },
+    { "form": "--atlas reindex", "action": "reindex", "supported": true },
+    { "form": "--atlas verify", "action": "verify", "supported": true },
+    { "form": "--atlas prune --older-than-days 30", "action": "prune", "supported": true },
+    { "form": "--atlas=prune --older-than-days=30 --apply", "action": "prune", "supported": true },
     { "form": "--atlas", "action": "unsupported", "supported": false },
     { "form": "--atlas export", "action": "unsupported", "supported": false },
     { "form": "--atlas=", "action": "unsupported", "supported": false }

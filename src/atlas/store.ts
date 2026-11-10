@@ -11,9 +11,11 @@ import {
   stableHash,
 } from "./identity.js";
 import {
+  artifactIdentity,
   readStoredArtifactJson,
   removeArtifactFileSync,
   validateStoredArtifact,
+  withArtifactLock,
   writeJsonArtifactSync,
 } from "./artifacts.js";
 import type { WrittenArtifact } from "./artifacts.js";
@@ -308,7 +310,10 @@ export class AtlasStore {
             })),
           };
 
-    return this.cache.withAtlasDb((db) => {
+    // Hold the artifact path from write through COMMIT so prune cannot unlink
+    // these bytes between the uncommitted insert and its reference recheck.
+    return withArtifactLock(this.cache.rootDir, artifactIdentity(artifactPayload).storagePath, () =>
+      this.cache.withAtlasDb((db) => {
       let writtenArtifact: WrittenArtifact | null = null;
       let artifactWritten = false;
       try {
@@ -705,7 +710,8 @@ export class AtlasStore {
         }
         throw error;
       }
-    });
+      }),
+    );
   }
 
   private removeOrphanArtifact(storagePath: string): void {
@@ -797,7 +803,10 @@ export class AtlasStore {
         mediaType: row.mediaType,
       },
     };
-    return this.cache.withAtlasDb((db) => {
+    // Hold the artifact path from write through COMMIT so prune cannot unlink
+    // these bytes between the uncommitted insert and its reference recheck.
+    return withArtifactLock(this.cache.rootDir, artifactIdentity(galleryPayload).storagePath, () =>
+      this.cache.withAtlasDb((db) => {
       let writtenArtifact: WrittenArtifact | null = null;
       let artifactWritten = false;
       let previousCapture: { status: string; last_confirmed_at: number | null } | undefined;
@@ -1145,7 +1154,8 @@ export class AtlasStore {
         }
         throw error;
       }
-    });
+      }),
+    );
   }
 }
 
