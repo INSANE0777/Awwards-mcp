@@ -78,7 +78,15 @@ jobs:
       # distro libraries Playwright's bundled build links against.
       - name: Install Chromium (Linux)
         if: matrix.browser && runner.os == 'Linux'
-        run: npx playwright install --with-deps chromium
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npx playwright install --with-deps chromium; then exit 0; fi
+            echo "Chromium install failed on attempt ${attempt}; retrying in 20s"
+            sleep 20
+          done
+          echo "Chromium install failed after 3 attempts"
+          exit 1
       - name: Install Chromium (macOS/Windows)
         if: matrix.browser && runner.os != 'Linux'
         run: npx playwright install chromium
