@@ -1055,7 +1055,7 @@ Phase 6 tool surfaces, v2 branches and Atlas CLI actions are implemented and gat
 - real-page density and rights checks on the held-out corpus
 - component-pack and screenshot copy policy sign-off before any public distribution
 
-Until the flag is enabled, the surfaces stay 41 full / 13 core / 15 v2. With `AWWARDS_MCP_ATLAS=1` they are 45 / 13 / 16.
+Until the flag is enabled, the surfaces stay 41 full / 13 core / 15 v2. With `AWWWARDS_MCP_ATLAS=1` they are 45 / 13 / 16.
 
 ## Verification
 

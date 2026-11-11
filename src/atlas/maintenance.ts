@@ -49,7 +49,7 @@ export interface AtlasVerifyReport {
 
 /** Offline artifact integrity census. No network and no explicit database writes. */
 export function verifyAtlasArtifacts(cache: Cache): AtlasVerifyReport {
-  const rows = cache.withAtlasDb(
+  const rows = cache.withAtlasReadDb(
     (db) =>
       db
         .prepare(

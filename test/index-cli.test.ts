@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -134,7 +134,6 @@ describe("index CLI --atlas", () => {
 
   it.each([
     [["--atlas", "reindex"], "atlas reindex"],
-    [["--atlas", "verify"], "atlas verify"],
     [["--atlas", "prune", "--older-than-days", "30"], "dry run"],
     [["--atlas", "prune", "--older-than-days", "30", "--apply"], "apply"],
   ])("runs %s against an empty cache", (args, expected) => {
@@ -145,6 +144,42 @@ describe("index CLI --atlas", () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toContain(expected);
       expect(result.stderr).not.toContain("pages crawled");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("verifies an existing Atlas cache read-only and never creates a missing one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-cli-atlas-"));
+    try {
+      const cacheDir = join(dir, "cache");
+      const imported = run(
+        ["--atlas", "import"],
+        { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
+        cacheDir,
+      );
+      expect(imported.status).toBe(0);
+      const dbPath = join(cacheDir, "cache.db");
+      const before = readFileSync(dbPath);
+      const beforeMtime = statSync(dbPath).mtimeMs;
+      const verified = run(
+        ["--atlas", "verify"],
+        { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
+        cacheDir,
+      );
+      expect(verified.status).toBe(0);
+      expect(verified.stderr).toContain("atlas verify");
+      expect(readFileSync(dbPath).equals(before)).toBe(true);
+      expect(statSync(dbPath).mtimeMs).toBe(beforeMtime);
+
+      const missing = join(dir, "missing");
+      const refused = run(
+        ["--atlas", "verify"],
+        { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
+        missing,
+      );
+      expect(refused.status).toBe(1);
+      expect(existsSync(missing)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

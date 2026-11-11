@@ -510,7 +510,7 @@ async function runBranchSchemas(flagOn) {
       status: "PASS",
       reason: flagOn
         ? `all ${ATLAS_V2_BRANCH_KINDS.length} Atlas branch kinds advertised; get_index outputSchema advertises Atlas`
-        : "no Atlas branch kinds advertised with the flag off",
+        : "all expected Atlas branch kinds remain declared with the flag off",
       details: { branches: details },
     };
   });
@@ -838,6 +838,14 @@ async function runCli() {
       }
       const cacheDir = join(tempRoot, "cli", `${action.action}-on-cache`);
       await seedCache(cacheDir);
+      if (action.action === "verify") {
+        const seeded = runNode(["--require", guardPath, installedIndexCli, "--atlas", "import"], {
+          env: serverEnv(cacheDir, { flagOn: true }),
+          timeoutMs: 60_000,
+          cwd: tempRoot,
+        });
+        assert(seeded.status === 0, `verify seed import failed: ${seeded.stderr}`);
+      }
       const result = runNode(["--require", guardPath, installedIndexCli, ...action.argv], {
         env: serverEnv(cacheDir, { flagOn: true }),
         timeoutMs: 60_000,
@@ -1138,7 +1146,7 @@ async function runQualification() {
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const files = (info.files ?? []).map((file) => file.path);
       assert(files.length > 0, "npm pack reported no files");
-      for (const required of ["package.json", "dist/cli.js", "dist/index-cli.js", "README.md"]) {
+      for (const required of ["package.json", "dist/cli.js", "dist/index-cli.js", "README.md", "ATLAS.md"]) {
         assert(files.includes(required), `packed artifact is missing ${required}`);
       }
       const forbidden = files.filter(

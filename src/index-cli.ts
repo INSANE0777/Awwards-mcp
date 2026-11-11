@@ -23,7 +23,10 @@ if (atlasCommand) {
   const atlasRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
   let atlasCache: Cache;
   try {
-    atlasCache = new Cache(atlasRoot, Date.now, { atlas: true });
+    atlasCache = new Cache(atlasRoot, Date.now, {
+      atlas: true,
+      ...(atlasCommand.kind === "verify" ? { readOnly: true } : {}),
+    });
   } catch (err) {
     const detail = redactCachePath(
       err instanceof Error ? err.message : String(err),

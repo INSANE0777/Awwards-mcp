@@ -13,7 +13,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "ATLAS.md"
   ],
   "keywords": [
     "mcp",

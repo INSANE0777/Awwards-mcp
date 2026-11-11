@@ -193,7 +193,7 @@ export function analyzeBranches({ flagOn, schema, tool }) {
   const missing = expected.filter((kind) => !found.includes(kind));
   const unexpected = flagOn ? [] : expected.filter((kind) => found.includes(kind));
   const problems = [];
-  if (flagOn && missing.length > 0) {
+  if (missing.length > 0) {
     problems.push(`${tool} is missing Atlas branch(es): ${missing.join(", ")}`);
   }
   return {
@@ -272,6 +272,8 @@ export const ATLAS_KNOWN_CODES = Object.freeze([
   "AMBIGUOUS_ALIAS",
   "ARTIFACT_INVALID",
   "ARTIFACT_LIMIT",
+  "ARTIFACT_MISSING",
+  "ARTIFACT_CORRUPT",
   "ATLAS_DISABLED",
   "ATTEMPT_NOT_PUBLISHABLE",
   "BLOCKED_DESTINATION",
@@ -316,6 +318,7 @@ export const ATLAS_KNOWN_CODES = Object.freeze([
   "LEGACY_ELEMENTS_MALFORMED",
   "LEGACY_ELEMENTS_MISSING",
   "LEGACY_METADATA_ONLY",
+  "LIVE_URL_UNAVAILABLE",
   "MAINTENANCE_PAGE",
   "MISSING_TIMESTAMP",
   "NAVIGATION_FAILED",
@@ -380,6 +383,7 @@ export const ATLAS_KNOWN_CODES = Object.freeze([
   "UNSUPPORTED_PROTOCOL",
   "UNSUPPORTED_ROUTE",
   "UNSUPPORTED_STATE",
+  "UNKNOWN_SITE",
 ]);
 
 const ATLAS_CODE_SET = new Set(ATLAS_KNOWN_CODES);
@@ -412,7 +416,7 @@ export function probeStatus(
           (code ? ` (code ${code})` : ""),
       };
     }
-    if (code === "ATLAS_DISABLED") {
+    if (code === "ATLAS_DISABLED" || code === "FEATURE_DISABLED") {
       return { status: "FAIL", reason: `Atlas reported itself disabled while the flag was on: ${firstLine(classified.text)}` };
     }
     if (expectPrivate && code !== "PRIVATE_DESTINATION") {

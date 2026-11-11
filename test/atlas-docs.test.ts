@@ -257,6 +257,11 @@ describe("Atlas documentation", () => {
     expect(README_DOC).toContain("the same check reports 45 tools");
   });
 
+  it("uses the exact Atlas flag name", () => {
+    expect(ATLAS_DOC).not.toContain("AWWARDS_MCP_ATLAS");
+    expect(README_DOC).not.toContain("AWWARDS_MCP_ATLAS");
+  });
+
   it("keeps every Atlas JSON example parseable", () => {
     const fences = [...ATLAS_DOC.matchAll(/```json\r?\n([\s\S]*?)```/g)];
     expect(fences.length).toBeGreaterThanOrEqual(10);

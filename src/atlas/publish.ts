@@ -990,7 +990,7 @@ export async function publishCapture(
   }
 
   try {
-    return withArtifactLocks(cache.rootDir, artifactPaths, () =>
+    return await withArtifactLocks(cache.rootDir, artifactPaths, () =>
       cache.withAtlasDb((db) => {
     let inTransaction = false;
     try {

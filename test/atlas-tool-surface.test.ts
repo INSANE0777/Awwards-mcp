@@ -379,6 +379,26 @@ describe("atlas_status output contract", () => {
     expect(runAtlasStatus(cache, 1_700_000_000_000).data?.enabled).toBe(false);
   });
 
+  it("returns FEATURE_DISABLED for every v2 Atlas branch when the flag is off", async () => {
+    const cache = new Cache(tmpDir(), () => 1_700_000_000_000, { atlas: false });
+    const handlers = createHandlers({ client: {} as any, cache });
+    const calls = [
+      () => runSearchReferences(handlers, { kind: "sections" } as any),
+      () =>
+        runGetReference(handlers, {
+          kind: "atlas_region",
+          regionId: "a".repeat(64),
+        } as any),
+      () => runGetIndex(handlers, { kind: "atlas_status" } as any),
+      () => runCapturePage(handlers, { kind: "atlas", slug: "site" } as any),
+    ];
+    for (const call of calls) {
+      const result = await call();
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0]!.text).error.code).toBe("FEATURE_DISABLED");
+    }
+  });
+
   it("advertises an object output schema for the four Atlas tools when on", () => {
     const saved = process.env.AWWWARDS_MCP_ATLAS;
     process.env.AWWWARDS_MCP_ATLAS = "1";

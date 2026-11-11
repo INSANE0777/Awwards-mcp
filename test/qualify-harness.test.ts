@@ -258,17 +258,18 @@ describe("v2 branch schemas", () => {
     expect(enabled.ok).toBe(false);
     expect(enabled.missing).toEqual(["components"]);
     const disabled = analyzeBranches({ flagOn: false, schema, tool: "search_references" });
-    expect(disabled.ok).toBe(true);
-    expect(disabled.unexpected).toEqual(["sections"]);
+    expect(disabled.ok).toBe(false);
+    expect(disabled.missing).toEqual(["components"]);
   });
 
-  it("accepts an Atlas-free schema when the flag is off", () => {
+  it("requires Atlas branches even when the flag is off", () => {
     const clean = analyzeBranches({
       flagOn: false,
       schema: { properties: { request: { oneOf: [{ properties: { kind: { const: "sites" } } }] } } },
       tool: "search_references",
     });
-    expect(clean.ok).toBe(true);
+    expect(clean.ok).toBe(false);
+    expect(clean.missing).toEqual(["sections", "components"]);
   });
 
   it("inspects the atlas_status discriminant, not the word atlas", () => {
@@ -354,6 +355,7 @@ describe("probe status", () => {
     expect(probeStatus(ok).status).toBe("PASS");
     expect(probeStatus(domain('{"code":"SEARCH_NOT_READY","message":"indexing"}')).status).toBe("PASS");
     expect(probeStatus(domain("ATLAS_DISABLED: no"), { expectDomain: true }).status).toBe("FAIL");
+    expect(probeStatus(domain('{"code":"FEATURE_DISABLED"}'), { expectDomain: true }).status).toBe("FAIL");
   });
 
   it("rejects an unknown code or a raw exception with no code", () => {
