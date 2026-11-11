@@ -631,6 +631,7 @@ function collectionFailure(
     case "POLICY_BLOCKED":
     case "BLOCKED_DESTINATION":
     case "DESTINATION_CHANGED":
+    case "ROBOTS_DENIED":
     case "ROBOTS_DISALLOWED":
     case "HTTP_BLOCKED":
     case "PRIVATE_DESTINATION":

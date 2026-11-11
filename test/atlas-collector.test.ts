@@ -8,6 +8,7 @@ import { collectAtlasPage, scrollTo } from "../src/atlas/collector.js";
 import { componentPatternKey } from "../src/atlas/components.js";
 import { acquireAtlasCaptureLease } from "../src/atlas/lease.js";
 import { publishCapture } from "../src/atlas/publish.js";
+import { runAtlasCapture } from "../src/atlas/tool-capture.js";
 import { loadPhase2Fixture } from "./helpers/phase2-fixture.js";
 import type {
   AtlasPageScan,
@@ -49,11 +50,14 @@ const site = (liveUrl: string | null): SiteSummary => ({
   studio: "Studio",
 });
 
-async function fixtureServer(robotsStatus = 200): Promise<{ origin: string }> {
+async function fixtureServer(
+  robotsStatus = 200,
+  robotsBody = "User-agent: *\nAllow: /\n",
+): Promise<{ origin: string }> {
   const server = createServer((req, res) => {
     if (req.url === "/robots.txt") {
       res.writeHead(robotsStatus, { "content-type": "text/plain" });
-      res.end(robotsStatus === 200 ? "User-agent: *\nAllow: /\n" : "unavailable");
+      res.end(robotsBody);
       return;
     }
     res.writeHead(200, { "content-type": "text/html" });
@@ -424,6 +428,19 @@ describe("Atlas collector lifecycle", () => {
         },
       ),
     ).rejects.toMatchObject({ code: "ROBOTS_UNAVAILABLE" });
+  });
+
+  it("maps a robots denial through capture_atlas to blocked", async () => {
+    const { origin } = await fixtureServer(200, "User-agent: *\nDisallow: /\n");
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const result = await runAtlasCapture(cache, { slug: "fixture-live", refresh: true }, {
+      now: () => Date.now(),
+      collectDeps: { allowPrivateOrigins: [origin] },
+    });
+    expect(result.status).toBe("blocked");
+    expect(result.error?.code).toBe("ROBOTS_DENIED");
+    expect(result.error?.retryable).toBe(false);
   });
 
   it("times out a held browser launch without leaving the lease held", async () => {
