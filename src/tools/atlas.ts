@@ -40,8 +40,10 @@ export function registerCaptureAtlas(ctx: ToolContext): void {
     "Capture and publish Atlas evidence for one known Awwwards site. The live URL comes only from cached site metadata; path (optional) must be a single-slash path on that origin with no query, fragment or credentials. One viewport per call (desktop default, mobile opt-in); components default true; at most 3 hover/focus state requests on regions of the current active head, and click/type/submit are never performed. refresh=false (default) reuses a matching usable active head up to 7 days old; refresh=true always launches the guarded collector. Publication atomicity, robots/destination policy and the one-per-cache lease are unchanged. A capture may return partial evidence without publication; published states the actual result, and cached=true means no new capture ran. captureId is empty when nothing was stored. Rights: page-derived content stays local evidence, not redistribution permission.",
     captureAtlasInputSchema,
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args: z.infer<typeof captureAtlasInputSchema>) =>
-      asMcpResult(ctx.handlers.capture_atlas(args)),
+    (args: z.infer<typeof captureAtlasInputSchema>, sdkCtx?: { mcpReq?: { signal?: AbortSignal } }) =>
+      asMcpResult(
+        ctx.handlers.capture_atlas(args, sdkCtx?.mcpReq?.signal),
+      ),
     captureAtlasEnvelopeSchema,
   );
 }

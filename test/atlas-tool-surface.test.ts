@@ -16,6 +16,7 @@ import {
   searchAtlasInputSchema,
 } from "../src/atlas/tool-contracts.js";
 import { runGetAtlas } from "../src/atlas/tools.js";
+import { registerCaptureAtlas } from "../src/tools/atlas.js";
 import { runAtlasStatus } from "../src/atlas/tool-read.js";
 import {
   capturePageRequestSchema,
@@ -397,6 +398,20 @@ describe("atlas_status output contract", () => {
       expect(result.isError).toBe(true);
       expect(JSON.parse(result.content[0]!.text).error.code).toBe("FEATURE_DISABLED");
     }
+  });
+
+  it("forwards the SDK abort signal through the direct capture_atlas registration", async () => {
+    let callback: any;
+    const capture = vi.fn(async () => ({ content: [], isError: false }));
+    registerCaptureAtlas({
+      handlers: { capture_atlas: capture },
+      tool: (_name: string, _desc: string, _schema: unknown, _annotations: unknown, fn: any) => {
+        callback = fn;
+      },
+    } as any);
+    const controller = new AbortController();
+    await callback({ slug: "site" }, { mcpReq: { signal: controller.signal } });
+    expect(capture).toHaveBeenCalledWith({ slug: "site" }, controller.signal);
   });
 
   it("advertises an object output schema for the four Atlas tools when on", () => {

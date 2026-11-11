@@ -3841,7 +3841,7 @@ suite("Atlas collector with real Chromium", () => {
           },
         },
       ),
-    ).rejects.toMatchObject({ code: "ROBOTS_DENIED" });
+    ).rejects.toMatchObject({ code: "ROBOTS_UNAVAILABLE" });
     expect(launched).toBe(false);
   }, 30_000);
 });

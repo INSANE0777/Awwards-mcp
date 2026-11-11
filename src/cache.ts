@@ -576,6 +576,13 @@ export class Cache {
         throw error;
       }
     };
+    // A WAL file without its shared-memory sidecar cannot be opened read-only
+    // without SQLite creating -shm, so refuse instead of writing a sidecar.
+    if (existsSync(`${this.dbPath}-wal`) && !existsSync(`${this.dbPath}-shm`)) {
+      throw new Error(
+        "read-only cache has an uncheckpointed WAL without a shared-memory sidecar; run a writable command to checkpoint it",
+      );
+    }
     // A clean checkpointed WAL database has no sidecars. Opening it
     // read-only in a writable directory still creates -wal/-shm, so use the
     // immutable snapshot first: it takes no locks and creates nothing.

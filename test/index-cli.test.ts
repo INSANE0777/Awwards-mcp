@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -182,6 +191,18 @@ describe("index CLI --atlas", () => {
       );
       expect(refused.status).toBe(1);
       expect(existsSync(missing)).toBe(false);
+
+      const walDir = join(dir, "wal-cache");
+      mkdirSync(walDir, { recursive: true });
+      copyFileSync(dbPath, join(walDir, "cache.db"));
+      writeFileSync(join(walDir, "cache.db-wal"), "");
+      const walRefused = run(
+        ["--atlas", "verify"],
+        { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
+        walDir,
+      );
+      expect(walRefused.status).toBe(1);
+      expect(existsSync(join(walDir, "cache.db-shm"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

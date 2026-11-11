@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
@@ -161,6 +161,36 @@ describe("capture_atlas", () => {
     expect(refreshed.data?.previousHeadId).toBe(first.data?.captureId);
   });
 
+  it("does not report a reused capture as complete when its artifacts are missing", async () => {
+    const cache = cacheWithSite();
+    await publishPackFixture(cache, { siteSlug: "probe" });
+    const paths = cache
+      .withAtlasReadDb(
+        (db) =>
+          db
+            .prepare(
+              "SELECT storage_path FROM atlas_artifacts WHERE storage_path IS NOT NULL",
+            )
+            .all() as Array<{ storage_path: string }>,
+      )
+      .map((row) => join(cache.rootDir, row.storage_path));
+    expect(paths.length).toBeGreaterThan(0);
+    for (const path of paths) unlinkSync(path);
+
+    const collect = vi.fn(async () => {
+      throw new Error("collector must not run for a cached head");
+    });
+    const reused = await runAtlasCapture(cache, { slug: "probe" }, {
+      now: () => PACK_NOW + 1000,
+      collect,
+    });
+    expect(collect).not.toHaveBeenCalled();
+    expect(reused.data?.cached).toBe(true);
+    expect(reused.status).toBe("partial");
+    expect(reused.coverage.limitations).toContain("ARTIFACT_MISSING");
+    expect(reused.data?.artifacts.some((artifact) => artifact.available === false)).toBe(true);
+  });
+
   it("keeps a reused partial capture partial and preserves its limitations", async () => {
     const cache = cacheWithSite();
     await publishPackFixture(cache, {
@@ -224,6 +254,22 @@ describe("capture_atlas", () => {
     expect(data.pageId).toMatch(/^[a-f0-9]{64}$/);
     expect(data.sections.length).toBeGreaterThan(0);
     expect(result.warnings).toContain("NO_CLAIMS");
+  });
+
+  it("preserves a collector deadline from an attempt with no viewport", async () => {
+    const cache = cacheWithSite();
+    const attempt = await buildPackAttempt(cache, { siteSlug: "probe" });
+    attempt.viewports = [];
+    attempt.limitations = ["CAPTURE_DEADLINE_EXCEEDED"];
+    attempt.error = "capture deadline exceeded";
+    const result = await runAtlasCapture(cache, { slug: "probe" }, {
+      now: () => PACK_NOW,
+      collect: async () => attempt,
+      publish: async (value) => failedPublish(value.target.urlKey, "PUBLICATION_FAILED"),
+    });
+    expect(result.status).toBe("inconclusive");
+    expect(result.error?.code).toBe("CAPTURE_DEADLINE_EXCEEDED");
+    expect(result.error?.retryable).toBe(true);
   });
 
   it("reports stored coverage totals for fresh and cached captures beyond the summary cap", async () => {

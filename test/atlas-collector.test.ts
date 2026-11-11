@@ -49,11 +49,11 @@ const site = (liveUrl: string | null): SiteSummary => ({
   studio: "Studio",
 });
 
-async function fixtureServer(): Promise<{ origin: string }> {
+async function fixtureServer(robotsStatus = 200): Promise<{ origin: string }> {
   const server = createServer((req, res) => {
     if (req.url === "/robots.txt") {
-      res.writeHead(200, { "content-type": "text/plain" });
-      res.end("User-agent: *\nAllow: /\n");
+      res.writeHead(robotsStatus, { "content-type": "text/plain" });
+      res.end(robotsStatus === 200 ? "User-agent: *\nAllow: /\n" : "unavailable");
       return;
     }
     res.writeHead(200, { "content-type": "text/html" });
@@ -406,6 +406,24 @@ describe("Atlas collector lifecycle", () => {
       ),
     ).rejects.toMatchObject({ code: "CAPTURE_DEADLINE_EXCEEDED" });
     expect(fake.closed()).toBe(false);
+  });
+
+  it("reports unavailable robots separately from a denial", async () => {
+    const { origin } = await fixtureServer(503);
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    await expect(
+      collectAtlasPage(
+        { siteSlug: "fixture-live" },
+        {
+          cache,
+          allowPrivateOrigins: [origin],
+          loader: async () => {
+            throw new Error("browser must not launch when robots is unavailable");
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "ROBOTS_UNAVAILABLE" });
   });
 
   it("times out a held browser launch without leaving the lease held", async () => {

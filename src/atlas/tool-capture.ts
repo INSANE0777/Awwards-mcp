@@ -374,6 +374,29 @@ function storedCaptureData(
       mime_type: string;
       state: string;
     }>;
+    const allArtifacts = db
+      .prepare(
+        `SELECT id, capture_id, region_id, kind, storage_path, sha256, bytes, mime_type, state
+           FROM atlas_artifacts WHERE capture_id = ? ORDER BY id`,
+      )
+      .all(captureId) as unknown as Array<{
+      id: string;
+      capture_id: string;
+      region_id: string | null;
+      kind: string;
+      storage_path: string | null;
+      sha256: string | null;
+      bytes: number | null;
+      mime_type: string;
+      state: string;
+    }>;
+    const brokenArtifacts = allArtifacts.filter(
+      (row) =>
+        row.kind !== "external_media" &&
+        row.state === "ready" &&
+        !artifactAvailabilityOf(cache.rootDir, row).available,
+    );
+    const artifactLimitations = brokenArtifacts.length > 0 ? ["ARTIFACT_MISSING"] : [];
     const stateEvidence = db
       .prepare(
         `SELECT COUNT(DISTINCT cl.sample_key) AS n
@@ -387,8 +410,8 @@ function storedCaptureData(
     // request; reuse stays allowed but must not claim component completeness.
     const componentsNotCollected = componentsRequested && config.components === false;
     const storedLimitations = componentsNotCollected
-      ? [...new Set([...availability.limitations, "COMPONENTS_NOT_COLLECTED"])]
-      : availability.limitations;
+      ? [...new Set([...availability.limitations, ...artifactLimitations, "COMPONENTS_NOT_COLLECTED"])]
+      : [...new Set([...availability.limitations, ...artifactLimitations])];
     const suffix = `:${capture.profile_key}`;
     const attemptId = capture.attempt_id.endsWith(suffix)
       ? capture.attempt_id.slice(0, -suffix.length)
@@ -458,6 +481,7 @@ function storedCaptureData(
       availability.status === "unknown"
         ? "unknown"
         : componentsNotCollected ||
+            artifactLimitations.length > 0 ||
             capture.status !== "complete" ||
             availability.status === "partial" ||
             data.capabilityCoverage.sections.status !== "complete"
@@ -703,11 +727,34 @@ export async function runAtlasCapture(
   }
   const viewportCapture = attempt.viewports.find((item) => item.viewport === viewport);
   if (!viewportCapture) {
+    const code =
+      attempt.limitations.find((entry) =>
+        [
+          "CAPTURE_DEADLINE_EXCEEDED",
+          "CAPTURE_TIMEOUT",
+          "CAPTURE_BUSY",
+          "NAVIGATION_FAILED",
+          "ROBOTS_UNAVAILABLE",
+          "ROBOTS_DENIED",
+          "PRIVATE_DESTINATION",
+          "POLICY_BLOCKED",
+          "BLOCKED_DESTINATION",
+          "TARGET_CHANGED",
+        ].includes(entry),
+      ) ?? "CAPTURE_FAILED";
+    const failure = collectionFailure(
+      new AtlasCollectionError(
+        code,
+        attempt.error ?? "The capture returned no evidence for the requested viewport",
+      ),
+      cache,
+    );
     return atlasFailure(
       "capture_atlas",
-      "CAPTURE_FAILED",
-      "The capture returned no evidence for the requested viewport",
-      false,
+      failure.code,
+      failure.message,
+      failure.retryable,
+      failure.status,
     );
   }
 
