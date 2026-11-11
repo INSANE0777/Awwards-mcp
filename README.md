@@ -116,6 +116,10 @@ input order, carry compact details only (no images), and report per-slug
 — page overflow, small text and small tap targets at 390×844 — evidence, not a
 score.
 
+Passive `capture_scene_3d` capture and `op:"download_assets"` are stable
+features. The Three.js and Spector adapters and the `verify_build.scene3d`
+gate remain experimental and opt-in.
+
 ### Opt-in Three adapter
 
 `capture_scene_3d` can add an experimental, opt-in Three.js adapter to an
@@ -614,7 +618,7 @@ Install them with the [`skills` CLI](https://skills.sh):
 npx skills add INSANE0777/awwwards-skills
 ```
 
-Tested pairing: **`awwwards-mcp@1.18.0` + `skills-v2026.11.07`**. The 1.18
+Tested pairing: **`awwwards-mcp@1.19.0` + `skills-v2026.11.07`**. The 1.18
 release keeps the same **41 / 13 / 15** tool surface (**45 / 13 / 16** with
 `AWWWARDS_MCP_ATLAS=1`), but rerun the
 compatibility check before a later release changes either side.

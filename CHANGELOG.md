@@ -3,6 +3,22 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.19.0 - 2026-11-11
+
+### Atlas Phase 6 (experimental, opt-in)
+
+- Added four opt-in MCP tools behind `AWWWARDS_MCP_ATLAS=1`: `search_atlas`, `get_atlas`, `capture_atlas` and `export_evidence_pack`, plus v2 branches `search_references: sections/components`, `get_reference: atlas_region/atlas_highlight/atlas_taxonomy`, `get_index: atlas_status`, `capture_page: atlas` and the 16th v2 tool `export_evidence_pack`.
+- Flag off remains **41 full / 13 core / 15 v2**; flag on is **45 full / 13 core / 16 v2**. Core stays 13 and no tool is registered twice.
+- Added `awwwards-index --atlas import|capture|reindex|verify|prune`. Argument and flag checks run before cache construction; prune is dry-run by default and protects active, pinned, running, young and unsafe evidence. `verify` is read-only and creates no cache, database or WAL/SHM sidecar.
+- Added the operator guide in `ATLAS.md` and Atlas sections in `README.md`: scopes, evidence modes, rights, unknowns, CLI, error codes and limitations.
+- Added a packed-install qualification harness (`npm run qualify:installed`) covering surfaces, protocol discovery, branch schemas, annotations, CLI behavior, packaging, real Chromium and isolated temp caches.
+- Atlas remains off by default. The held-out component precision gate (F9) is still unmet, and offline qualification reports INCOMPLETE because a positive Atlas capture requires a permitted public fixture.
+- Hardened Atlas capture reuse, read-only verify, artifact provenance, robots unavailability versus denial, deadline propagation, cancellation and evidence-pack publication.
+
+### Scene capture promoted to stable
+
+- Passive `capture_scene_3d` capture and `download_assets` are now stable features rather than experimental. The Three.js and Spector adapters and the `verify_build.scene3d` gate remain experimental and opt-in.
+
 ## v1.18.0 - 2026-11-04
 
 ### DESIGN.md skill and guarded public capture
