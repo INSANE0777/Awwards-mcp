@@ -31,6 +31,7 @@ import { buildChildEnv, cacheFingerprint, sameCacheFingerprint } from "../script
 import { checkDistFreshness } from "../scripts/qualify/freshness.mjs";
 import { classifyFlagOffProbe, classifyFlagOnProbe } from "../scripts/qualify/cli-probe.mjs";
 import { startMcpClient } from "../scripts/qualify/mcp-client.mjs";
+import { APPROVED_FIXTURE_URL, normalizeFixtureUrl } from "../scripts/qualify/fixture.mjs";
 
 const STARTED = "2026-01-01T00:00:00.000Z";
 const FINISHED = "2026-01-01T00:00:01.000Z";
@@ -667,5 +668,26 @@ describe("MCP stdio client", () => {
     const audit = await client.stop();
     expect(audit.ok).toBe(false);
     expect(audit.problems.join("\n")).toMatch(/duplicate response id/);
+  });
+});
+
+describe("approved qualification fixture", () => {
+  it("accepts the exact approved URL and a trailing-slash variant", () => {
+    expect(normalizeFixtureUrl(APPROVED_FIXTURE_URL)).toBe(APPROVED_FIXTURE_URL);
+    expect(normalizeFixtureUrl("https://awwwards-mcp.vercel.app")).toBe(
+      APPROVED_FIXTURE_URL,
+    );
+  });
+
+  it("refuses a different origin, path, query or hash", () => {
+    for (const value of [
+      "https://example.com/",
+      "https://awwwards-mcp.vercel.app/other",
+      "https://awwwards-mcp.vercel.app/?x=1",
+      "https://awwwards-mcp.vercel.app/#hero",
+      "http://awwwards-mcp.vercel.app/",
+    ]) {
+      expect(() => normalizeFixtureUrl(value), value).toThrow(/approved fixture/);
+    }
   });
 });

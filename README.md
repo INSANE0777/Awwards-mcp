@@ -545,7 +545,17 @@ exercised (`qualificationScope: "full"`). An offline or `--no-browser` run is
 `qualificationScope: "offline-installed"` and is never PASS: with no failures
 it is INCOMPLETE (exit 2), and real failures still exit 1. Because a positive
 Atlas capture needs a permitted non-loopback fixture, a fully offline machine
-reports INCOMPLETE even when every other check passes. `--skip-build` refuses a
+reports INCOMPLETE even when every other check passes. For a full browser
+qualification, point the harness at the approved owned fixture:
+
+```bash
+npm run qualify:installed -- --fixture-url https://awwwards-mcp.vercel.app/
+```
+
+The URL is validated against the compiled-in approved fixture; any other URL is
+refused before any browser launch. The equivalent environment variable is
+`AWWWARDS_QUALIFY_FIXTURE_URL`. With the fixture check passing,
+`qualificationScope` becomes `full` and exit 0 is possible. `--skip-build` refuses a
 `dist` older than `src` and reports INCOMPLETE (exit 2), so an existing build
 cannot qualify stale code.
 
