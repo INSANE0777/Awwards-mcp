@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
@@ -221,7 +221,7 @@ describe("export_evidence_pack", () => {  it("builds a validated pack, then retu
       hashes: "pass",
       designMd: "pass",
     });
-    expect(data.directory.startsWith(cache.rootDir)).toBe(true);
+    expect(realpathSync(data.directory).startsWith(realpathSync(cache.rootDir))).toBe(true);
 
     const second = await runAtlasExport(cache, input, PACK_NOW + 2000);
     expect(second.status).toBe("ok");

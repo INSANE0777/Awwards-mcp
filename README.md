@@ -618,7 +618,7 @@ Install them with the [`skills` CLI](https://skills.sh):
 npx skills add INSANE0777/awwwards-skills
 ```
 
-Tested pairing: **`awwwards-mcp@1.19.0` + `skills-v2026.11.07`**. The 1.18
+Tested pairing: **`awwwards-mcp@1.19.0` + `skills-v2026.11.11`**. The 1.18
 release keeps the same **41 / 13 / 15** tool surface (**45 / 13 / 16** with
 `AWWWARDS_MCP_ATLAS=1`), but rerun the
 compatibility check before a later release changes either side.
