@@ -411,7 +411,7 @@ describe("atlas_status output contract", () => {
       }
       expect(server.server._instructions).toContain("Experimental Atlas");
     } finally {
-      if (saved === undefined) delete process.env.AWWARDS_MCP_ATLAS;
+      if (saved === undefined) delete process.env.AWWWARDS_MCP_ATLAS;
       else process.env.AWWWARDS_MCP_ATLAS = saved;
     }
   });

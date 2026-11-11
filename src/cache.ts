@@ -576,6 +576,16 @@ export class Cache {
         throw error;
       }
     };
+    // A clean checkpointed WAL database has no sidecars. Opening it
+    // read-only in a writable directory still creates -wal/-shm, so use the
+    // immutable snapshot first: it takes no locks and creates nothing.
+    // If a writer appeared in between, fall through to a live read-only open.
+    const immutableFirst = immutableDatabaseUri(this.dbPath);
+    if (immutableFirst) {
+      const db = open(immutableFirst);
+      if (!existsSync(`${this.dbPath}-wal`) && !existsSync(`${this.dbPath}-shm`)) return db;
+      db.close();
+    }
     try {
       return open(this.dbPath);
     } catch (error) {

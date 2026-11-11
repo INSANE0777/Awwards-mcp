@@ -162,6 +162,8 @@ describe("index CLI --atlas", () => {
       const dbPath = join(cacheDir, "cache.db");
       const before = readFileSync(dbPath);
       const beforeMtime = statSync(dbPath).mtimeMs;
+      const sidecars = [`${dbPath}-wal`, `${dbPath}-shm`];
+      const beforeSidecars = sidecars.map((path) => existsSync(path));
       const verified = run(
         ["--atlas", "verify"],
         { ...process.env, AWWWARDS_MCP_ATLAS: "1" },
@@ -171,6 +173,7 @@ describe("index CLI --atlas", () => {
       expect(verified.stderr).toContain("atlas verify");
       expect(readFileSync(dbPath).equals(before)).toBe(true);
       expect(statSync(dbPath).mtimeMs).toBe(beforeMtime);
+      expect(sidecars.map((path) => existsSync(path))).toEqual(beforeSidecars);
 
       const missing = join(dir, "missing");
       const refused = run(

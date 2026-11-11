@@ -253,7 +253,7 @@ describe("v2 branch schemas", () => {
     ]);
   });
 
-  it("requires Atlas branches only with the flag on", () => {
+  it("requires Atlas branches in both flag states", () => {
     const enabled = analyzeBranches({ flagOn: true, schema, tool: "search_references" });
     expect(enabled.ok).toBe(false);
     expect(enabled.missing).toEqual(["components"]);

@@ -1265,7 +1265,12 @@ export async function publishCapture(
       }),
     );
   } catch (error) {
-    if (isBusyError(error)) {
+    if (
+      isBusyError(error) ||
+      /Atlas artifact lock timeout/i.test(
+        error instanceof Error ? error.message : String(error),
+      )
+    ) {
       return {
         published: false,
         code: "PUBLICATION_BUSY",
