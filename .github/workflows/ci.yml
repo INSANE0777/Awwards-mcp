@@ -26,15 +26,16 @@ jobs:
     # failure there instead of a quiet skip.
     env:
       AWWWARDS_CHROMIUM_SMOKE: ${{ matrix.browser && '1' || '' }}
+      AWWARDS_CHROMIUM_SMOKE: ${{ matrix.browser && '1' || '' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             node: "22"
             browser: false
             label: "22"
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             node: "24"
             browser: true
             label: "24"
@@ -74,22 +75,44 @@ jobs:
           echo "npm ci failed after 3 attempts"
           exit 1
       - run: npm run typecheck
-      # Chromium only where the browser smoke runs. Ubuntu runners need the
-      # distro libraries Playwright's bundled build links against.
+      # Chromium only where the browser smoke runs. Ubuntu runners already
+      # carry the distro libraries Playwright's bundled build links against;
+      # installing them again with --with-deps makes CI depend on apt mirror
+      # DNS. Download only, then prove the browser really launches.
       - name: Install Chromium (Linux)
         if: matrix.browser && runner.os == 'Linux'
         shell: bash
         run: |
           for attempt in 1 2 3; do
-            if npx playwright install --with-deps chromium; then exit 0; fi
-            echo "Chromium install failed on attempt ${attempt}; retrying in 20s"
-            sleep 20
+            if npx playwright install chromium; then exit 0; fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Chromium download failed; retrying in $((attempt * 20))s"
+              sleep $((attempt * 20))
+            fi
           done
           echo "Chromium install failed after 3 attempts"
           exit 1
       - name: Install Chromium (macOS/Windows)
         if: matrix.browser && runner.os != 'Linux'
         run: npx playwright install chromium
+      - name: Assert Chromium launches
+        if: matrix.browser
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ headless: true, timeout: 30_000 });
+          try {
+            const page = await browser.newPage();
+            await page.setContent('<h1>ready</h1>');
+            if (await page.locator('h1').innerText() !== 'ready') {
+              throw new Error('Chromium page verification failed');
+            }
+            console.log(`Chromium ${browser.version()} launched successfully`);
+          } finally {
+            await browser.close();
+          }
+          NODE
       - run: npm test -- --maxWorkers=2
         if: runner.os == 'Windows'
       - run: npm test
