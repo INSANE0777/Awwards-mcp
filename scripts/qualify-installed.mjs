@@ -31,6 +31,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { GUARD_MARKER } from "./egress-guard-marker.cjs";
 import { buildChildEnv, cacheFingerprint, sameCacheFingerprint } from "./qualify/child-env.mjs";
 import { ATLAS_ACTIONS, classifyFlagOffProbe, classifyFlagOnProbe } from "./qualify/cli-probe.mjs";
+import { APPROVED_FIXTURE_URL, normalizeFixtureUrl } from "./qualify/fixture.mjs";
 import {
   ATLAS_FULL_TOOLS,
   ATLAS_V2_BRANCHES,
@@ -84,7 +85,8 @@ const FIXTURE = `<!doctype html>
 </html>`;
 
 const USAGE = `usage: node scripts/qualify-installed.mjs [--report <path>] [--skip-build]
-       [--no-browser] [--keep-temp] [--verbose] [--timeout-ms <n>]`;
+       [--no-browser] [--keep-temp] [--verbose] [--timeout-ms <n>]
+       [--fixture-url ${APPROVED_FIXTURE_URL}]`;
 
 function parseArgs(argv) {
   const options = {
@@ -94,6 +96,9 @@ function parseArgs(argv) {
     keepTemp: false,
     timeoutMs: 120_000,
     verbose: false,
+    fixtureUrl: process.env.AWWWARDS_QUALIFY_FIXTURE_URL
+      ? normalizeFixtureUrl(process.env.AWWWARDS_QUALIFY_FIXTURE_URL)
+      : null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -101,7 +106,11 @@ function parseArgs(argv) {
     else if (arg === "--no-browser") options.browser = false;
     else if (arg === "--keep-temp") options.keepTemp = true;
     else if (arg === "--verbose") options.verbose = true;
-    else if (arg === "--report") {
+    else if (arg === "--fixture-url") {
+      const value = argv[++index];
+      if (!value) throw new Error(`--fixture-url needs an approved URL\n${USAGE}`);
+      options.fixtureUrl = normalizeFixtureUrl(value);
+    } else if (arg === "--report") {
       const value = argv[++index];
       if (!value) throw new Error(`--report needs a path\n${USAGE}`);
       options.report = resolve(value);
@@ -300,11 +309,12 @@ function assertCleanAudit(audit) {
   assert(audit.problems.length === 0, audit.problems.join("; "));
 }
 
-async function runClient({ label, cacheDir, flagOn, profile }, fn) {
+async function runClient({ label, cacheDir, flagOn, profile, guard = true }, fn) {
   assert(installedCli, "installed CLI unavailable");
+  const args = guard ? ["--require", guardPath, installedCli] : [installedCli];
   const client = await startMcpClient({
     command: process.execPath,
-    args: ["--require", guardPath, installedCli],
+    args,
     cwd: tempRoot,
     env: serverEnv(cacheDir, { flagOn, profile }),
     label,
@@ -822,11 +832,54 @@ async function runCli() {
     };
   });
 
-  await check("cli.capture.flag_on", "cli", false, async () => ({
-    status: "SKIP",
-    reason:
-      "positive --atlas capture needs a permitted non-loopback fixture; this offline run does not exercise it",
-  }));
+  await check("cli.capture.flag_on", "cli", Boolean(options.fixtureUrl), async () => {
+    if (!options.fixtureUrl) {
+      return {
+        status: "SKIP",
+        reason:
+          "positive --atlas capture needs the approved fixture; pass " +
+          `--fixture-url ${APPROVED_FIXTURE_URL} or set AWWWARDS_QUALIFY_FIXTURE_URL`,
+      };
+    }
+    const cacheDir = join(tempRoot, "cli", "capture-on-cache");
+    await seedCache(cacheDir, { siteUrl: options.fixtureUrl });
+    let result;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      result = runNode(
+        [
+          installedIndexCli,
+          "--atlas",
+          "capture",
+          "--slug",
+          "qualify-fixture",
+          "--path",
+          "/",
+          "--viewport",
+          "desktop",
+        ],
+        {
+          env: serverEnv(cacheDir, { flagOn: true }),
+          timeoutMs: 180_000,
+          cwd: tempRoot,
+        },
+      );
+      if (result.status === 0) break;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    assert(
+      result.status === 0,
+      `positive --atlas capture failed: ${firstLine(result.stderr || result.stdout || result.errorText)}`,
+    );
+    assert(
+      /capture desktop/i.test(`${result.stdout}\n${result.stderr}`),
+      "positive --atlas capture produced no capture summary",
+    );
+    return {
+      status: "PASS",
+      reason: "capture_atlas published from the approved fixture through the installed CLI",
+      details: { exit: result.status },
+    };
+  });
 
   for (const action of ATLAS_ACTIONS.filter((entry) => entry.offline && entry.action !== "import")) {
     await check(`cli.${action.action}.flag_on`, "cli", true, async () => {
@@ -1046,10 +1099,65 @@ async function runBrowser() {
     };
   });
 
-  await check("browser.atlas_capture", "browser", false, async () => ({
-    status: "SKIP",
-    reason: "positive Atlas capture needs a permitted non-loopback owned fixture; this run has no live network",
-  }));
+  await check("browser.atlas_capture", "browser", Boolean(options.fixtureUrl), async () => {
+    if (!options.fixtureUrl) {
+      return {
+        status: "SKIP",
+        reason:
+          "positive Atlas capture needs the approved fixture; pass " +
+          `--fixture-url ${APPROVED_FIXTURE_URL} or set AWWWARDS_QUALIFY_FIXTURE_URL`,
+      };
+    }
+    if (!chromium.available) {
+      return { status: "SKIP", reason: `real browser unavailable: ${chromium.reason}` };
+    }
+    const cacheDir = join(tempRoot, "caches", "browser-atlas-capture");
+    await seedCache(cacheDir, { siteUrl: options.fixtureUrl });
+    const { value, audit } = await runClient(
+      { label: "atlas capture", cacheDir, flagOn: true, profile: undefined, guard: false },
+      async (client) => {
+        await initializeLegacy(client);
+        const envelope = await toolJson(client, "capture_atlas", {
+          slug: "qualify-fixture",
+          path: "/",
+          viewport: "desktop",
+          components: true,
+          refresh: true,
+        });
+        assert(
+          envelope.status === "ok" || envelope.status === "partial",
+          `positive capture returned ${envelope.status}: ${JSON.stringify(envelope.error)}`,
+        );
+        assert(
+          envelope.data?.published === true,
+          `positive capture did not publish: ${JSON.stringify(envelope.error)}`,
+        );
+        assert(
+          typeof envelope.data?.captureId === "string" && envelope.data.captureId.length > 0,
+          "positive capture returned no captureId",
+        );
+        assert(
+          Array.isArray(envelope.data?.sections) && envelope.data.sections.length > 0,
+          "positive capture returned no sections",
+        );
+        return {
+          status: envelope.status,
+          captureId: envelope.data.captureId,
+          sections: envelope.data.sections.length,
+          components: envelope.data.components?.length ?? 0,
+          artifacts: envelope.data.artifacts?.length ?? 0,
+        };
+      },
+    );
+    assertCleanAudit(audit);
+    return {
+      status: "PASS",
+      reason:
+        `capture_atlas published ${value.sections} sections and ` +
+        `${value.components} components from the approved fixture`,
+      details: value,
+    };
+  });
 
   const atlasPresent =
     Array.isArray(tools.on.full) &&
@@ -1262,6 +1370,8 @@ async function runQualification() {
   await runProtocol(false, "modern");
   await runProtocol(true, "legacy");
   await runProtocol(true, "modern");
+  const cliChromium = chromiumInfo();
+  playwrightBrowsersPath = cliChromium.browsersPath ?? playwrightBrowsersPath;
   await runCli();
   await runBrowser();
 }
