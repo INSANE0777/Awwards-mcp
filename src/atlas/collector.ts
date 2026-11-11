@@ -595,12 +595,12 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
   };
   const hopAllowed = async (
     raw: string,
-  ): Promise<{ ok: boolean; privateDestination: boolean }> => {
+  ): Promise<{ ok: boolean; privateDestination: boolean; robotsUnavailable: boolean }> => {
     let url: URL;
     try {
       url = new URL(raw);
     } catch {
-      return { ok: false, privateDestination: false };
+      return { ok: false, privateDestination: false, robotsUnavailable: false };
     }
     let allowed = false;
     try {
@@ -613,10 +613,14 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
       if (error instanceof AtlasCollectionError) throw error;
       allowed = false;
     }
-    if (!allowed) return { ok: false, privateDestination: true };
+    if (!allowed) return { ok: false, privateDestination: true, robotsUnavailable: false };
     const policy = await robotsFor(url);
-    if (policy === null) return { ok: false, privateDestination: false };
-    return { ok: robotsAllows(`${url.pathname}${url.search}`, policy), privateDestination: false };
+    if (policy === null) return { ok: false, privateDestination: false, robotsUnavailable: true };
+    return {
+      ok: robotsAllows(`${url.pathname}${url.search}`, policy),
+      privateDestination: false,
+      robotsUnavailable: false,
+    };
   };
   const initialPolicy = await withTimeout(
     hopAllowed(target.requestedUrl),
@@ -624,6 +628,12 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
     "CAPTURE_DEADLINE_EXCEEDED",
   );
   if (!initialPolicy.ok) {
+    if (initialPolicy.robotsUnavailable) {
+      throw new AtlasCollectionError(
+        "ROBOTS_UNAVAILABLE",
+        "The reference's robots policy is unavailable",
+      );
+    }
     throw new AtlasCollectionError(
       initialPolicy.privateDestination ? "PRIVATE_DESTINATION" : "ROBOTS_DENIED",
       initialPolicy.privateDestination
@@ -633,6 +643,7 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
   }
   let preflightBlocked = false;
   let preflightPrivate = false;
+  let preflightRobotsUnavailable = false;
   let preflightDestinationChanged = false;
   const preflight = await withTimeout(
     fetchSceneHtmlResponse(gate, target.requestedUrl, {
@@ -640,6 +651,10 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
       maxBytes: 1_048_576,
       onHop: async (url, previous) => {
         const hop = await hopAllowed(url);
+        if (hop.robotsUnavailable) {
+          preflightRobotsUnavailable = true;
+          return false;
+        }
         if (!hop.ok && hop.privateDestination) {
           preflightBlocked = true;
           preflightPrivate = true;
@@ -663,6 +678,12 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
     throw new AtlasCollectionError(
       "DESTINATION_CHANGED",
       "A redirect destination changes the reference identity",
+    );
+  }
+  if (preflightRobotsUnavailable) {
+    throw new AtlasCollectionError(
+      "ROBOTS_UNAVAILABLE",
+      "The reference's robots policy is unavailable",
     );
   }
   if (preflightBlocked) {
@@ -815,9 +836,13 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
         );
       };
       let viewportPolicyBlocked = false;
+      let viewportRobotsUnavailable = false;
       const markPolicyBlocked = (): void => {
         policyBlocked = true;
         viewportPolicyBlocked = true;
+      };
+      const markRobotsUnavailable = (): void => {
+        viewportRobotsUnavailable = true;
       };
       let context: any;
       let routeHandler: ((route: any) => Promise<void>) | undefined;
@@ -899,11 +924,17 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
               }
               const initialHop = await hopAllowed(requestUrl);
               if (!initialHop.ok) {
-                markPolicyBlocked();
+                if (initialHop.robotsUnavailable) {
+                  markRobotsUnavailable();
+                  limitations.push("ROBOTS_UNAVAILABLE");
+                } else {
+                  markPolicyBlocked();
+                }
                 await route.abort("blockedbyclient");
                 return;
               }
               let blocked = false;
+              let robotsUnavailable = false;
               if (isFixtureOrigin) {
                 const fetched = await fetchSceneBinaryResponse(gate, requestUrl, {
                   timeoutMs: Math.max(1, Math.min(15_000, deadline - now())),
@@ -917,12 +948,17 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
                       }
                     }
                     const hop = await hopAllowed(url);
-                    if (!hop.ok) blocked = true;
+                    if (hop.robotsUnavailable) robotsUnavailable = true;
+                    else if (!hop.ok) blocked = true;
                     return hop.ok;
                   },
                 });
-                if (blocked || fetched.error || fetched.body === undefined) {
+                if (blocked || robotsUnavailable || fetched.error || fetched.body === undefined) {
                   if (blocked) markPolicyBlocked();
+                  if (robotsUnavailable) {
+                    markRobotsUnavailable();
+                    limitations.push("ROBOTS_UNAVAILABLE");
+                  }
                   await route.abort("blockedbyclient");
                   return;
                 }
@@ -945,12 +981,17 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
                     }
                   }
                   const hop = await hopAllowed(url);
-                  if (!hop.ok) blocked = true;
+                  if (hop.robotsUnavailable) robotsUnavailable = true;
+                  else if (!hop.ok) blocked = true;
                   return hop.ok;
                 },
               });
-              if (blocked || fetched.error || fetched.body === undefined) {
+              if (blocked || robotsUnavailable || fetched.error || fetched.body === undefined) {
                 if (blocked) markPolicyBlocked();
+                if (robotsUnavailable) {
+                  markRobotsUnavailable();
+                  limitations.push("ROBOTS_UNAVAILABLE");
+                }
                 await route.abort("blockedbyclient");
                 return;
               }
@@ -967,8 +1008,13 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
             }
             const hop = await hopAllowed(requestUrl);
             if (!hop.ok) {
-              markPolicyBlocked();
-              limitations.push("BLOCKED_DESTINATION");
+              if (hop.robotsUnavailable) {
+                markRobotsUnavailable();
+                limitations.push("ROBOTS_UNAVAILABLE");
+              } else {
+                markPolicyBlocked();
+                limitations.push("BLOCKED_DESTINATION");
+              }
               await route.abort("blockedbyclient");
               return;
             }
@@ -976,16 +1022,22 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
             // is refused before the browser transports it.
             if (isFixtureOrigin) {
               let policyDenied = false;
+              let robotsUnavailable = false;
               const fetched = await fetchSceneBinaryResponse(gate, requestUrl, {
                 timeoutMs: Math.max(1, Math.min(15_000, deadline - now())),
                 maxBytes: 8 * 1024 * 1024,
                 onHop: async (url) => {
                   const nextHop = await hopAllowed(url);
-                  if (!nextHop.ok) policyDenied = true;
+                  if (nextHop.robotsUnavailable) robotsUnavailable = true;
+                  else if (!nextHop.ok) policyDenied = true;
                   return nextHop.ok;
                 },
               });
               if (policyDenied) markPolicyBlocked();
+              if (robotsUnavailable) {
+                markRobotsUnavailable();
+                limitations.push("ROBOTS_UNAVAILABLE");
+              }
               if (fetched.error || fetched.body === undefined) {
                 if (fetched.reason === "policy") {
                   markPolicyBlocked();
@@ -1021,7 +1073,12 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
               const next = new URL(location, current).toString();
               const nextHop = await hopAllowed(next);
               if (!nextHop.ok) {
-                markPolicyBlocked();
+                if (nextHop.robotsUnavailable) {
+                  markRobotsUnavailable();
+                  limitations.push("ROBOTS_UNAVAILABLE");
+                } else {
+                  markPolicyBlocked();
+                }
                 await route.abort("blockedbyclient");
                 return;
               }
@@ -1100,14 +1157,26 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
           throw new AtlasCollectionError(settledRedirect.code, settledRedirect.message);
         }
         if (cancelled) break;
+        const includeComponents = input.components !== false;
         const rawScan = deps.scanPage
-          ? await withTimeout(
-              deps.scanPage(page, viewport),
-              Math.max(1, deadline - now()),
-              "CAPTURE_DEADLINE_EXCEEDED",
-            )
+          ? includeComponents
+            ? await withTimeout(
+                deps.scanPage(page, viewport),
+                Math.max(1, deadline - now()),
+                "CAPTURE_DEADLINE_EXCEEDED",
+              )
+            : await withTimeout(
+                deps.scanPage(page, viewport, { components: false }),
+                Math.max(1, deadline - now()),
+                "CAPTURE_DEADLINE_EXCEEDED",
+              )
           : await withTimeout(
-              page.evaluate(ATLAS_SECTION_SCAN, ATLAS_COMPONENT_HINTS) as Promise<AtlasPageScan>,
+              page.evaluate(
+                ATLAS_SECTION_SCAN,
+                includeComponents
+                  ? ATLAS_COMPONENT_HINTS
+                  : { ...ATLAS_COMPONENT_HINTS, components: false },
+              ) as Promise<AtlasPageScan>,
               Math.max(1, deadline - now()),
               "CAPTURE_DEADLINE_EXCEEDED",
             );
@@ -1131,6 +1200,7 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
               limitations.push("SCROLL_ROOT_UNKNOWN");
               if (scan.nodeBudgetHit) limitations.push("DOM_NODE_LIMIT");
               if (viewportPolicyBlocked) limitations.push("POLICY_BLOCKED");
+      if (viewportRobotsUnavailable) limitations.push("ROBOTS_UNAVAILABLE");
               const viewportLimitations = [...new Set(limitations)];
               viewports.push({
                 viewport,
@@ -2187,6 +2257,7 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
           }
         }
         if (viewportPolicyBlocked) limitations.push("POLICY_BLOCKED");
+      if (viewportRobotsUnavailable) limitations.push("ROBOTS_UNAVAILABLE");
         const published = new Set(publishedRegions.map((region) => regionStableKey(region)));
         for (const section of scan.sections) {
           const stable = regionStableKey(section as unknown as RegionCandidate);
@@ -2310,6 +2381,7 @@ export async function collectAtlasPage(  input: AtlasCollectInput,
     viewports,
     artifacts,
     states: stateRequests,
+    components: input.components !== false,
   };
 }
 

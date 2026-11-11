@@ -8,6 +8,7 @@ import { collectAtlasPage, scrollTo } from "../src/atlas/collector.js";
 import { componentPatternKey } from "../src/atlas/components.js";
 import { acquireAtlasCaptureLease } from "../src/atlas/lease.js";
 import { publishCapture } from "../src/atlas/publish.js";
+import { runAtlasCapture } from "../src/atlas/tool-capture.js";
 import { loadPhase2Fixture } from "./helpers/phase2-fixture.js";
 import type {
   AtlasPageScan,
@@ -49,11 +50,14 @@ const site = (liveUrl: string | null): SiteSummary => ({
   studio: "Studio",
 });
 
-async function fixtureServer(): Promise<{ origin: string }> {
+async function fixtureServer(
+  robotsStatus = 200,
+  robotsBody = "User-agent: *\nAllow: /\n",
+): Promise<{ origin: string }> {
   const server = createServer((req, res) => {
     if (req.url === "/robots.txt") {
-      res.writeHead(200, { "content-type": "text/plain" });
-      res.end("User-agent: *\nAllow: /\n");
+      res.writeHead(robotsStatus, { "content-type": "text/plain" });
+      res.end(robotsBody);
       return;
     }
     res.writeHead(200, { "content-type": "text/html" });
@@ -406,6 +410,37 @@ describe("Atlas collector lifecycle", () => {
       ),
     ).rejects.toMatchObject({ code: "CAPTURE_DEADLINE_EXCEEDED" });
     expect(fake.closed()).toBe(false);
+  });
+
+  it("reports unavailable robots separately from a denial", async () => {
+    const { origin } = await fixtureServer(503);
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    await expect(
+      collectAtlasPage(
+        { siteSlug: "fixture-live" },
+        {
+          cache,
+          allowPrivateOrigins: [origin],
+          loader: async () => {
+            throw new Error("browser must not launch when robots is unavailable");
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "ROBOTS_UNAVAILABLE" });
+  });
+
+  it("maps a robots denial through capture_atlas to blocked", async () => {
+    const { origin } = await fixtureServer(200, "User-agent: *\nDisallow: /\n");
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const result = await runAtlasCapture(cache, { slug: "fixture-live", refresh: true }, {
+      now: () => Date.now(),
+      collectDeps: { allowPrivateOrigins: [origin] },
+    });
+    expect(result.status).toBe("blocked");
+    expect(result.error?.code).toBe("ROBOTS_DENIED");
+    expect(result.error?.retryable).toBe(false);
   });
 
   it("times out a held browser launch without leaving the lease held", async () => {
@@ -1142,11 +1177,41 @@ describe("Atlas collector lifecycle", () => {
     }
   });
 
+  it("passes components:false to the initial scan and records no components", async () => {
+    const { origin } = await fixtureServer();
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const scan = componentScan([scanComponent()]);
+    const calls: Array<{ components?: boolean } | undefined> = [];
+    const attempt = await collectAtlasPage(
+      { siteSlug: "fixture-live", viewports: ["desktop"], components: false },
+      {
+        cache,
+        allowPrivateOrigins: [origin],
+        loader: async () => ({ chromium: { launch: async () => fakeBrowser(scan).browser } }),
+        settle: async () => undefined,
+        scanPage: async (_page, _viewport, options) => {
+          calls.push(options);
+          return {
+            ...scan,
+            url: `${origin}/`,
+            components: options?.components === false ? [] : scan.components,
+          };
+        },
+        totalBudgetMs: 30_000,
+      },
+    );
+    expect(calls[0]).toEqual({ components: false });
+    expect(attempt.viewports[0]!.components ?? []).toEqual([]);
+    expect(attempt.components).toBe(false);
+  });
+
   it("discovers components only on the initial scan", async () => {
     const scan = componentScan([scanComponent()]);
     const { attempt, cache } = await collectWithScan(scan);
     const viewport = attempt.viewports[0]!;
     expect(viewport.components).toHaveLength(1);
+    expect(viewport.scan.components ?? []).toHaveLength(1);
     expect(viewport.coverage.limitations).toContain("COMPONENT_INITIAL_SCAN_ONLY");
     expect(viewport.limitations).not.toContain("COMPONENT_INITIAL_SCAN_ONLY");
     expect(attempt.coverage.limitations).toContain("COMPONENT_INITIAL_SCAN_ONLY");

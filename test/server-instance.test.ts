@@ -10,8 +10,10 @@ describe("server factory", () => {
   it("returns a distinct server with 41 registrations and instructions per call", () => {
     const savedProfile = process.env.AWWWARDS_MCP_PROFILE;
     const savedLegacy = process.env.AWARDS_MCP_PROFILE;
+    const savedAtlas = process.env.AWWWARDS_MCP_ATLAS;
     delete process.env.AWWWARDS_MCP_PROFILE;
     delete process.env.AWARDS_MCP_PROFILE;
+    delete process.env.AWWWARDS_MCP_ATLAS;
     try {
       const handlers = {} as any;
       const first = createServer({ handlers, version: "0.0.0-test" });
@@ -40,6 +42,8 @@ describe("server factory", () => {
       else process.env.AWWWARDS_MCP_PROFILE = savedProfile;
       if (savedLegacy === undefined) delete process.env.AWARDS_MCP_PROFILE;
       else process.env.AWARDS_MCP_PROFILE = savedLegacy;
+      if (savedAtlas === undefined) delete process.env.AWWWARDS_MCP_ATLAS;
+      else process.env.AWWWARDS_MCP_ATLAS = savedAtlas;
     }
   });
 });

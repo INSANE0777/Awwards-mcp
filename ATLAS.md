@@ -6,11 +6,11 @@ Atlas is the section-level evidence layer for awwwards-mcp. It is **opt-in** and
 AWWWARDS_MCP_ATLAS=1
 ```
 
-It adds capture, segmentation, checkpoint evidence, publication, candidate section labels and local search to the existing SQLite cache. It does **not** add or change MCP tools; tool exposure belongs to a later phase.
+It adds capture, segmentation, checkpoint evidence, publication, candidate section labels, local search and evidence packs to the existing SQLite cache. With `AWWWARDS_MCP_ATLAS=1` it also adds four experimental MCP tools (`search_atlas`, `get_atlas`, `capture_atlas`, `export_evidence_pack`) and their v2 branches. With the flag off, the surfaces stay at **41 full / 13 core / 15 v2**.
 
 ## Status
 
-Phase 4B explicit hover/focus state capture and state-aware search are implemented locally and pass their focused test gates. Phase 5 evidence packs are implemented locally and pass their focused test gates; they are an internal export path, not an MCP tool. Classification is still **not calibrated** and is not advertised as accepted.
+Phase 4B explicit hover/focus state capture and state-aware search are implemented locally and pass their focused test gates. Phase 5 evidence packs are implemented locally and pass their focused test gates. Phase 6 adds the four MCP tools, the v2 branches and the Atlas CLI actions behind the same flag; see [Using Atlas](#using-atlas-phase-6). Classification is still **not calibrated** and is not advertised as accepted.
 
 - Held-out corpus: 50 usable pages
 - Scored: 49 pages, 1,883 sections
@@ -27,6 +27,8 @@ Every section label written by Atlas is `candidate`. Nothing is promoted to `acc
 
 Search therefore defaults to `evidenceMode: "candidate"` and marks every hit `candidateOnly: true`. `accepted` mode never includes candidates.
 
+The candidate default is an accepted deviation from spec §10.1, which names `accepted` as the default. This release does not claim §10.1 compliance. The export copy cap is a second accepted deviation: spec §16 allows 64 MiB of copied artifacts, while this release caps copies at 32 MiB (see [`export_evidence_pack` constraints](#export_evidence_pack-inputs-rights-and-constraints)).
+
 Structural labels are stronger than content labels:
 
 | Class | Precision | Recall |
@@ -39,9 +41,820 @@ Structural labels are stronger than content labels:
 
 Content classes (services, features, pricing, process, CTA, product listing) need recall work before they can be exposed as filters.
 
+## Using Atlas (Phase 6)
+
+This is the operator-facing guide to the Phase 6 surface. `docs/atlas-spec.md` §11, §15, §16, §18 and §19 are normative; this section summarises those contracts and adds the usage rules that are easy to get wrong.
+
+### Feature flag and surface counts
+
+`AWWWARDS_MCP_ATLAS=1` enables Atlas. The flag is read once at server start, so changing it requires a restart. It is off by default.
+
+| Profile | Flag off | Flag on |
+|---|---:|---:|
+| `full` (default) | 41 | 45 |
+| `core` | 13 | 13 |
+| `v2` | 15 | 16 |
+
+- Flag on adds `search_atlas`, `get_atlas`, `capture_atlas` and `export_evidence_pack` to `full` (41 → 45). None is a `core` tool, so `core` stays 13. `v2` gains one tool, `export_evidence_pack` (15 → 16); the other Atlas operations are branches of existing v2 tools.
+- Flag off: the four tools are not registered. The v2 Atlas branches still validate their request shape but return `FEATURE_DISABLED` without network access or mutation, and the surface counts stay 41 / 13 / 15.
+- Atlas tables and files are additive and are not removed when the flag is turned off. Unsetting the flag is the operational rollback; an older binary ignores the additive tables and keeps using the legacy tools.
+- These are surface counts, not a claim about any one installed build. Verify them at release with `npm run protocol:smoke` (flag off) and `AWWWARDS_MCP_ATLAS=1 npm run protocol:smoke` (flag on), and never hard-code one count for both states.
+
+All four tools return the Atlas result envelope from spec §5.6. This blocked example shows the error form:
+
+```json
+{
+  "schemaVersion": "awwwards-atlas-v1",
+  "operation": "capture_atlas",
+  "status": "blocked",
+  "data": null,
+  "coverage": { "status": "unknown", "collected": 0, "excluded": 0, "limitations": [] },
+  "warnings": [],
+  "error": {
+    "code": "ROBOTS_DISALLOWED",
+    "message": "The destination is disallowed by robots; no bypass was attempted",
+    "retryable": false
+  }
+}
+```
+
+`ok` and `partial` always carry operation data in `data`. `inconclusive` carries resolved evidence when the operation produced any — an ambiguous highlight returns its candidate `regionIds` — and `data: null` when it did not. Every result includes concise text, and `ok`, `partial` and `inconclusive` also return `structuredContent` with the envelope. `blocked` and `error` carry `data: null`, set `isError: true`, and return the envelope serialized in text without `structuredContent`. Error messages never include stacks or absolute paths.
+
+### Tools
+
+| Tool | Read-only | Idempotent | Open world | Purpose |
+|---|---:|---:|---:|---|
+| `search_atlas` | yes | yes | no | Local section or component search with predicates, facets, scopes, evidence modes and cursors. Zero network. |
+| `get_atlas` | yes | yes | no | Read `status`, `taxonomy`, one `region` or one `highlight`. Zero network. |
+| `capture_atlas` | no | no | yes | Guarded live capture and publication for one known site slug and one viewport. Writes an active head when publication succeeds. |
+| `export_evidence_pack` | no | yes | no | Build and validate a local evidence pack for 1–12 selected regions. Zero network. |
+
+`search_atlas` takes `kind: "sections" | "components"` plus the search filters below. `get_atlas`, `capture_atlas` and `export_evidence_pack` take one flat object each; the v2 branches take the same fields inside `request`.
+
+#### `search_atlas` inputs
+
+| Field | Values | Default | Rules |
+|---|---|---|---|
+| `kind` | `sections`, `components` | required | One kind per call. |
+| `query` | string | none | 1–300 characters, at most 16 tokens. Lexical FTS5 search over stored region text and accepted labels; every token is required. It does not assert traits. |
+| `predicates` | `{field, values}[]` | none | At most 8 predicates. Each predicate carries 1–8 canonical values; the engine caps a predicate at 8 values. Predicates are ANDed; values inside one predicate are ORed. Repeated predicates on the same field stay separate AND requirements. |
+| `scope` | `region`, `page`, `site` | `region` | Witness scope; see [Scopes](#scopes-states-and-evidence-modes). |
+| `viewport` | `desktop`, `mobile` | `desktop` | Collection viewport. |
+| `state` | `default`, `hover`, `focus` | `default` | A state query reads only claims with that exact state. |
+| `evidenceMode` | `accepted`, `observed_only`, `candidate` | `candidate` | See the deviation note below and [evidence modes](#scopes-states-and-evidence-modes). |
+| `siteSlugs` | string[] | none | 1–20 distinct cached site slugs; duplicates are rejected; narrows matches, totals and facets. |
+| `maxAgeDays` | integer 1–3650 | 30 | Freshness window over the confirmation time. |
+| `groupBy` | `instance`, `pattern` | `instance` sections, `pattern` components | Pattern grouping counts repeated component families. |
+| `sort` | `relevance`, `newest` | `relevance` | BM25 for a text query; tiered relevance otherwise. |
+| `facets` | field[] | none | At most 4 distinct fields. Counts are disjunctive. |
+| `limit` | integer 1–20 | 8 | Anchors per page. |
+| `cursor` | string | none | `nextCursor` from the previous page; bound to the query and revision, expires after 15 minutes. |
+
+Supported predicate fields: `section.purpose`, `component.type`, `context.section_purpose`, `region.kind`, `region.tag`, `region.role`, `region.landmark`. A section search accepts only `region.kind: "section"`; a component search accepts only `region.kind: "component"`. Any other field or value returns `UNSUPPORTED_PREDICATE` before any query runs. Appearance, layout, behavior, rendering and technology fields exist in the classifier vocabulary but are not exposed as predicates in this release.
+
+> **Default evidence mode is a deliberate deviation.** Spec §10.1 names `accepted` as the default, but every section label in this release is still candidate. Search therefore defaults to `candidate`, marks every hit `candidateOnly: true`, sets `candidateNote` and adds the `CLASSIFICATION_AMBIGUOUS` warning. Pass `evidenceMode: "accepted"` to search accepted labels only. This deviation is accepted for the release: the release does not claim §10.1 compliance and the difference is tracked in [Deliberate deviation](#deliberate-deviation).
+
+### `get_atlas` branches
+
+| `kind` | Input | Data returned |
+|---|---|---|
+| `status` | none | Enabled and available state; stored and current schema/FTS/vocabulary/classifier versions; revision and `updatedAt`; counts by source, region kind and capture status; fresh/stale live captures; latest publication; latest failed attempt; lease state, expiry and `ttlSeconds` (`null` when free, at most 150 while held); artifact records, distinct hashes, ready records and deduplicated bytes; FTS availability; coverage note. |
+| `taxonomy` | none | Registry version; every field with values, labels, support (`supported`, `reserved`, `dynamic`, `disabled`), enabled/searchable flags, permitted evidence bases, aliases and rule IDs; supported scopes, states, evidence modes and grouping; explicitly unsupported operations. |
+| `region` | `regionId` (64 lowercase hex) | Stored region record; capture conditions and source identity; up to 128 claims; availability-checked artifact descriptors; parent and up to 24 bounded child summaries; current/historical head status. |
+| `highlight` | `elementId` | Alias resolution to one region: `status` is `resolved`, `ambiguous` or `not_found`, with `aliasKind`, candidate `regionIds` and an optional full `region`. |
+
+- `status` reads the SQLite cache only. It does not scan the filesystem, and its counts describe the locally cached subset, not all of Awwwards. Collection errors that happen before publication are returned by the capture call itself and are not stored as capture rows, so `latestFailedAttempt` only covers persisted attempts.
+- `region` does not embed a raw component tree by default. Component packs and screenshots are returned as artifact descriptors with `storagePath`, `sha256`, `bytes`, `mimeType`, `state` (`ready`, `missing`, `corrupt`, `restricted`) and `available`. Claim lists are capped at 128 (`claimsTruncated`), children at 24 (`childrenTruncated`) and artifacts at 32 (`artifactsTruncated`).
+- `highlight` resolves an existing element id through `atlas_aliases`, trying `legacy_element_slug` and then `legacy_gallery_slug`. Ambiguity returns envelope `inconclusive` with error `AMBIGUOUS_ALIAS` and the candidate `regionIds`; an unknown id returns `inconclusive` with `status: "not_found"` and no error. The old gallery page is never fetched.
+- An invalid `regionId` returns `INVALID_INPUT`; an unknown one returns `REGION_NOT_FOUND`; a cache written by a newer schema returns `SCHEMA_TOO_NEW` without modifying anything.
+
+### `capture_atlas` inputs and output
+
+| Input | Values | Default | Rules |
+|---|---|---|---|
+| `slug` | cached site slug | required | The live URL comes from cached site metadata, never from a free URL. |
+| `path` | path on that origin | known root | Must start with one `/`, must not start with `//`, and may not contain `?`, `#` or credentials. |
+| `viewport` | `desktop`, `mobile` | `desktop` | One viewport per call; 1440×900 or 390×844. |
+| `components` | boolean | `true` | Component candidates and packs; `false` returns `components: []`. |
+| `states` | `{action, targetRegionId}[]` | none | At most 3 unique `hover`/`focus` pairs on regions of the current active head. |
+| `refresh` | boolean | `false` | `false` reuses a matching usable active head up to 7 days old; `true` always launches a capture. |
+
+Output data: `captureId`, `attemptId`, `pageId`, `cached`, `published`, `previousHeadId`, `viewport`, `sections`, `components` (bounded `RegionSummary` lists; 64 each), `artifacts` (availability-checked descriptors; 32), `capabilityCoverage` (geometry, sections, components, screenshots, tokens, states, motion, rendering, policy) and `omitted` (sections, components, screenshots, componentPacks).
+
+Publication semantics:
+
+- `cached: true` means no new capture ran. A matching usable active head up to seven days old was reused, with the same requested states. `published` is `false` because nothing was republished, and `previousHeadId` is `null`.
+- `published: true` means a new capture replaced the active head. `previousHeadId` is the head it replaced, or `null` for a first publication.
+- `published: false` with `cached: false` means the attempt produced evidence that could not be published. Envelope `status` is `partial` when usable evidence was collected, or `inconclusive` when the result is unknown. The bounded summaries and `omitted` counters still describe what was collected, and `captureId` is empty when nothing was stored. The previous head is preserved.
+- A blocked policy result returns envelope `blocked` and `isError` (`ROBOTS_DISALLOWED`, `DESTINATION_CHANGED`, `BLOCKED_DESTINATION`, `HTTP_BLOCKED`, `PRIVATE_DESTINATION`, `POLICY_BLOCKED`). A page destination that changes during collection is `inconclusive` with `TARGET_CHANGED`; it is not a policy block, publishes nothing and preserves the previous head. A navigation failure or deadline returns `inconclusive` and is retryable (`NAVIGATION_FAILED`, `CAPTURE_TIMEOUT`, `CAPTURE_DEADLINE_EXCEEDED`, `ROBOTS_UNAVAILABLE`). A second concurrent capture returns retryable `CAPTURE_BUSY`; it never waits out the other capture's deadline.
+- One capture runs per cache at a time through the capture lease. The capture budget is 90 seconds; the lease TTL is 150 seconds (the 90-second budget plus 60 seconds of slack), and the lease is not a queue and there is no background scheduler.
+- State capture supports `hover` and `focus` only. Click, type, submit, drag, keyboard navigation and route transitions are never performed. An unresolved, ambiguous or changed target makes that state inconclusive and does not abort the default capture.
+- Component packs follow the Phase 4A bounds: at most 120 candidates, 12 packs, 150 nodes and depth 12 per pack. Hidden, offscreen and inferred types stay candidate-only.
+- `components` is recorded in the capture config hash, but reuse is matched on the requested states, not on `components`. A `components: true` request that reuses a head captured with components off stays a reuse and returns `status: "partial"` with limitation `COMPONENTS_NOT_COLLECTED` and `components: []`; it never claims component completeness or launches a second capture. A `components: false` request only omits component summaries and counts them in `omitted.components`; an otherwise complete reuse stays `ok`/`complete`.
+- Page-derived content is local evidence, not redistribution permission. Capture uses fresh anonymous contexts, rejects sensitive query parameters before launch, and redacts credentials, queries and fragments from exposed provenance.
+
+### `export_evidence_pack` inputs, rights and constraints
+
+| Input | Values | Default | Rules |
+|---|---|---|---|
+| `regionIds` | id[] | required | 1–12 distinct section/component regions from the active heads of one cached site. The page root and highlights are not selectable. |
+| `goal` | string | neutral local-reference goal | At most 1,000 characters after trimming. |
+| `includeMedia` | `references`, `permitted` | `references` | See the rights rules below. |
+| `rightsAssertions` | `{artifactId, rights}[]` | none | At most 24, one per artifact id. Rights is the spec `RightsRecord`. |
+
+Output data: `packId`, `directory`, `manifestPath`, `manifestHash`, `files` (`path`, `sha256`, `bytes`, `mimeType`), `selectedRegionIds`, `excludedArtifacts` (`artifactId`, `reason`), `validation` (`manifest`, `claims`, `hashes`, `designMd`) and `cached`.
+
+Rights:
+
+- `references` copies only derived manifests and summaries. Raw component packs and screenshots stay referenced by artifact id, path and hash; no source SVG, image, font, video, model or bundle enters the pack.
+- `permitted` copies only selected stored artifacts covered by a caller assertion with status `owned`, `licensed` or `permission`, `scope: "export_copy"` and a non-empty reference. Unknown, missing, wrong-scope and restricted artifacts are excluded with a reason. Copies are capped at 24 artifacts, 8 MiB each and 32 MiB total — 32 MiB is the accepted release cap; spec §16 allows 64 MiB.
+- No permission assertion overrides a robots or destination refusal. Missing third-party payloads are never fetched.
+- Assertions are recorded, not independently verified, and are never presented as legal conclusions. Unknown rights stay unknown. Captured page content remains its creators' property and is not covered by this repository's MIT license.
+
+Constraints:
+
+- The pack is always written under `<cache>/atlas/evidence-packs/<packId>/`. There is no arbitrary output path, overwrite switch, asset downloader, public-sharing or publish operation.
+- The pack id hashes the sorted region ids, the selected captures' identity and evidence hashes, the goal, the inclusion mode, the rights assertions and the Atlas/exporter versions. The same selection yields the same id.
+- An existing intact pack is validated and returned with `cached: true`; a corrupt one returns `PACK_CORRUPT` and is preserved, never overwritten.
+- Files are staged in a unique temporary directory, fully validated, then atomically renamed. `validation.designMd` is `not_applicable` when the selected evidence produces no DESIGN.md; the other three checks must pass.
+- Export is local only: it reads the SQLite cache and artifact files, never the network. The specification's 15-second budget covers 12 regions and up to 64 MiB of copied artifacts. This release deliberately caps copied artifacts at 32 MiB: 32 MiB is the accepted release cap and the spec §16 64 MiB allowance is not implemented.
+
+### Robots, rights and privacy
+
+- Robots policy is evaluated before each new document request and redirect, using the most restrictive result of the project restrictions and the robots rules. Successful decisions are cached for at most 24 hours; 404/410 means no published rules; network failure and 5xx mean unavailable, so collection is deferred. No alternate transport bypasses a refusal, requested subresources are covered too, and a redirect decision that cannot be enforced before the request fails closed.
+- Awwwards metadata requests stay at one request start per second. Live top-level navigations are limited to one start per origin per second. Browser subresources are bounded by the capture deadline and resource budget. There are no retries through 403/429, no stealth or proxy rotation, no authenticated fallback, and no retired endpoint is accessed during import, indexing, retrieval or export.
+- Rights stay separate from source eligibility. Public access does not establish redistribution permission; unknown rights remain unknown; the repository's MIT license does not apply to captured content; no third-party payload enters public distribution automatically; and no export downloads a missing asset. Removal is supported by withdrawing heads and explicitly pruning unpinned artifacts.
+- Capture uses fresh anonymous contexts with no cookies or session import. Credentials, queries and fragments are redacted from exposed provenance, sensitive URL parameter names are rejected before capture, and form values, passwords, tokens and hidden page content are not indexed. Email and phone strings are removed from bounded searchable excerpts. Page-derived text is treated as untrusted data, escaped in generated HTML/Markdown, and is never sent to an external model.
+
+### v2 mapping
+
+| v2 call | Atlas branch | Envelope |
+|---|---|---|
+| `search_references` | `request.kind: "sections"` or `"components"`, with the `search_atlas` filter fields inline in the same object | `search_atlas` |
+| `get_reference` | `request.kind: "atlas_region"` (`regionId`), `"atlas_highlight"` (`elementId`) or `"atlas_taxonomy"` | `get_atlas.region`, `get_atlas.highlight` or `get_atlas.taxonomy` |
+| `get_index` | `request.kind: "atlas_status"` | `get_atlas.status` |
+| `capture_page` | `request.kind: "atlas"` with the `capture_atlas` fields inline | `capture_atlas` |
+| `export_evidence_pack` | a new flat tool, not a branch | `export_evidence_pack` |
+
+Old branches keep their existing response shapes. New branches use the Atlas envelope. Mixed v2 groups keep conservative annotations: `search_references`, `get_reference` and `get_index` stay read-only; `capture_page` is already non-read-only because its recording branch can interact with a page. A branch validating is not proof that the flag is on — with the flag off it returns `FEATURE_DISABLED`.
+
+### CLI actions
+
+Atlas extends the existing `awwwards-index` executable; there is no second binary. Every action requires `AWWWARDS_MCP_ATLAS=1` and is mutually exclusive with the normal site crawl.
+
+| Action | Form | Network | Behaviour |
+|---|---|---|---|
+| Import | `--atlas import` | no | Project cached item pages and legacy gallery rows into Atlas. Never captures afterwards. |
+| Capture | `--atlas capture --slug <slug> [--path /] --viewport desktop\|mobile\|both` | yes | Run the same guarded capture used by `capture_atlas`. `both` runs the desktop capture, then the mobile capture, sequentially. |
+| Reindex | `--atlas reindex` | no | Rebuild the Atlas FTS layer and search projections from stored evidence. |
+| Verify | `--atlas verify` | no | Offline, read-only artifact-integrity census. Reports checked/ok, external, missing, size-mismatch, hash-mismatch, not-a-file and unsafe-path counts, lists up to ten issues, and exits 1 when any issue exists. It never marks, rewrites or withdraws evidence. |
+| Prune | `--atlas prune --older-than-days <N>` | no | Dry-run by default. Deletion requires an explicit `--apply` and user authorisation. |
+
+Rules:
+
+- Arguments are validated before any cache, client or file is constructed. An unknown or malformed action, or a missing flag, exits 2 with a usage message and no network access.
+- `--atlas` is never combined with the site crawl. The existing `--elements` / `--elements=*` refusal is unchanged and still runs before cache construction.
+- `reindex` and `verify` are offline. `verify` is read-only; `reindex` rebuilds the derived FTS layer and projections. `import` reads the local cache only.
+- `verify` compares every stored artifact record with its recorded byte size and SHA-256. A missing file, size mismatch, hash mismatch, non-regular file or unsafe path is counted and reported, never repaired: no database write is performed, no head is withdrawn and no file is deleted.
+- Pruning never removes active-head evidence, pack-pinned captures or artifacts, or any file outside the resolved Atlas cache subtree.
+- Prune defaults to dry-run. `--apply` requires explicit user authorisation; there is no scheduled or automatic pruning.
+
+### Scopes, states and evidence modes
+
+**Scopes.** `region` (default) requires every predicate to be satisfied by the anchor region, with state claims sharing one sample key. `page` lets witnesses come from different regions of the same capture, viewport and state. `site` lets witnesses come from different explicit pages of the same site, with the same viewport and state, and returns an observation time span. Trait combinations never combine across regions except through the declared page or site scope, and never across sites. Each witness must satisfy the age constraint. `query` always matches the anchor.
+
+**States.** `default`, `hover` and `focus`. A hover/focus query reads only evidence recorded for that exact state; default-state claims never fill a state query. Without state evidence the outcome is `insufficient_coverage`. Only explicit state capture produces those claims; click, type, submit and navigation are unsupported.
+
+**Evidence modes.**
+
+| Mode | Includes | Default |
+|---|---|---|
+| `accepted` | Accepted observed and accepted inferred claims. | no |
+| `observed_only` | Accepted observed claims only; excludes inferred semantic purposes. | no |
+| `candidate` | Accepted evidence plus candidate hints; every hit is marked `candidateOnly`. | yes, in this release |
+
+Candidates, rejected claims, proposed claims and unknown values never satisfy `accepted` or `observed_only` predicates. Highlight regions are excluded from section and component search. The default `candidate` mode is the deliberate deviation described above.
+
+**Freshness.** `maxAgeDays` defaults to 30 and is capped at 3650. A hit is displayed as `fresh` through seven days and `stale` afterwards; stale evidence is still returned inside the requested age window. Unknown observation times do not satisfy live-evidence queries. A failed refresh preserves the previous usable head.
+
+### Limits
+
+Search:
+
+- `query` 1–300 characters and at most 16 tokens; at most 8 predicates; 1–8 canonical values per predicate; at most 4 distinct facets; `siteSlugs` 1–20 distinct; `limit` 1–20, default 8; `cursor` at most 4,096 characters and valid for 15 minutes.
+- Response cap is 262,144 serialized bytes. Per-hit witnesses are capped at 200 per explanation and 2,000 per response, artifact descriptors at 8 per anchor and screenshot keys at 8 per hit. `responseTruncated` is true only when optional evidence was shed; per-field clipping is silent.
+- Outcome is `matches`, `no_observed_match`, `empty_corpus` or `insufficient_coverage`. An empty index returns envelope `inconclusive`; absence of evidence is never proof of absence.
+
+Capture (spec §9.5): 90-second wall time, 6,000 inspected DOM nodes, traversal depth 12, 200 headings, 24 sections, 120 component candidates, 12 component packs, 150 nodes and depth 12 per pack, 800 token-sampled nodes, 6 default scroll checkpoints, 3 explicit states, 18 screenshots, 2,400 CSS pixels per screenshot, 64 MiB stored artifacts and 128 claims per region. Exceeding a bound yields partial coverage and a specific limitation.
+
+Export: 1–12 regions, 1,000-character goal, 24 rights assertions, 24 copied artifacts, 8 MiB per artifact, 32 MiB total copies, 24 KiB DESIGN.md, 256 KiB per JSON document and 1 MiB for the selection artifact. The 15-second export budget covers 12 regions and 64 MiB in spec §16; this release caps copies at 32 MiB, the accepted release cap.
+
+Performance gates, not measured promises: local search p95 ≤300 ms without facets and ≤500 ms with four facets at 100,000 eligible regions; region retrieval ≤100 ms excluding payload reads; status ≤200 ms; live capture ≤90 s; one capture per cache; SQLite busy wait ≤5 s; cursor lifetime 15 minutes. The benchmark section below records the latest local measurements.
+
+### Errors and inconclusive results
+
+| Code | Envelope status | Meaning |
+|---|---|---|
+| `FEATURE_DISABLED` | error | Atlas is off; no tool registration, capture, publication or mutation. |
+| `INVALID_INPUT` | error | Rejected before network or browser work. |
+| `INVALID_SELECTION` | error | A pack selection is empty, duplicated, not 1–12 regions, not section/component, or spans sites. |
+| `INVALID_STATE_REQUEST` | error | Unknown action, duplicate pair, foreign page/viewport, or unverifiable target; rejected before browser launch. |
+| `UNSUPPORTED_PREDICATE` | error | Unknown field, disabled value, or a kind the corpus does not publish. |
+| `UNSUPPORTED_KIND` / `UNSUPPORTED_STATE` / `UNSUPPORTED_GROUPING` | error | Search option not supported for that kind or release. |
+| `UNKNOWN_SITE` / `INVALID_SITE_SLUG` | error | The slug is malformed or not in the local cache; no source discovery. |
+| `UNSUPPORTED_ROUTE` | error | Path variant is not supported; no route guessing. |
+| `UNSUPPORTED_PROTOCOL` / `CREDENTIAL_URL` | error | The cached reference is not HTTP(S) or carries credentials; refused before launch. |
+| `LIVE_URL_UNAVAILABLE` / `REFERENCE_UNAVAILABLE` | inconclusive/error | The cached site has no usable live reference URL. |
+| `REGION_NOT_FOUND` | error | No stored region has that id. |
+| `AMBIGUOUS_ALIAS` | inconclusive | A highlight resolves to several regions; candidates are returned. |
+| `ARTIFACT_MISSING` / `ARTIFACT_CORRUPT` | inconclusive | Stored bytes are absent or fail their hash; nothing is regenerated or fetched during a read. |
+| `ROBOTS_DISALLOWED` | blocked | Refused by robots; no bypass. |
+| `ROBOTS_UNAVAILABLE` | inconclusive | Robots could not be evaluated; collection is deferred. |
+| `DESTINATION_CHANGED` / `BLOCKED_DESTINATION` / `PRIVATE_DESTINATION` / `HTTP_BLOCKED` | blocked | Destination or response is not eligible; no retry through the block. |
+| `POLICY_BLOCKED` | blocked | Publication refused by capture policy. |
+| `NAVIGATION_FAILED` | inconclusive | Main navigation failed; the previous head is preserved. |
+| `CAPTURE_TIMEOUT` / `CAPTURE_DEADLINE_EXCEEDED` | inconclusive, retryable | Budget exhausted; publish only if minimum usability holds. |
+| `OVERLAY_UNRESOLVED` | partial/inconclusive | A blocking overlay was not resolved; underlying content is not assumed observed. |
+| `PARSER_DRIFT` | inconclusive | A parse no longer matches the expected shape; no replacement projection. |
+| `TARGET_CHANGED` | inconclusive | The page destination changed during collection; nothing is published and the previous head is preserved. |
+| `STATE_TARGET_MISSING` / `STATE_TARGET_AMBIGUOUS` / `STATE_TARGET_CHANGED` | limitation | A state target is missing, ambiguous or changed; that request is inconclusive with this limitation and there is no nearest-element fallback. |
+| `CAPTURE_BUSY` | error, retryable | Another capture owns the per-cache lease. |
+| `CAPTURE_LEASE_UNAVAILABLE` / `CAPTURE_LEASE_CORRUPT` | error, retryable | The lease cannot be acquired or read. |
+| `PUBLICATION_BUSY` → `DATABASE_BUSY` | error, retryable | Another publication holds the cache; bounded retry only. |
+| `FTS_UNAVAILABLE` | error for text queries | Facet-only search remains available. |
+| `SEARCH_NOT_READY` | error, retryable | The search snapshot or projection is not ready; retry. |
+| `CURSOR_STALE` / `CURSOR_EXPIRED` / `CURSOR_QUERY_MISMATCH` / `CURSOR_INVALID` | error | Restart from page one with the original query. |
+| `RIGHTS_REQUIRED` | partial/error | Copies are excluded; references are retained where possible. |
+| `PACK_CORRUPT` | error | The existing pack is invalid and is preserved, never overwritten. |
+| `PACK_STALE` | error | A selected capture, region, artifact or claim changed before publication. |
+| `STORAGE_LIMIT` | partial/error | Writes stop; prior valid data is preserved. |
+| `SCHEMA_TOO_NEW` | error | The cache schema is newer than this binary; Atlas access is disabled and files are preserved. |
+| `CAPTURE_FAILED` / `EXPORT_FAILED` / `NOT_PUBLISHED` | error/partial | The operation did not produce a publishable result; `published` states the truth. |
+
+Publication evidence checks can also surface `ATTEMPT_NOT_PUBLISHABLE`, `NO_CLAIMS`, `DUPLICATE_REGION_KEY`, `INVALID_GEOMETRY`, `NO_SECTION_REGIONS`, `CLAIM_REGION_MISSING`, `PACK_OWNERSHIP_MISMATCH`, `EVIDENCE_UNRESOLVED` and `STALE_OBSERVATION`. A blocked or failed publication publishes nothing and preserves the previous head. Evidence-pack exclusion reasons appear in `excludedArtifacts[].reason`: `RIGHTS_NOT_ASSERTED`, `RIGHTS_UNKNOWN`, `RIGHTS_SCOPE`, `RIGHTS_REFERENCE`, `ARTIFACT_NOT_READY`, `ARTIFACT_INVALID`, `POLICY_UNKNOWN` and `ROBOTS_OR_DESTINATION_REFUSED`, alongside the size and count limits.
+
+Collector coverage limitations — written to `coverage.limitations` and, for capture, also into envelope `warnings` — include `DOM_NODE_LIMIT`, `SECTION_TRUNCATION`, `SECTION_EXCLUDED`, `NO_SECTIONS`, `SCREENSHOT_LIMIT`, `SCREENSHOT_FAILED`, `SCREENSHOT_EMPTY`, `SCREENSHOT_INVALID`, `SCREENSHOTS_MISSING`, `CHECKPOINT_LIMIT`, `CHECKPOINT_EVIDENCE_LIMIT`, `CHECKPOINT_SECTION_TRUNCATION`, `CHECKPOINT_SECTION_EXCLUDED`, `CHECKPOINT_OBSERVATION_MISSING`, `SCROLL_ROOT_UNKNOWN`, `SCROLL_OFFSET_MISMATCH`, `REDIRECT_LIMIT`, `RESOURCE_NETWORK_ERROR`, `COMPONENT_CAP` (or `COMPONENT_CAP:<dropped>`), `COMPONENT_PACK_CAP`, `COMPONENT_PACK_TRUNCATED`, `COMPONENTS_NOT_COLLECTED`, `POLICY_BLOCKED`, `BLOCKED_DESTINATION` and `CAPTURE_DEADLINE_EXCEEDED`. State limitations are `STATE_TARGET_MISSING`, `STATE_TARGET_AMBIGUOUS`, `STATE_TARGET_CHANGED`, `STATE_TARGET_FULL_VIEWPORT`, `STATE_HOVER_NOT_ACTIVE`, `STATE_FOCUS_UNCONFIRMED`, `STATE_FOCUS_NOT_VISIBLE`, `STATE_NO_CHANGE`, `STATE_PROBE_FAILED`, `STATE_DEADLINE_EXCEEDED`, `STATE_RESET_FAILED` and `STATE_ARTIFACT_LIMIT`. Legacy import adds `LEGACY_DETAIL_MISSING`, `LEGACY_ELEMENTS_MISSING`, `LEGACY_ELEMENTS_MALFORMED`, `LEGACY_GALLERY_NO_SOURCE_ARTIFACT` and `MISSING_TIMESTAMP`. Candidate-mode search also adds the `CLASSIFICATION_AMBIGUOUS` warning; it is a search warning, not a collector limitation.
+
+### Unsupported operations
+
+`get_atlas` taxonomy reports this list explicitly; it is part of the contract, not a roadmap:
+
+- `state.click` — click, type, submit, drag, keyboard navigation and route transitions are never performed.
+- `accepted.inferred_component_type` — card, drawer, carousel, icon_button and tooltip stay candidate-only until human labels exist.
+- `cross_site.combination` — scopes are same region, same page or same site; traits never combine across regions or sites.
+- `asset.download` — search, retrieval and export never fetch missing third-party assets.
+- `color.similarity` — no colour-similarity search.
+- `vector.semantic_search` — SQLite FTS5 plus explicit predicates; no embeddings.
+- `gallery.fetch` — highlights resolve through stored aliases only; the legacy gallery is not fetched.
+- `arbitrary_url.capture` — capture accepts a known slug and a path on its known live origin.
+- `reduced_motion.comparison` — not collected in this release.
+
+Also unsupported: human classification editing, arbitrary export paths, pack overwrite, public sharing or publishing, background capture queues, automatic capture after import, and treating an observed subset as an official brand system.
+
+### Examples
+
+The examples are abridged to the fields that matter. `…` marks a clipped list, `<TypeName>` stands for one element of that contract type, and ids are shown as `<64-hex>`; none of these placeholders is a literal value. Field names follow the Phase 6 tool contract; where the specification describes content rather than key names, that contract is the reference.
+
+#### `search_atlas`
+
+Request:
+
+```json
+{
+  "kind": "sections",
+  "predicates": [
+    { "field": "section.purpose", "values": ["hero"] },
+    { "field": "region.landmark", "values": ["main"] }
+  ],
+  "scope": "region",
+  "viewport": "desktop",
+  "state": "default",
+  "facets": ["region.tag"],
+  "limit": 8
+}
+```
+
+Response (abridged):
+
+```json
+{
+  "schemaVersion": "awwwards-atlas-v1",
+  "operation": "search_atlas",
+  "status": "ok",
+  "data": {
+    "outcome": "matches",
+    "revision": 42,
+    "asOf": 1783000000000,
+    "interpreted": {
+      "kind": "sections",
+      "predicates": [
+        { "field": "section.purpose", "values": ["hero"] },
+        { "field": "region.landmark", "values": ["main"] }
+      ],
+      "scope": "region",
+      "viewport": "desktop",
+      "state": "default",
+      "evidenceMode": "candidate",
+      "maxAgeDays": 30,
+      "groupBy": "instance",
+      "sort": "relevance",
+      "facets": ["region.tag"],
+      "limit": 8
+    },
+    "results": [
+      {
+        "regionId": "<64-hex>",
+        "captureId": "<64-hex>",
+        "pageId": "<64-hex>",
+        "siteSlug": "example-site",
+        "siteTitle": "Example Site",
+        "sitePublicUrl": "https://example.com/",
+        "sourceUrl": "https://www.awwwards.com/sites/example-site",
+        "pageUrl": "https://example.com/",
+        "pagePath": "/",
+        "kind": "section",
+        "componentType": null,
+        "primaryLabel": "hero",
+        "viewport": "desktop",
+        "state": "default",
+        "observedAt": 1782900000000,
+        "freshness": "fresh",
+        "matchedSampleKey": "default:0",
+        "explanations": [
+          {
+            "field": "section.purpose",
+            "values": ["hero"],
+            "supportingRegionIds": ["<64-hex>"],
+            "sampleKeys": ["default:0"],
+            "truncated": false
+          }
+        ],
+        "explanationsTruncated": false,
+        "claims": [
+          {
+            "field": "section.purpose",
+            "value": "hero",
+            "classification": "inferred",
+            "decision": "candidate",
+            "basis": "rule_derivation",
+            "sampleKey": "default:0"
+          }
+        ],
+        "screenshotKeys": ["desktop:0"],
+        "screenshotsTruncated": false,
+        "artifacts": [
+          {
+            "kind": "screenshot",
+            "storagePath": "atlas/artifacts/<sha256>.png",
+            "sha256": "<sha256>",
+            "bytes": 182000,
+            "mimeType": "image/png"
+          }
+        ],
+        "coverage": { "status": "complete", "collected": 1, "excluded": 0, "limitations": [] },
+        "patternKey": null,
+        "group": null,
+        "candidateOnly": true
+      }
+    ],
+    "total": 1,
+    "countUnit": "region_instance",
+    "nextCursor": null,
+    "facets": [
+      {
+        "field": "region.tag",
+        "disjunctive": true,
+        "countUnit": "region_instance",
+        "values": [{ "value": "section", "count": 1, "selected": false }]
+      }
+    ],
+    "corpus": {
+      "sites": 1,
+      "pages": 1,
+      "captures": 1,
+      "note": "locally cached subset",
+      "catalogueTotal": null
+    },
+    "candidateOnly": true,
+    "candidateNote": "Candidate labels are hints, not accepted evidence.",
+    "responseTruncated": false
+  },
+  "coverage": { "status": "complete", "collected": 1, "excluded": 0, "limitations": [] },
+  "warnings": ["CLASSIFICATION_AMBIGUOUS"],
+  "error": null
+}
+```
+
+To page, resend the same request with `"cursor": "<nextCursor>"`. A changed query, viewport, scope, state or evidence mode with an old cursor returns `CURSOR_QUERY_MISMATCH`.
+
+#### `get_atlas` — status
+
+```json
+{ "kind": "status" }
+```
+
+```json
+{
+  "schemaVersion": "awwwards-atlas-v1",
+  "operation": "get_atlas.status",
+  "status": "ok",
+  "data": {
+    "enabled": true,
+    "available": true,
+    "versions": {
+      "schema": 10,
+      "fts": 4,
+      "vocabulary": "atlas-vocabulary-4",
+      "classifier": "atlas-classifier-2",
+      "currentSchema": 10,
+      "currentFts": 4,
+      "currentVocabulary": "atlas-vocabulary-4",
+      "currentClassifier": "atlas-classifier-2"
+    },
+    "revision": 42,
+    "updatedAt": 1783000000000,
+    "counts": {
+      "sources": { "awwwardsItem": 120, "legacyGallery": 0, "livePage": 18 },
+      "regions": { "page": 18, "highlight": 0, "section": 612, "component": 240 },
+      "captures": {
+        "running": 0,
+        "complete": 16,
+        "partial": 2,
+        "unknown": 0,
+        "blocked": 0,
+        "failed": 0,
+        "abandoned": 0
+      }
+    },
+    "liveCaptures": { "fresh": 15, "stale": 3, "total": 18 },
+    "latestPublication": {
+      "publishedAt": 1782990000000,
+      "pageId": "<64-hex>",
+      "captureId": "<64-hex>",
+      "profileKey": "live-desktop"
+    },
+    "latestFailedAttempt": null,
+    "lease": { "state": "free", "expiresAt": null, "ttlSeconds": null },
+    "artifacts": { "records": 96, "distinctHashes": 91, "bytes": 48234496, "readyRecords": 94 },
+    "fts": { "available": true, "version": 4 },
+    "coverageNote": "Locally cached subset only; live-capture freshness is 30 days. Counts describe this cache, not all of Awwwards."
+  },
+  "coverage": { "status": "complete", "collected": 18, "excluded": 0, "limitations": [] },
+  "warnings": [],
+  "error": null
+}
+```
+
+Version numbers in this example are from the current build; read them at runtime instead of pinning them.
+
+#### `get_atlas` — taxonomy
+
+```json
+{ "kind": "taxonomy" }
+```
+
+The data is large; this is the shape of one field (abridged):
+
+```json
+{
+  "registryVersion": "atlas-vocabulary-4",
+  "fields": [
+    {
+      "field": "section.purpose",
+      "support": "supported",
+      "provider": null,
+      "values": [
+        {
+          "value": "hero",
+          "label": "Hero",
+          "support": "supported",
+          "enabled": true,
+          "searchable": true,
+          "permittedBases": ["rule_derivation", "human_review"],
+          "aliases": [],
+          "ruleIds": ["section.hero"]
+        }
+      ]
+    }
+  ],
+  "scopes": ["region", "page", "site"],
+  "states": ["default", "hover", "focus"],
+  "evidenceModes": ["accepted", "observed_only", "candidate"],
+  "groupBy": ["instance", "pattern"],
+  "unsupported": [
+    {
+      "operation": "state.click",
+      "reason": "Click, type, submit, drag, keyboard navigation and route transitions are never performed."
+    }
+  ]
+}
+```
+
+#### `get_atlas` — region
+
+```json
+{ "kind": "region", "regionId": "<64-hex>" }
+```
+
+Response data (abridged; arrays are capped as described above):
+
+```json
+{
+  "region": {
+    "regionId": "<64-hex>",
+    "captureId": "<64-hex>",
+    "pageId": "<64-hex>",
+    "parentId": null,
+    "kind": "section",
+    "ordinal": 2,
+    "tag": "section",
+    "role": "region",
+    "landmark": "main",
+    "selector": "main > section.hero",
+    "heading": "Build faster",
+    "textExcerpt": "…",
+    "rawTitle": null,
+    "primaryLabel": "hero",
+    "patternKey": null,
+    "fingerprint": "<hash>",
+    "coverage": { "status": "complete", "collected": 1, "excluded": 0, "limitations": [] },
+    "sampleKeys": ["default:0"],
+    "geometry": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+    "viewport": "desktop"
+  },
+  "capture": {
+    "captureId": "<64-hex>",
+    "pageId": "<64-hex>",
+    "siteSlug": "example-site",
+    "sourceKind": "live_page",
+    "profileKey": "live-desktop",
+    "status": "complete",
+    "startedAt": 1782980000000,
+    "finishedAt": 1782980042000,
+    "observedAt": 1782980000000,
+    "lastConfirmedAt": 1782980042000,
+    "sourceFetchedAt": 1782900000000,
+    "configHash": "<hash>",
+    "extractorVersion": "atlas-extractor-3",
+    "classifierVersion": "atlas-classifier-2",
+    "policy": { "robots": "allowed", "publicOnly": false },
+    "conditions": {
+      "browserVersion": "…",
+      "dpr": 1,
+      "reducedMotion": "no-preference",
+      "viewport": "desktop",
+      "requestedStates": []
+    },
+    "source": {
+      "publicUrl": "https://example.com/",
+      "path": "/",
+      "requestedUrl": "https://example.com/"
+    }
+  },
+  "claims": [
+    {
+      "claimId": "<64-hex>",
+      "field": "section.purpose",
+      "value": "hero",
+      "sampleKey": "default:0",
+      "state": "default",
+      "classification": "inferred",
+      "basis": "rule_derivation",
+      "decision": "candidate",
+      "ruleId": "section.hero",
+      "ruleVersion": "1",
+      "evidence": [
+        { "artifactId": "<64-hex>", "pointer": "/regions/2", "sampleKey": "default:0" }
+      ],
+      "limitations": []
+    }
+  ],
+  "claimsTruncated": false,
+  "artifacts": [
+    {
+      "artifactId": "<64-hex>",
+      "captureId": "<64-hex>",
+      "regionId": "<64-hex>",
+      "kind": "screenshot",
+      "storagePath": "atlas/artifacts/<sha256>.png",
+      "sha256": "<sha256>",
+      "bytes": 182000,
+      "mimeType": "image/png",
+      "state": "ready",
+      "available": true,
+      "availabilityNote": null
+    }
+  ],
+  "artifactsTruncated": false,
+  "parent": null,
+  "children": [],
+  "childrenTruncated": false,
+  "head": { "current": true, "headCaptureId": "<64-hex>", "publishedAt": 1782980042000 }
+}
+```
+
+The raw component tree is never embedded. Use the `component_pack` artifact's `storagePath` and `sha256` to read it locally.
+
+#### `get_atlas` — highlight
+
+Ambiguous id:
+
+```json
+{ "kind": "highlight", "elementId": "example-legacy-slug" }
+```
+
+```json
+{
+  "schemaVersion": "awwwards-atlas-v1",
+  "operation": "get_atlas.highlight",
+  "status": "inconclusive",
+  "data": {
+    "elementId": "example-legacy-slug",
+    "status": "ambiguous",
+    "aliasKind": "legacy_element_slug",
+    "regionIds": ["<64-hex>", "<64-hex>"],
+    "region": null
+  },
+  "coverage": { "status": "unknown", "collected": 0, "excluded": 0, "limitations": [] },
+  "warnings": [],
+  "error": {
+    "code": "AMBIGUOUS_ALIAS",
+    "message": "The element id resolves to more than one Atlas region; choose one of the returned region ids",
+    "retryable": false
+  }
+}
+```
+
+A single resolution returns `status: "ok"` with `data.status: "resolved"` and `data.region` filled by the `get_atlas` region shape. An unknown id returns `inconclusive` with `data.status: "not_found"`, `regionIds: []` and `error: null`.
+
+#### `capture_atlas`
+
+Request:
+
+```json
+{
+  "slug": "example-site",
+  "viewport": "mobile",
+  "components": true,
+  "states": [
+    { "action": "hover", "targetRegionId": "<64-hex>" }
+  ],
+  "refresh": false
+}
+```
+
+Published response (abridged):
+
+```json
+{
+  "schemaVersion": "awwwards-atlas-v1",
+  "operation": "capture_atlas",
+  "status": "ok",
+  "data": {
+    "captureId": "<64-hex>",
+    "attemptId": "<uuid>",
+    "pageId": "<64-hex>",
+    "cached": false,
+    "published": true,
+    "previousHeadId": "<64-hex>",
+    "viewport": "mobile",
+    "sections": [
+      {
+        "regionId": "<64-hex>",
+        "kind": "section",
+        "ordinal": 0,
+        "tag": "header",
+        "role": "banner",
+        "landmark": "header",
+        "selector": "body > header",
+        "heading": "",
+        "primaryLabel": "header",
+        "type": null,
+        "patternKey": null,
+        "rect": { "x": 0, "y": 0, "width": 390, "height": 72 },
+        "visible": true,
+        "state": null,
+        "coverage": { "status": "complete", "collected": 1, "excluded": 0, "limitations": [] }
+      }
+    ],
+    "components": ["<RegionSummary>"],
+    "artifacts": ["<ArtifactAvailability>"],
+    "capabilityCoverage": {
+      "geometry": { "status": "complete", "collected": 18, "excluded": 0, "limitations": [] },
+      "sections": { "status": "complete", "collected": 7, "excluded": 0, "limitations": [] },
+      "components": { "status": "complete", "collected": 12, "excluded": 0, "limitations": [] },
+      "screenshots": { "status": "complete", "collected": 8, "excluded": 0, "limitations": [] },
+      "tokens": { "status": "unknown", "collected": 0, "excluded": 0, "limitations": [] },
+      "states": { "status": "complete", "collected": 1, "excluded": 0, "limitations": [] },
+      "motion": { "status": "unknown", "collected": 0, "excluded": 0, "limitations": [] },
+      "rendering": { "status": "unknown", "collected": 0, "excluded": 0, "limitations": [] },
+      "policy": { "status": "complete", "collected": 0, "excluded": 0, "limitations": [] }
+    },
+    "omitted": { "sections": 0, "components": 0, "screenshots": 0, "componentPacks": 0 }
+  },
+  "coverage": { "status": "complete", "collected": 19, "excluded": 0, "limitations": [] },
+  "warnings": [],
+  "error": null
+}
+```
+
+Unpublished partial result: `status: "partial"`, `published: false`, `cached: false`, `captureId: ""` when nothing was stored, and the previous head untouched. A cached reuse returns `cached: true`, `published: false`, `previousHeadId: null` and the stored summaries.
+
+#### `export_evidence_pack`
+
+Request:
+
+```json
+{
+  "regionIds": ["<64-hex>", "<64-hex>"],
+  "goal": "Rebuild the hero and pricing sections in the same visual language",
+  "includeMedia": "permitted",
+  "rightsAssertions": [
+    {
+      "artifactId": "<64-hex>",
+      "rights": {
+        "status": "licensed",
+        "reference": "licence-ref-2026-11",
+        "recordedAt": 1783000000000,
+        "assertedBy": "caller",
+        "scope": "export_copy"
+      }
+    }
+  ]
+}
+```
+
+Response (abridged):
+
+```json
+{
+  "schemaVersion": "awwwards-atlas-v1",
+  "operation": "export_evidence_pack",
+  "status": "ok",
+  "data": {
+    "packId": "<64-hex>",
+    "directory": "<cache>/atlas/evidence-packs/<packId>",
+    "manifestPath": "<cache>/atlas/evidence-packs/<packId>/manifest.json",
+    "manifestHash": "<64-hex>",
+    "files": [
+      { "path": "design-evidence.json", "sha256": "<64-hex>", "bytes": 22100, "mimeType": "application/json" },
+      { "path": "DESIGN.md", "sha256": "<64-hex>", "bytes": 6100, "mimeType": "text/markdown" },
+      { "path": "artifacts/<artifactId>-<sha256>.png", "sha256": "<64-hex>", "bytes": 182000, "mimeType": "image/png" }
+    ],
+    "selectedRegionIds": ["<64-hex>", "<64-hex>"],
+    "excludedArtifacts": [
+      { "artifactId": "<64-hex>", "reason": "RIGHTS_UNKNOWN" }
+    ],
+    "validation": { "manifest": "pass", "claims": "pass", "hashes": "pass", "designMd": "pass" },
+    "cached": false
+  },
+  "coverage": { "status": "complete", "collected": 3, "excluded": 1, "limitations": [] },
+  "warnings": [],
+  "error": null
+}
+```
+
+Files with no supporting evidence are omitted and listed in the manifest; no placeholder claims are written.
+
+#### v2 calls
+
+```text
+{ "request": { "kind": "sections", "predicates": [{ "field": "section.purpose", "values": ["pricing"] }], "limit": 4 } }
+{ "request": { "kind": "components", "predicates": [{ "field": "component.type", "values": ["card"] }], "groupBy": "pattern", "limit": 4 } }
+{ "request": { "kind": "atlas_region", "regionId": "<64-hex>" } }
+{ "request": { "kind": "atlas_highlight", "elementId": "example-legacy-slug" } }
+{ "request": { "kind": "atlas_taxonomy" } }
+{ "request": { "kind": "atlas_status" } }
+{ "request": { "kind": "atlas", "slug": "example-site", "viewport": "desktop", "refresh": false } }
+{ "regionIds": ["<64-hex>"], "goal": "Local reference for a pricing-section rebuild" }
+```
+
+The first two are `search_references`, the next three `get_reference`, the sixth `get_index`, the seventh `capture_page`, and the last is the flat `export_evidence_pack`. Each returns its Atlas envelope.
+
+#### CLI
+
+```bash
+# Project the existing cache; no capture afterwards.
+awwwards-index --atlas import
+
+# One viewport, or desktop then mobile sequentially.
+awwwards-index --atlas capture --slug example-site --viewport desktop
+awwwards-index --atlas capture --slug example-site --path /pricing --viewport both
+
+# Offline maintenance.
+awwwards-index --atlas reindex
+awwwards-index --atlas verify
+
+# Dry-run first; --apply deletes after explicit authorisation.
+awwwards-index --atlas prune --older-than-days 30
+awwwards-index --atlas prune --older-than-days 30 --apply
+```
+
+Every command above requires `AWWWARDS_MCP_ATLAS=1`. From a local checkout, use `npm run index -- --atlas …`; the arguments after `--` are identical.
+
 ## Phase 3 search
 
-Implemented locally, with no MCP tool registration:
+Phase 3 implemented the search core locally; Phase 6 exposes it through `search_atlas` and the v2 `search_references` branches:
 
 - Section predicates over `section.purpose`, `region.kind`, `region.tag`, `region.role` and `region.landmark`
 - `region.kind` for `kind: "sections"` accepts only `section`; `page`, `highlight` and `component` are rejected with `UNSUPPORTED_PREDICATE`, so a section anchor can never match through a kind the corpus does not publish
@@ -68,7 +881,7 @@ Not implemented in Phase 4A/4B:
 
 ## Phase 4A component search
 
-Implemented locally, with no MCP tool registration:
+Phase 4A implemented component search locally; Phase 6 exposes it through `search_atlas kind:"components"`:
 
 - `kind: "components"` anchors only on `atlas_regions.kind = 'component'`; a section in the same capture is never returned, even with no predicate or query
 - `component.type` and `context.section_purpose` predicates, plus `region.kind = component` as a no-op
@@ -94,7 +907,7 @@ Evidence honesty:
 
 ## Phase 4B explicit states
 
-Implemented locally, with no MCP tool registration:
+Phase 4B implemented explicit states locally; Phase 6 exposes them through `search_atlas state:"hover"|"focus"` and the `capture_atlas` states input:
 
 - `collectAtlasPage({ states })` accepts at most **three** `{ action: "hover" | "focus", targetRegionId }` requests. A fourth, a duplicate target/action pair, an unknown action, a target from another page or viewport, a non-section/component target, a target that is not part of the current active head, or a component target without a verifiable persisted type **and** `patternKey` is rejected with `INVALID_STATE_REQUEST` before the browser launches. A missing `patternKey` is never re-derived from the request.
 - State capture runs after the default scan, checkpoints and component classification, inside the containing capture. It does **not** create a separate capture, head or revision of its own: the state samples and claims are part of that capture, and publishing it replaces the active head and bumps the revision exactly like any other capture.
@@ -114,7 +927,7 @@ Schema v10 adds the additive `atlas_claims.state` column (existing rows default 
 
 ## Phase 5 evidence packs
 
-Implemented locally, with no MCP tool registration and no change to the 41/13/15 surfaces or the schema (v10 already has `atlas_packs`):
+Phase 5 implemented this as an internal export path and left the surfaces unchanged; Phase 6 adds the `export_evidence_pack` tool. No schema change was needed (v10 already has `atlas_packs`):
 
 - Public internal interfaces: `buildEvidencePack(input, store)`, `validateEvidencePack(path)`, `renderDesignMd(selection)` and `renderRebuildHandoff(selection, goal)`.
 - Input: `siteSlug`, a required bounded goal (1,000 characters), 1-200 region ids, optional capture ids, `inclusionMode: "references" | "permitted"` (default `references`) and up to 24 rights assertions.
@@ -133,9 +946,11 @@ Implemented locally, with no MCP tool registration and no change to the 41/13/15
 - `validateEvidencePack` is an independent integrity pass: it requires every required file and JSON document, validates every 12.1 manifest field and nested type (versions, captures and conditions, observation dates, coverage, rights, omitted families, artifact decisions and references), verifies every manifest hash and size, rejects unlisted files, path traversal and symlinks, checks that claim source region/capture ids are non-empty strings, that every source and derived claim's capture and viewport equal its selected region, validates manifest, selection and components artifact paths, re-derives the pack id from the selection artifact and compares it with the manifest and directory, requires multiset equality (duplicates are never masked) between the manifest and selection (regions, captures, claims, goal, site and inclusion mode) and compares each manifest capture's complete record (viewport, browser, DPR, observation dates, conditions, coverage) against its selection capture, resolves every claim pointer against `artifacts/selection.json` only, compares its value, checks claim ids against the manifest and generated documents, validates the DESIGN.md front matter and exact H2 order, rejects base64 images and strong template markers (`{{`, `}}`, `REPLACE_ME`, `lorem ipsum`, `TBD:`, `TODO:`) in prose without masking the goal, observed values or generated code spans, enforces document and copied-artifact caps, stats every listed file and refuses one over the applicable cap before reading it, and verifies included artifacts and capture hashes. It also requires exact exporter/vocabulary/classifier/schema/FTS versions and known extractor/classifier versions per capture, a supported site attribution and exact file MIME types, binds every `artifacts.included` copy to both its selection media decision and its selection reference (capture id, kind, hash, size, MIME and ready state) with the exact `artifacts/<artifactId>-<sha256><ext>` path, requires each selection media `storagePath` to equal its reference `storagePath`, and requires a qualifying `owned`/`licensed`/`permission` `export_copy` rights record under an allowed capture policy. It re-derives the section and component summaries from the selected regions and claims and rejects a summary whose type, classification, pattern key, section linkage, geometry, styles, claims or state counts disagree (`SELECTION_MISMATCH`). It re-renders every generated document from `artifacts/selection.json` with the same renderers and byte-compares `artifacts/selection.json`, `DESIGN.md`, `tokens.json`, `tokens.css`, `components.json`, `brief.md`, `rebuild-handoff.md` and `design-evidence.json`, so appended CSS, prose or formatting returns `DOCUMENT_RENDER_MISMATCH`. Manifest coverage, limitations, omitted families, excluded artifacts and artifact references are compared with the selection and with recomputed coverage/omitted/token decisions (`MANIFEST_DECISION_MISMATCH`; objects are compared canonically so key order never changes validity), and `createdAt` must be an integer millisecond timestamp in the JS Date range; the creation clock is advisory and excluded from the `atlas_packs.manifest_hash` pin, and it is not range-derived from observation dates because source evidence may be timestamped after the export. It checks generated token and `tokens.css` values against claim values and pointers, checks DESIGN.md color/font/geometry/style/material values against claims (including unclaimed elevation), and requires every claim's classification/source/method/sampleKey to match the selection claim. Malformed nested structures fail with an error code instead of throwing.
 - The spec's 17.2 `test/atlas-export.test.ts` suite is implemented as `test/atlas-evidence-pack.test.ts` (plus `test/helpers/atlas-pack-fixture.ts`); no separate export suite exists.
 - Policy refusal is fail-closed: only an explicit affirmative policy (`robots: "allowed"`, `status: "allowed"` or `publicOnly: true`) allows a copy; a missing, empty or malformed capture `policy_json` yields `POLICY_UNKNOWN`, and no permission assertion can override either refusal.
-- Caps: 200 selected regions, 1,000-character goal, 24 rights assertions, 24 copied artifacts, 8 MiB per artifact, 32 MiB total copies, 24 KiB DESIGN.md, 256 KiB design-evidence/sidecar and other documents, 1 MiB selection artifact. These are enforced before the final directory is published.
+- Caps: 200 selected regions, 1,000-character goal, 24 rights assertions, 24 copied artifacts, 8 MiB per artifact, 32 MiB total copies (the accepted release cap; spec §16 allows 64 MiB), 24 KiB DESIGN.md, 256 KiB design-evidence/sidecar and other documents, 1 MiB selection artifact. These are enforced before the final directory is published.
 - No network: build and validation read only the SQLite cache and local artifact files; they never refresh captures, fetch assets or resolve a URL.
-- Known gaps: this phase is an internal export path, not an MCP tool or CLI command; `permitted` mode cannot acquire missing payloads or override robots/destination refusals; raw `external_media` artifacts are never copied; elevation/border/motion values are omitted unless a future capture stores default-state evidence; component styles depend on the stored initial scan and are omitted when the scan artifact is unavailable; selected regions may span multiple active captures/pages of one site (narrowed by an optional `captureIds` filter), and the documents separate them by capture. A process killed mid-write can leave a `.tmp-*` directory (never a final pack); a database failure after the atomic rename leaves a complete but unregistered pack that the next build adopts and registers.
+- Known gaps: Phase 5 shipped as an internal export path; Phase 6A exposes it as a tool. `permitted` mode cannot acquire missing payloads or override robots/destination refusals; raw `external_media` artifacts are never copied; elevation/border/motion values are omitted unless a future capture stores default-state evidence; component styles depend on the stored initial scan and are omitted when the scan artifact is unavailable; selected regions may span multiple active captures/pages of one site (narrowed by an optional `captureIds` filter), and the documents separate them by capture. A process killed mid-write can leave a `.tmp-*` directory (never a final pack); a database failure after the atomic rename leaves a complete but unregistered pack that the next build adopts and registers.
+
+## Search
 
 Search pushes eligibility, predicate matching, ordering, pagination, facet counting and the requested anchor page into SQLite. The JavaScript layer receives only the requested page of anchors, its page-capped witnesses, claims and artifact descriptors. The query path is **read-only**.
 
@@ -206,16 +1021,41 @@ Residual risks:
 - The immutable fallback is a snapshot read by construction: it ignores any `-wal` or `-journal` that appears after the sidecar check and assumes the file cannot change. That is sound for read-only media and ACL-denied directories; if a writer can still reach the same path, readers keep the last checkpointed content until they reconnect. The fallback refuses whenever a sidecar is present at open, and is never used on a normal writable cache.
 - Immutable media caveat: the connection reports `journal_mode = delete`, takes no locks and rejects writes with `SQLITE_READONLY`; replacing the database file behind an open handle is not observed. If the platform's SQLite build cannot open URI filenames, the fallback fails and search returns the typed `SEARCH_NOT_READY`.
 
+## Phase 6B CLI maintenance
+
+The existing `awwwards-index` executable exposes explicit Atlas actions. There is no new binary, and no automatic capture after an import.
+
+```bash
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas import
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas capture --slug <slug> [--path /] --viewport desktop|mobile|both
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas reindex
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas verify
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas prune --older-than-days <N>
+AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas prune --older-than-days <N> --apply
+```
+
+- Every action requires `AWWWARDS_MCP_ATLAS=1`. A missing flag or a malformed argument exits `2` before the cache directory, cache database or network client is created.
+- Atlas actions are mutually exclusive with the normal site crawl. `--elements` keeps its existing refusal before cache construction.
+- `capture` resolves the cached Awwwards slug to its known live origin, refuses arbitrary URLs, and never follows a failed target into the crawler. The documented spec form includes `--path /`: `--slug <slug> --path / --viewport desktop|mobile|both`. `--path` may be omitted and then defaults to `/`. `--viewport both` runs the desktop capture and publish, then the mobile capture and publish, sequentially.
+- `reindex` is offline: it validates active heads, repairs the canonical FTS documents and rebuilds the revision-keyed search projections. A repaired head set or changed FTS document set bumps the revision once; a projection-only rebuild does not bump it, and an identical rerun leaves the revision unchanged.
+- `verify` is offline and reports stored artifact integrity (`missing`, size, hash, not-a-file and unsafe-path counts). It prints the artifact ID and kind of up to ten issues (plus a remaining-issue count) and exits `1` when any artifact fails. It opens the cache read-only: it does not create the cache, migrate it or touch the database. A cache without Atlas tables also exits `1`; run `--atlas import` or `--atlas reindex` first.
+- `prune` is a dry run by default. `--apply` is required to delete. It never removes active-head evidence, captures pinned by an `atlas_packs` registration, running captures, captures younger than the cutoff, or any capture with an artifact path that resolves outside `<cache>/atlas/artifacts`. Unsafe-path and non-regular-file captures are classified independently of artifact row order: a capture with both is skipped once, still counts as one unsafe capture and one not-file capture, never becomes eligible, and makes the command exit `1`. A non-regular artifact path always counts as a file failure, so `--apply` never reports that evidence as removed. Shared content-addressed files stay while any remaining artifact references them. Files are unlinked under the artifact lock, after deletion, and only when still unreferenced; publication holds the same per-path lock from artifact write or validation through COMMIT, so prune cannot unlink bytes under an uncommitted reference.
+- The artifact lock wait is bounded at 120 s, longer than a full publish (the 100k-region projection rebuild was measured at 7.6-17.7 s and runs inside the publish transaction) but not unbounded. A wait that exceeds it fails closed with `Atlas artifact lock timeout`; prune counts it as a file failure and exits `1` without unlinking, so the caller retries.
+- A prune that removes a shared file before an in-flight capture publishes makes that capture fail artifact validation instead of leaving a dangling reference. The publish pre-flight withdraws heads whose artifacts are already invalid, but the recheck inside the publish transaction returns `ARTIFACT_INVALID` without withdrawing a head; `verify` reports the missing file and the next successful publish replaces the head.
+- The unlink pass runs after COMMIT and is not transactional. A crash between the commit and the unlink leaves an unreferenced artifact file behind. `verify` walks database rows and does not report it, and no reclaim command exists; the file is inert because no row references it, and a later identical artifact write reuses the same content-addressed path.
+- Output is counts, typed codes, verify artifact IDs/kinds and redacted failure messages; stack traces and absolute cache paths are never printed.
+
 ## Next phase
 
-Phase 5 evidence packs are implemented locally; the remaining Phase 5 work is review and release qualification, not new export behavior:
+Phase 6 tool surfaces, v2 branches and Atlas CLI actions are implemented and gated behind `AWWWARDS_MCP_ATLAS=1`. Remaining Phase 6 work is release qualification, not new behaviour:
 
-- optional CLI entry point for local pack creation (no MCP tool until Phase 6)
+- installed-artifact and browser qualification reports
+- optional CLI entry point for local pack creation (not implemented; no pack CLI exists, and `export_evidence_pack` is the only pack surface)
 - human review of generated DESIGN.md/brief/handoff from a permitted pilot pack
 - real-page density and rights checks on the held-out corpus
 - component-pack and screenshot copy policy sign-off before any public distribution
 
-Phase 6 remains the MCP surface: `get_atlas`, `capture_atlas`, `export_evidence_pack` and the v2 branches. Until then the surfaces stay 41 full / 13 core / 15 v2.
+Until the flag is enabled, the surfaces stay 41 full / 13 core / 15 v2. With `AWWWARDS_MCP_ATLAS=1` they are 45 / 13 / 16.
 
 ## Verification
 
@@ -223,7 +1063,11 @@ Phase 6 remains the MCP surface: `get_atlas`, `capture_atlas`, `export_evidence_
 npm run typecheck
 npm test -- --maxWorkers=2
 npm run build
+npm run protocol:smoke
+AWWWARDS_MCP_ATLAS=1 npm run protocol:smoke
 npm run atlas:search:bench
+npx vitest run test/atlas-tool-surface.test.ts test/atlas-tool-contracts.test.ts test/atlas-tool-capture.test.ts
+npx vitest run test/atlas-docs.test.ts
 npx vitest run test/atlas-evidence-pack.test.ts
 npx vitest run test/atlas-collector.chromium.test.ts
 ```

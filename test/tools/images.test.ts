@@ -213,7 +213,7 @@ describe("analyze_images handler", () => {
   it("is registered once with non-idempotent open-world annotations", () => {
     const regs: any[][] = [];
     const tool = (...args: any[]) => regs.push(args);
-    registerAllTools({ handlers: {} as any, tool, registerTool: tool });
+    registerAllTools({ handlers: {} as any, tool, registerTool: tool }, { atlas: false });
 
     const matches = regs.filter((args) => args[0] === "analyze_images");
     expect(matches).toHaveLength(1);

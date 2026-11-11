@@ -35,7 +35,7 @@ function registeredSchemas(): Map<string, z.ZodType> {
     record(name, inputSchema);
   const registerTool = (name: string, config: { inputSchema: unknown }) =>
     record(name, config.inputSchema);
-  registerV2Tools({ handlers: {} as never, tool, registerTool } as never);
+  registerV2Tools({ handlers: {} as never, tool, registerTool } as never, { atlas: false });
   return schemas;
 }
 
@@ -122,7 +122,7 @@ describe("v2-routing.md exact examples", () => {
         expect(args, example.tool).toHaveProperty("request");
       }
     }
-    expect(EXAMPLES).toHaveLength(44);
+    expect(EXAMPLES).toHaveLength(51);
   });
 
   it("covers every consolidated branch exactly once", () => {

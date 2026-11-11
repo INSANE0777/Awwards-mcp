@@ -34,6 +34,11 @@ export const getIndexRequestSchema = z.discriminatedUnion("kind", [
         .describe("Max rows per frequency list (technologies, colours, motion libs)"),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("atlas_status"),
+    })
+    .strict(),
 ]);
 
 export type GetIndexRequest = z.infer<typeof getIndexRequestSchema>;
@@ -55,6 +60,8 @@ export async function runGetIndex(
       return handlers.get_index_status();
     case "stats":
       return handlers.get_index_stats({ windowDays: request.windowDays, top: request.top });
+    case "atlas_status":
+      return handlers.get_atlas({ kind: "status" });
     default: {
       const exhaustive: never = request;
       throw new Error(`unhandled get_index request: ${JSON.stringify(exhaustive)}`);
@@ -65,7 +72,7 @@ export async function runGetIndex(
 export function registerGetIndex(ctx: ToolContext): void {
   ctx.tool(
     "get_index",
-    "Read the local offline index only — zero network. Choose exactly one request.kind: status (cached site count, crawl progress, last successful finish and error, lock state and freshness) or stats (aggregate all-time and windowed metrics over locally cached rows; windowDays defaults to 90 and top caps each frequency list). Aggregates only: no site slugs or titles. There is no all mode: exactly one kind per call.",
+    "Read the local offline index only — zero network. Choose exactly one request.kind: status (cached site count, crawl progress, last successful finish and error, lock state and freshness), stats (aggregate all-time and windowed metrics over locally cached rows; windowDays defaults to 90 and top caps each frequency list), or — when AWWWARDS_MCP_ATLAS=1 — atlas_status (Atlas enabled/schema/FTS/vocabulary/classifier versions, revision, source/region/capture counts, fresh/stale live captures, latest publication and failed attempt, lease, deduplicated artifact bytes and its own envelope). Aggregates only: no site slugs or titles. There is no all mode: exactly one kind per call.",
     getIndexInputSchema,
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: { request: GetIndexRequest }) =>

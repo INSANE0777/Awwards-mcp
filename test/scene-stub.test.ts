@@ -1151,7 +1151,7 @@ describe("v2 scene_stub branch", () => {
       handlers: {} as never,
       tool: ((name: string) => names.push(name)) as never,
       registerTool: ((name: string) => names.push(name)) as never,
-    });
+    }, { atlas: false });
     expect(names).toHaveLength(41);
     expect(new Set(names).size).toBe(41);
     expect(names).toContain("build_scene_stub");

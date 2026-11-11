@@ -7,12 +7,12 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/INSANE0777/Awwwards-mcp#readme",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "awwwards-mcp",
-      "version": "1.18.0",
+      "version": "1.19.0",
       "transport": {
         "type": "stdio"
       }

@@ -92,7 +92,7 @@ registers (`test/v2-examples.test.ts`). The `build_motion` evidence objects are
 abridged: take the pose grid, census and bands verbatim from `capture_page`,
 `analyze_motion` and `inspect_page`.
 
-### `search_references` (5 branches)
+### `search_references` (7 branches)
 
 ```json
 { "tool": "search_references", "arguments": { "request": { "kind": "sites" } } }
@@ -100,9 +100,11 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "search_references", "arguments": { "request": { "kind": "directory", "country": "United States" } } }
 { "tool": "search_references", "arguments": { "request": { "kind": "motion", "lib": "gsap" } } }
 { "tool": "search_references", "arguments": { "request": { "kind": "collections" } } }
+{ "tool": "search_references", "arguments": { "request": { "kind": "sections", "predicates": [{ "field": "section.purpose", "values": ["pricing"] }], "scope": "page" } } }
+{ "tool": "search_references", "arguments": { "request": { "kind": "components", "predicates": [{ "field": "component.type", "values": ["card"] }], "groupBy": "pattern" } } }
 ```
 
-### `get_reference` (5 branches)
+### `get_reference` (8 branches)
 
 ```json
 { "tool": "get_reference", "arguments": { "request": { "kind": "site_details", "slug": "l-i-s-a" } } }
@@ -110,6 +112,9 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "get_reference", "arguments": { "request": { "kind": "element", "id": "site-l-i-s-a-footer" } } }
 { "tool": "get_reference", "arguments": { "request": { "kind": "comparison", "slugs": ["l-i-s-a", "bruno-simon"] } } }
 { "tool": "get_reference", "arguments": { "request": { "kind": "collection", "slug": "brutalism" } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "atlas_region", "regionId": "0000000000000000000000000000000000000000000000000000000000000000" } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "atlas_highlight", "elementId": "site-l-i-s-a-footer" } } }
+{ "tool": "get_reference", "arguments": { "request": { "kind": "atlas_taxonomy" } } }
 ```
 
 ### `browse_awards` (4 branches)
@@ -121,11 +126,12 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "browse_awards", "arguments": { "request": { "kind": "annual_nominee", "id": "00000000-0000-4000-8000-000000000000" } } }
 ```
 
-### `get_index` (2 branches)
+### `get_index` (3 branches)
 
 ```json
 { "tool": "get_index", "arguments": { "request": { "kind": "status" } } }
 { "tool": "get_index", "arguments": { "request": { "kind": "stats", "windowDays": 30, "top": 5 } } }
+{ "tool": "get_index", "arguments": { "request": { "kind": "atlas_status" } } }
 ```
 
 ### `inspect_page` (3 branches)
@@ -144,7 +150,7 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "analyze_motion", "arguments": { "request": { "kind": "hover", "url": "https://example.com" } } }
 ```
 
-### `capture_page` (5 branches)
+### `capture_page` (6 branches)
 
 ```json
 { "tool": "capture_page", "arguments": { "request": { "kind": "screenshot", "url": "https://example.com" } } }
@@ -152,6 +158,7 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "capture_page", "arguments": { "request": { "kind": "pose", "url": "https://example.com" } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "scene", "op": "capture", "url": "https://example.com", "adapters": ["three"] } } }
 { "tool": "capture_page", "arguments": { "request": { "kind": "recording", "url": "https://example.com" } } }
+{ "tool": "capture_page", "arguments": { "request": { "kind": "atlas", "slug": "l-i-s-a", "viewport": "desktop" } } }
 ```
 
 ### `audit_page` (4 branches)
@@ -190,6 +197,11 @@ abridged: take the pose grid, census and bands verbatim from `capture_page`,
 { "tool": "verify_flow", "arguments": { "buildUrl": "http://localhost:5173", "referenceUrl": "https://example.com", "steps": [{ "action": "scroll", "y": 1200 }] } }
 { "tool": "analyze_network_capture", "arguments": { "path": "capture.har", "top": 50 } }
 ```
+
+When `AWWWARDS_MCP_ATLAS=1`, `export_evidence_pack` is added as one extra v2
+tool with the same flat input as the full-profile tool (`regionIds`, optional
+`goal`, `includeMedia`, `rightsAssertions`). The Atlas branches above return the
+Atlas envelope instead of the old branch shapes; all old branches are unchanged.
 
 ## v2 rules the 1.x workflow didn't need
 

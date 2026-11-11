@@ -1,6 +1,6 @@
 {
   "name": "awwwards-mcp",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "mcpName": "io.github.insane0777/awwwards-mcp",
   "description": "Awwwards design inspiration, screenshots, motion and scene evidence for AI agents.",
   "type": "module",
@@ -13,7 +13,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "ATLAS.md"
   ],
   "keywords": [
     "mcp",
@@ -47,6 +48,7 @@
     "smoke:browser": "node scripts/browser-smoke.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "protocol:smoke": "node scripts/protocol-smoke.mjs",
+    "qualify:installed": "node scripts/qualify-installed.mjs",
     "registry:gate": "node scripts/registry-gate.mjs",
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",

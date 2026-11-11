@@ -111,9 +111,11 @@ const handlersFor = (cache: Cache, deps: Record<string, unknown> = {}) =>
 function withProfile<T>(profile: string | undefined, fn: () => T): T {
   const savedProfile = process.env.AWWWARDS_MCP_PROFILE;
   const savedLegacy = process.env.AWARDS_MCP_PROFILE;
+  const savedAtlas = process.env.AWWWARDS_MCP_ATLAS;
   if (profile === undefined) delete process.env.AWWWARDS_MCP_PROFILE;
   else process.env.AWWWARDS_MCP_PROFILE = profile;
   delete process.env.AWARDS_MCP_PROFILE;
+  delete process.env.AWWWARDS_MCP_ATLAS;
   try {
     return fn();
   } finally {
@@ -121,6 +123,8 @@ function withProfile<T>(profile: string | undefined, fn: () => T): T {
     else process.env.AWWWARDS_MCP_PROFILE = savedProfile;
     if (savedLegacy === undefined) delete process.env.AWARDS_MCP_PROFILE;
     else process.env.AWARDS_MCP_PROFILE = savedLegacy;
+    if (savedAtlas === undefined) delete process.env.AWWWARDS_MCP_ATLAS;
+    else process.env.AWWWARDS_MCP_ATLAS = savedAtlas;
   }
 }
 

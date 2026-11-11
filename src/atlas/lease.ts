@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -230,6 +230,47 @@ export function acquireAtlasCaptureLease(
       path,
       error instanceof Error ? error.message : "The Atlas lease could not be opened",
     );
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* close is best effort */
+    }
+  }
+}
+
+export interface AtlasLeaseStatus {
+  state: "free" | "held" | "expired" | "unavailable";
+  expiresAt: number | null;
+  ttlSeconds: number | null;
+}
+
+/** Read-only lease visibility for status. Never exposes the owner token. */
+export function readAtlasCaptureLease(
+  cacheRoot: string,
+  now: number = Date.now(),
+): AtlasLeaseStatus {
+  const path = join(cacheRoot, LEASE_DB);
+  if (!existsSync(path)) return { state: "free", expiresAt: null, ttlSeconds: null };
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(path, { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 1000");
+    const row = db
+      .prepare("SELECT expires_at FROM atlas_capture_lease WHERE singleton = 1")
+      .get() as { expires_at: number } | undefined;
+    if (!row) return { state: "free", expiresAt: null, ttlSeconds: null };
+    const expiresAt = Number(row.expires_at);
+    if (!Number.isFinite(expiresAt)) {
+      return { state: "unavailable", expiresAt: null, ttlSeconds: null };
+    }
+    return {
+      state: expiresAt > now ? "held" : "expired",
+      expiresAt,
+      ttlSeconds: expiresAt > now ? Math.ceil((expiresAt - now) / 1000) : null,
+    };
+  } catch {
+    return { state: "unavailable", expiresAt: null, ttlSeconds: null };
   } finally {
     try {
       db?.close();

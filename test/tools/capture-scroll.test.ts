@@ -101,7 +101,7 @@ describe("capture_live_site scrollCapture schema", () => {
   it("registers the enum with an auto default", () => {
     const regs: any[][] = [];
     const tool = (...args: any[]) => regs.push(args);
-    registerAllTools({ handlers: {} as any, tool, registerTool: tool });
+    registerAllTools({ handlers: {} as any, tool, registerTool: tool }, { atlas: false });
     const match = regs.find((args) => args[0] === "capture_live_site");
     expect(match).toBeDefined();
     // Tool modules pass a raw field shape; server-instance wraps it in z.object.

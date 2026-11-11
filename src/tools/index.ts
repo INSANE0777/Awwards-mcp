@@ -48,9 +48,24 @@ import {
   registerSearchMotion,
 } from "./build.js";
 import { registerCaptureScene3d } from "./scene.js";
+import {
+  registerCaptureAtlas,
+  registerExportEvidencePack,
+  registerGetAtlas,
+  registerSearchAtlas,
+} from "./atlas.js";
+import { atlasEnabled } from "../cache.js";
+
+export interface ToolRegistrationOptions {
+  /** Read once at server start; tests may pass it explicitly. */
+  atlas?: boolean;
+}
 
 /** Registers the full MCP tool surface in its stable, historical order. */
-export function registerAllTools(ctx: ToolContext): void {
+export function registerAllTools(
+  ctx: ToolContext,
+  options: ToolRegistrationOptions = {},
+): void {
   registerSearchSites(ctx);
   registerGetSiteDetails(ctx);
   registerCompareSites(ctx);
@@ -92,4 +107,11 @@ export function registerAllTools(ctx: ToolContext): void {
   registerSearchMotion(ctx);
   registerNewWinners(ctx);
   registerWatchSite(ctx);
+  // Experimental Atlas surface: appended so the historical 41 keep their order.
+  if (options.atlas ?? atlasEnabled()) {
+    registerSearchAtlas(ctx);
+    registerGetAtlas(ctx);
+    registerCaptureAtlas(ctx);
+    registerExportEvidencePack(ctx);
+  }
 }
