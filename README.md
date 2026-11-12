@@ -66,7 +66,7 @@ queries keep AND semantics: every token must hit the same site.
 | `audit_url` | Runtime + static performance **evidence** for any live URL — never a grade. Runtime: installed Chrome/Edge over raw CDP (no playwright) measures fps, dropped frames, long tasks/animations and layout thrash (`perf: {error}` when no browser exists). Static: fetches the page HTML + up to 8 same-origin CSS/JS assets (≤2MB each, one shared 1 req/s limiter, 10s default timeouts), resolving refs against the final post-redirect page URL; asset redirects leaving that origin are rejected. Scans them for animation anti-patterns and returns severity-sorted findings (`count`, `worst`, ≤50 `findings`, `coverage: {assetsScanned, failed}`) so `worst` is always included. Each half degrades independently. Personal, non-commercial use; audit only URLs you are authorised to inspect. |
 | `analyze_accessibility` | Accessibility **evidence** from a live page — explicitly not a WCAG pass/fail. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background **composited bottom-up from the ancestor stack** for fully opaque chains (colour alpha layers; reported as final `rgb()`), then the contrast ratio (worst pairs + selector paths). A sample under any ancestor CSS opacity group (<1) is **excluded from ratios** and counted in `coverage.skippedOpacityGroups` — never approximated. Background images, gradients and pseudo-elements are not composited either, so contrast stays heuristic there. Also: image alt coverage; heading ladder issues; focusable/positive-tabindex counts plus `outline:none` stylesheet rules; unlabeled form controls; document `lang`/title. Returns `coverage`, `heuristic: true` and the note "Evidence only — not a WCAG pass/fail". Accepts http(s) URLs only; degrades to `{error}` when playwright is missing. (needs [playwright](https://playwright.dev)). |
 | `build_project` | Convert a single-file exact rebuild (any local `.html`, e.g. the rebuild flow's `full-page-exact.html`) into a runnable **Vite**, **Astro** or **Next.js** project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (`useEffect` + `gsap.context` on Next), assets carried. Reads a local file and writes the project dir — the suite's one local-write tool. |
-| `verify_build` | Score a build against a reference site: band-map compare (Dice score) + motion-fingerprint diff (trigger mix, scrub/pin, easing vocabulary, native scroll timelines) → 0–100 score, pass/warn/fail verdict and evidence lines. `bands` carries one aggregate score plus `matched`/`refOnly`/`buildOnly` labels and a `diagnostics` row per band (reference/build index, match reason, relative-order flag, height delta, background change) — there are no per-band scores. The design-loop gate: build → verify the aggregate band score → fix → re-verify. Optional `domDiff` adds a body-subtree structural diff (missing/extra/reordered/rect drift) between reference and build. Optional `scene3d` adds a separate, opt-in 3D gate that preflights both URLs through one shared DNS/private-IP guard before any legacy scan (a private or loopback URL is refused with no requests, and the legacy acquisitions run behind the same proxy), then replays a `capture_scene_3d` pack on the build canvas and returns its own status/verdict; the legacy verdict never certifies a canvas (see [Opt-in 3D verify gate](#opt-in-3d-verify-gate)). (needs [playwright](https://playwright.dev)). |
+| `verify_build` | Score a build against a reference site: band-map compare (Dice score) + motion-fingerprint diff (trigger mix, scrub/pin, easing vocabulary, native scroll timelines) → 0–100 score, pass/warn/fail verdict and evidence lines. `bands` carries one aggregate score plus `matched`/`refOnly`/`buildOnly` labels and a `diagnostics` row per band (reference/build index, match reason, relative-order flag, height delta, background change) — there are no per-band scores. The design-loop gate: build → verify the aggregate band score → fix → re-verify. Optional `domDiff` adds a body-subtree structural diff (missing/extra/reordered/rect drift) between reference and build. Optional `scene3d` adds a separate, opt-in 3D gate that preflights both URLs through one shared DNS/private-IP guard before any legacy scan (a private or loopback URL is refused with no requests, and the legacy acquisitions run behind the same proxy), then replays a `capture_scene_3d` pack on the build canvas and returns its own status/verdict; the legacy verdict never certifies a canvas (see [Opt-in 3D verify gate](#opt-in-3d-verify-gate-stable)). (needs [playwright](https://playwright.dev)). |
 | `verify_flow` | Step-aligned interaction-flow comparison: runs the same 1–6 scroll/click/wait steps on a build and a reference URL (two fresh headless launches, desktop or mobile) and compares path, scroll delta, skeleton hash, text hash and element count after each step. `same` only when both sides are complete and untruncated — truncated or failed states are `unknown`. No screenshots; a click can still trigger client-side mutations. (needs [playwright](https://playwright.dev)). |
 | `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000, optional `maxDepth` where values above 12 can exceed Code Mode's depth cap and 12 keeps a capped pack safe), fonts, colors and element animations — for pixel-informed rebuilds. Adds `typography` usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each, `sampled` node count) and a deduped `paletteSummary` (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). `compact: true` trades detail for tokens: each node keeps only `{tag, classes, rect}` (styles, text, svg, pseudo styles and anims are dropped) plus top-level `fonts`/`colors`; the `typography`/`paletteSummary` summaries are full-mode only. Runs on any URL. (needs [playwright](https://playwright.dev)). |
 | `export_design_tokens` | Deterministic design-token export from one computed-style capture: colors, typography, spacing, radii, shadows and borders as ordinal CSS variables (`--color-1`, `--space-1`, …) plus a Tailwind theme map. `selector` defaults to `body`, `maxNodes` to 800 (50–2000); `include` filters categories. Names are ordinals — never semantic guesses — values are deduped, frequency-ranked and capped; a category cap or node truncation sets `truncated` and names the reason in `notes`, and the CSS contains no URLs. Runs on any URL. (needs [playwright](https://playwright.dev)). |
@@ -117,8 +117,8 @@ input order, carry compact details only (no images), and report per-slug
 score.
 
 Passive `capture_scene_3d` capture and `op:"download_assets"` are stable
-features. The Three.js and Spector adapters and the `verify_build.scene3d`
-gate remain experimental and opt-in.
+features. The `verify_build.scene3d` gate is stable and opt-in. The Three.js
+and Spector adapters remain experimental and opt-in.
 
 ### Opt-in Three adapter
 
@@ -232,11 +232,21 @@ returns context and command evidence with an empty `programs` array. Command
 arguments, results, state, stack and memory are deliberately absent, so the
 summary cannot explain why a draw call differs — only what was submitted.
 
-### Opt-in 3D verify gate
+### Opt-in 3D verify gate (stable)
 
 `verify_build` takes an optional `scene3d` block for canvas/WebGL builds. It
 replays the checkpoints of one `capture_scene_3d` pack against the build page in
 a fresh browser and compares each clipped canvas frame pixel-by-pixel.
+
+What stable means: the gate supports replaying a `scene-evidence-v1` pack,
+cropped canvas pixel comparison, separate status/verdict fields, diff artifacts,
+and a deterministic `inconclusive` on any incomparability. A verdict requires
+both tolerances, the same backing size and decoded frame dimensions, a
+replayable scroll/DPR/viewport, and one canvas with a non-empty viewport crop
+that carries the unique per-run marker. It does not support WebGPU,
+camera/geometry/shader inference, cross-viewport or image-size comparison,
+partial passes or scene reconstruction. Existing fields, status and verdict
+semantics will not change without a versioned contract or a changelog note.
 
 ```json
 {
@@ -253,7 +263,7 @@ a fresh browser and compares each clipped canvas frame pixel-by-pixel.
 | Field | Meaning |
 |---|---|
 | `referenceCaptureId` | Pack id from a `capture_scene_3d` `op:"capture"` run (v2: `capture_page` `kind:"scene"`); it must match the `scene-<time>-<hex>` pattern. |
-| `buildSelector` | CSS selector for the build's `<canvas>`; it must match one visible canvas. The gate tags it with a per-run random marker and refuses duplicate or pre-marked decoys instead of guessing. |
+| `buildSelector` | CSS selector for the build's `<canvas>`; it must match one canvas whose viewport crop is non-empty. The gate tags it with a per-run random marker and refuses duplicate or pre-marked decoys instead of guessing. |
 | `tolerances.pixelThreshold` | Per-channel normalized delta (0–1) above which a pixel counts as changed; default 0 while no verdict is issued. |
 | `tolerances.maxChangedFraction` | Maximum share of changed pixels (0–1) for the pair to stay within tolerance. |
 | `tolerances.cameraAngleDeg` | Accepted camera-angle delta in degrees (0–180). Only used when the reference pack carries a comparable camera angle; neither `scene-evidence-v1` nor either adapter records one. |
@@ -340,8 +350,8 @@ Honest limits: one frame per checkpoint — animation that shifted in time
 relative to the reference may land outside tolerance for reasons unrelated to
 fidelity; the gate compares pixels only and does not read the pack's
 scene/camera/geometry evidence, so it cannot attribute a mismatch; and there is
-no scaling, so the build must match the reference's DPR and backing size
-exactly.
+no scaling, so the build must match the reference's DPR within 0.01, the same
+backing size and the same decoded frame dimensions.
 
 `create_design_brief` turns 2–5 shortlisted references into a cited direction:
 
