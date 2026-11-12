@@ -4,7 +4,7 @@ Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
 sourced from the web's best award-winning websites.
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme) [![mcp.market](https://mcp.market/badge/insane0777-awwwards-mcp.svg)](https://mcp.market/server/insane0777-awwwards-mcp)
+[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme) [![mcp.market](https://mcp.market/badge/insane0777-awwwards-mcp.svg)](https://mcp.market/server/insane0777-awwwards-mcp) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa)](https://github.com/sponsors/INSANE0777)
 
 <p align="center">
   <picture>
@@ -1079,6 +1079,12 @@ indexer uses:
 - Our client (`src/awwwards.ts` `buildFilterUrl`) constructs **only**
   `/websites/…` paths at 1 request/second — the loop stays inside the
   published rules by construction, not by convention.
+
+## Sponsor
+
+awwwards-mcp is free and MIT-licensed. If it saves you time, you can
+[sponsor development on GitHub](https://github.com/sponsors/INSANE0777).
+Sponsorship is optional and does not change the licence or the tool contracts.
 
 ## Contributing
 
