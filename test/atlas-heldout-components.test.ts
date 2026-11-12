@@ -37,7 +37,13 @@ function runScoreComponents(reviewPath: string, labelsPath: string) {
   return spawnSync(
     process.execPath,
     [TSX_CLI, HELDOUT_CLI, "score-components", reviewPath, labelsPath],
-    { encoding: "utf8", timeout: 30_000 },
+    {
+      encoding: "utf8",
+      timeout: 30_000,
+      // Node 22 warns about node:sqlite on stderr; the CLI contract is about
+      // its own output, not the runtime's experimental warning.
+      env: { ...process.env, NODE_NO_WARNINGS: "1" },
+    },
   );
 }
 
@@ -45,6 +51,7 @@ function runCli(args: string[]) {
   return spawnSync(process.execPath, [TSX_CLI, HELDOUT_CLI, ...args], {
     encoding: "utf8",
     timeout: 30_000,
+    env: { ...process.env, NODE_NO_WARNINGS: "1" },
   });
 }
 
