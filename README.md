@@ -620,7 +620,7 @@ server), and pass `cdpEndpoint: "http://127.0.0.1:9222"` — or
 
 ## Skills
 
-The seven agent skills live in the separate
+The nine agent skills live in the separate
 [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills),
 which is their source of truth. This package does not ship them.
 

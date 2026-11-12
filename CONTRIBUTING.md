@@ -26,13 +26,20 @@ git clone https://github.com/INSANE0777/Awwwards-mcp.git
 cd Awwwards-mcp
 npm install
 npm run typecheck   # tsc --noEmit
-npm test            # offline unit tests — no network needed
+npm test            # full suite, including Chromium regressions
+# Fast offline run without browser tests:
+npx vitest run --exclude "**/*.chromium.test.ts" --maxWorkers=2
 ```
 
-All tests run against **committed HTML fixtures** in `test/fixtures/` — you
-never hit awwwards.com during development or CI. The optional browser tools
-(playwright-based) are guarded by injectable loaders in tests, so playwright
-is not a dev requirement either.
+Most tests run against **committed HTML fixtures** in `test/fixtures/` - you
+never hit awwwards.com during development or CI. Browser regressions
+(`*.chromium.test.ts`) run against local loopback fixtures and need a
+Playwright Chromium build; they skip only where the host has no Chromium and
+`AWWARDS_CHROMIUM_SMOKE` is unset. Playwright is a devDependency, but
+`npm install` does not download a browser binary.
+
+If the `ffmpeg-static` download fails during install, use
+`npm ci --ignore-scripts`: tests inject their own ffmpeg path or stub.
 
 For a manual smoke test against live awwwards.com:
 
@@ -46,10 +53,11 @@ npm run smoke
 src/
   parsers.ts    Pure HTML parsers (fixture-tested — most PRs land here)
   awwwards.ts   HTTP client: 1 req/s limiter, BlockedError on 403/429
-  cache.ts      SQLite cache at ~/.awwwards-mcp/ (node:sqlite, no native deps)
+  cache.ts      SQLite cache at ~/.awwwards-mcp/ or AWWWARDS_CACHE_DIR (node:sqlite)
   server.ts     Thin facade: re-exports public types + createHandlers
-  server/       Handler domains: awards, data, capture, motion, audit, build
-  tools/        41 MCP tool registrations (zod schemas + annotations)
+  server/       Handler domains: awards, data, capture, motion, audit, build, atlas
+  tools/        41 base MCP tool registrations (45 with AWWARDS_MCP_ATLAS=1)
+  atlas/        Atlas ingest, collector, search, components, states and evidence packs
   capture.ts    Optional playwright: capture_live_site
   structure.ts  Optional playwright: analyze_page_structure
   motion.ts     Optional playwright + ffmpeg: record_site_motion
@@ -73,8 +81,12 @@ Hard constraints the codebase enforces (keep them in new code):
   `client`).
 - **No native deps**: runtime deps are the MCP SDK + zod; the cache is
   `node:sqlite`. Don't add anything needing compilation.
-- **playwright stays optional**: the three browser tools must fail with an
-  install hint when playwright is absent, never crash the server.
+- **playwright stays optional**: every browser-backed tool must fail with an
+  install hint when playwright or Chromium is absent, never crash the server.
+- **Atlas is opt-in**: `AWWARDS_MCP_ATLAS=1` adds four tools and changes the
+  surface to **45 / 13 / 16**. Keep the default **41 / 13 / 15**, keep Atlas
+  off by default, and do not present candidate labels or the F9 component gate
+  as settled.
 
 ## How to create a PR
 
@@ -119,10 +131,11 @@ Hard constraints the codebase enforces (keep them in new code):
    what changed, why, how you tested it. Link the issue it closes
    (`Closes #123`).
 
-6. **Green checks.** CI (typecheck + tests on Node 22/24) must pass. The
-   maintainer reviews within a few days; expect comments on parser PRs —
-   fixtures drive everything here, so reviews verify fixtures against live
-   markup.
+6. **Green checks.** CI must pass on Ubuntu 22.04, Ubuntu 24.04, Windows 24
+   and macOS 15, including the Chromium launch preflight, pack smoke and
+   protocol smoke for both protocol generations. The maintainer reviews within
+   a few days; expect comments on parser PRs - fixtures drive everything here,
+   so reviews verify fixtures against live markup.
 
 ### What gets PRs merged fast
 
@@ -142,7 +155,8 @@ runs, it just won't find anything to break. Keep code blocks in README valid
 
 Please **do not open a public issue** for anything that looks like a security
 problem (e.g. a way the server could be tricked into scraping non-awwwards
-URLs, cache poisoning, path traversal in the SQLite cache). See
+URLs, cache poisoning, path traversal in the cache, capture directories,
+evidence-pack store or build output). See
 [SECURITY.md](SECURITY.md) for private reporting.
 
 ## License
