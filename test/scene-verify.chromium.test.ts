@@ -75,6 +75,98 @@ if (!${JSON.stringify(variant === "blank")}) {
 </body></html>`;
 }
 
+// Identical canvas pixels, rect and backing size to sceneHtml("same"), but a
+// visibly different page shell: background, heading, copy and spacing all
+// change. The gate must compare the canvas crop, not the page around it.
+function styleOnlyHtml(): string {
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:3200px;background:#f4a261}
+body{padding:48px 24px;font-family:Georgia,serif}
+h1{margin:0 0 32px;font-size:64px;color:#1d3557;letter-spacing:6px}
+p{margin:0 0 24px;font-size:20px;color:#264653}
+#scene{position:fixed;left:40px;top:30px;width:600px;height:400px;display:block;border:0}
+</style></head><body>
+<h1>Different shell</h1>
+<p>Surrounding markup, background and spacing differ from the reference.</p>
+<canvas id="scene" width="600" height="400"></canvas>
+<script>
+const c = document.getElementById("scene");
+const x = c.getContext("2d");
+x.fillStyle = "#0d1b2a";
+x.fillRect(0, 0, 600, 400);
+x.fillStyle = "#e63946";
+x.fillRect(40, 40, 240, 160);
+x.fillStyle = "#2a9d8f";
+x.fillRect(320, 60, 200, 200);
+x.fillStyle = "#e9c46a";
+x.beginPath();
+x.arc(160, 320, 60, 0, Math.PI * 2);
+x.fill();
+x.fillStyle = "#8338ec";
+x.fillRect(340, 300, 180, 60);
+</script>
+</body></html>`;
+}
+
+// Real-WebGL fixture: one fixed 600x400 canvas with preserveDrawingBuffer on
+// and antialias off. A full-screen quad plus four flat-colour rectangles gives
+// five exact colours (the gate treats <=4 sampled colours as blank) and needs
+// no texture or network resource. Variants differ only in the base colour.
+function webglHtml(variant: "same" | "perturbed"): string {
+  const base = variant === "perturbed" ? "#457b9d" : "#14213d";
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:3000px;background:#0b0d12}
+#scene{position:fixed;left:40px;top:30px;width:600px;height:400px;display:block}
+</style></head><body>
+<canvas id="scene" width="600" height="400"></canvas>
+<script>
+const canvas = document.getElementById("scene");
+const gl = canvas.getContext("webgl", {
+  preserveDrawingBuffer: true,
+  antialias: false,
+  alpha: false,
+});
+if (gl) {
+  const vs = "attribute vec2 a_pos; uniform vec4 u_rect; void main() { gl_Position = vec4(u_rect.xy + a_pos * u_rect.zw, 0.0, 1.0); }";
+  const fs = "precision mediump float; uniform vec4 u_color; void main() { gl_FragColor = u_color; }";
+  const compile = (type, source) => {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+  };
+  const program = gl.createProgram();
+  gl.attachShader(program, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(program);
+  gl.useProgram(program);
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
+  const pos = gl.getAttribLocation(program, "a_pos");
+  gl.enableVertexAttribArray(pos);
+  gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+  const uRect = gl.getUniformLocation(program, "u_rect");
+  const uColor = gl.getUniformLocation(program, "u_color");
+  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).concat(1);
+  const rect = (x, y, w, h, hex) => {
+    gl.uniform4f(uRect, (x / 600) * 2 - 1, 1 - (y / 400) * 2, (w / 600) * 2, -(h / 400) * 2);
+    gl.uniform4fv(uColor, rgb(hex));
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  };
+  gl.viewport(0, 0, 600, 400);
+  rect(0, 0, 600, 400, ${JSON.stringify(base)});
+  rect(40, 40, 160, 120, "#e63946");
+  rect(320, 60, 180, 160, "#2a9d8f");
+  rect(120, 260, 140, 90, "#e9c46a");
+  rect(360, 280, 160, 80, "#8338ec");
+}
+</script>
+</body></html>`;
+}
+
 // Same pixels as sceneHtml("same"), but a decoy canvas pre-marked with the old
 // fixed marker value sits first in document order at a different position.
 // copyMarker installs a MutationObserver that copies the run marker after pick.
@@ -382,6 +474,10 @@ async function startFixture(): Promise<Fixture> {
     "/build-perturbed.html": sceneHtml("perturbed"),
     "/build-blank.html": sceneHtml("blank"),
     "/build-small.html": sceneHtml("same", { width: 300, height: 200 }),
+    "/build-style-only.html": styleOnlyHtml(),
+    "/webgl-reference.html": webglHtml("same"),
+    "/webgl-same.html": webglHtml("same"),
+    "/webgl-perturbed.html": webglHtml("perturbed"),
     "/build-hijacked.html": hijackedHtml(),
     "/build-scroll-canvas.html": scrollCanvasHtml(),
     "/build-moves.html": movingHtml(),
@@ -429,9 +525,41 @@ if (!chromiumAvailable && REQUIRED) {
     let fixture: Fixture;
     let dir: string;
     let pack: SceneEvidence;
+    let webglPack: SceneEvidence | null = null;
+    let webglSkipReason = "";
+
+    const webglLoader = async () => {
+      const { chromium } = await import("playwright");
+      return {
+        chromium: {
+          launch: (options: any) =>
+            chromium.launch({
+              ...options,
+              args: [...(options?.args ?? []), "--enable-unsafe-swiftshader"],
+            }),
+        },
+      };
+    };
+
+    // Probe with the same loader before capturing, so an unavailable WebGL
+    // stack skips the tests by name instead of capturing blank frames.
+    const webglReady = async (): Promise<boolean> => {
+      const { chromium } = await webglLoader();
+      const browser = await chromium.launch({});
+      try {
+        const page = await browser.newPage();
+        return await page.evaluate(() => {
+          const canvas = document.createElement("canvas");
+          return Boolean(canvas.getContext("webgl"));
+        });
+      } finally {
+        await browser.close();
+      }
+    };
 
     // One reference pack for the whole suite: the capture path is already
     // covered by scene-capture.chromium.test.ts; here it is the input fixture.
+    // The WebGL pack is captured the same way with swiftshader enabled.
     beforeAll(async () => {
       fixture = await startFixture();
       dir = sceneDir();
@@ -446,37 +574,59 @@ if (!chromiumAvailable && REQUIRED) {
       });
       if ("error" in result) throw new Error(result.error);
       pack = result;
-    }, 120_000);
+
+      try {
+        if (!(await webglReady())) {
+          webglSkipReason = "WebGL is unavailable in this Chromium build";
+          return;
+        }
+      } catch (err) {
+        webglSkipReason = `WebGL probe failed: ${err instanceof Error ? err.message : String(err)}`;
+        return;
+      }
+      const webglResult = await captureScene3d(`${fixture.origin}/webgl-reference.html`, {
+        allowPrivateOrigins: [fixture.origin],
+        sceneDir: dir,
+        includeViewportShots: false,
+        loader: webglLoader,
+        checkpoints: [
+          { scrollRatio: 0, waitMs: 200 },
+          { scrollRatio: 1, waitMs: 200 },
+        ],
+      });
+      if ("error" in webglResult) {
+        // WebGL was proven available by the probe; a capture failure is a
+        // regression, not an unavailable feature, so the suite must fail.
+        throw new Error(`WebGL reference capture failed: ${webglResult.error}`);
+      }
+      webglPack = webglResult;
+    }, 180_000);
 
     afterAll(async () => {
       for (const entry of dirs.splice(0)) rmSync(entry, { recursive: true, force: true });
       if (fixture) await fixture.close();
     }, 60_000);
 
-    const verify = (page: string, opts: { tolerances?: typeof tolerances; loader?: any } = {}) =>
-      verifyScene3d({
+    const verify = (
+      page: string,
+      opts: {
+        tolerances?: typeof tolerances;
+        loader?: any;
+        referenceCaptureId?: string;
+      } = {},
+    ) => {
+      const { referenceCaptureId = pack.captureId, ...rest } = opts;
+      return verifyScene3d({
         buildUrl: `${fixture.origin}/${page}`,
-        referenceCaptureId: pack.captureId,
+        referenceCaptureId,
         buildSelector: "#scene",
         sceneDir: dir,
         allowPrivateOrigins: [fixture.origin],
         // Real pages and several parallel Chromium suites need more than the
         // 15s product default; the deadline itself is covered by unit tests.
         timeoutMs: 60_000,
-        ...opts,
+        ...rest,
       });
-
-    const webglLoader = async () => {
-      const { chromium } = await import("playwright");
-      return {
-        chromium: {
-          launch: (options: any) =>
-            chromium.launch({
-              ...options,
-              args: [...(options?.args ?? []), "--enable-unsafe-swiftshader"],
-            }),
-        },
-      };
     };
 
     // Rewrites the shared pack for one call, then restores it byte-for-byte.
@@ -534,6 +684,45 @@ if (!chromiumAvailable && REQUIRED) {
           expect(checkpoint.diffImage).toContain(join("verify"));
         }
         expect(result.limitations.join(" ")).toContain("Pixel comparison only");
+      },
+    );
+
+    it(
+      "a style-only page shell change keeps the canvas comparable and within-tolerance",
+      { timeout: 90_000 },
+      async () => {
+        const result = await verify("build-style-only.html", { tolerances });
+        if ("error" in result) throw new Error(result.error);
+
+        // Canvas pixels, rect and backing size match the reference; body
+        // background, heading, copy and page spacing differ. Comparing the
+        // page shell would fail here.
+        expect(result.status).toBe("comparable");
+        expect(result.verdict).toBe("within-tolerance");
+        expect(result.compared).toBe(2);
+        for (const checkpoint of result.checkpoints) {
+          expect(checkpoint.changedPixelFraction).toBe(0);
+          expect(checkpoint.meanAbsoluteChannelError).toBe(0);
+        }
+      },
+    );
+
+    it(
+      "three consecutive runs of the same build are all within-tolerance with zero changed pixels",
+      { timeout: 300_000 },
+      async () => {
+        for (let run = 1; run <= 3; run += 1) {
+          const result = await verify("build-same.html", { tolerances });
+          if ("error" in result) throw new Error(`run ${run}: ${result.error}`);
+
+          expect(result.status, `run ${run}`).toBe("comparable");
+          expect(result.verdict, `run ${run}`).toBe("within-tolerance");
+          expect(result.compared, `run ${run}`).toBe(2);
+          for (const checkpoint of result.checkpoints) {
+            expect(checkpoint.changedPixelFraction, `run ${run}`).toBe(0);
+            expect(checkpoint.meanAbsoluteChannelError, `run ${run}`).toBe(0);
+          }
+        }
       },
     );
 
@@ -780,6 +969,60 @@ if (!chromiumAvailable && REQUIRED) {
         expect(result.checkpoints[0].reasons.join(" ")).toContain(
           "lost its WebGL context",
         );
+      },
+    );
+
+    it(
+      "real WebGL: identical build is comparable and within-tolerance",
+      { timeout: 180_000 },
+      async (ctx) => {
+        if (!webglPack) ctx.skip(webglSkipReason || "WebGL is unavailable");
+        const reference = webglPack!;
+
+        const result = await verify("webgl-same.html", {
+          tolerances,
+          loader: webglLoader,
+          referenceCaptureId: reference.captureId,
+        });
+        if ("error" in result) throw new Error(result.error);
+
+        expect(result.status).toBe("comparable");
+        expect(result.verdict).toBe("within-tolerance");
+        expect(result.compared).toBe(2);
+        for (const checkpoint of result.checkpoints) {
+          // Real GPU/ANGLE paths may differ by a few pixels from the captured
+          // reference; the tolerance is the contract, not exact equality.
+          expect(checkpoint.changedPixelFraction!).toBeLessThanOrEqual(
+            tolerances.maxChangedFraction,
+          );
+          expect(checkpoint.meanAbsoluteChannelError!).toBeLessThanOrEqual(0.01);
+        }
+      },
+    );
+
+    it(
+      "real WebGL: perturbed fragment colour is outside-tolerance",
+      { timeout: 180_000 },
+      async (ctx) => {
+        if (!webglPack) ctx.skip(webglSkipReason || "WebGL is unavailable");
+        const reference = webglPack!;
+
+        const result = await verify("webgl-perturbed.html", {
+          tolerances,
+          loader: webglLoader,
+          referenceCaptureId: reference.captureId,
+        });
+        if ("error" in result) throw new Error(result.error);
+
+        expect(result.status).toBe("comparable");
+        expect(result.verdict).toBe("outside-tolerance");
+        expect(result.compared).toBe(2);
+        // Only the base fill differs, and it covers over two thirds of the
+        // canvas, so the change is far above the 10% floor.
+        for (const checkpoint of result.checkpoints) {
+          expect(checkpoint.changedPixelFraction!).toBeGreaterThan(0.1);
+          expect(checkpoint.meanAbsoluteChannelError!).toBeGreaterThan(0.01);
+        }
       },
     );
 

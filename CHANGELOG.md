@@ -3,6 +3,12 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased
+
+### Scene verify gate promoted to stable
+
+- `verify_build.scene3d` is stable and opt-in. New regression evidence covers a style-only page shell (canvas comparison ignores surrounding HTML/CSS), three consecutive runs of one build (all comparable, zero changed pixels), and a real WebGL pair (identical build within tolerance, perturbed fragment colour outside tolerance). No thresholds, fields, tool surface or default behavior changed; the Three.js and Spector adapters remain experimental.
+
 ## v1.19.0 - 2026-11-11
 
 ### Atlas Phase 6 (experimental, opt-in)
