@@ -70,6 +70,8 @@ export interface AtlasScanComponent {
   selector: string;
   tag: string;
   role: string | null;
+  /** Lowercased `type` attribute for an `<input>`, `text` when absent; null otherwise. */
+  inputType?: string | null;
   hint: string;
   hintBasis: "native_semantics" | "declared_aria" | "rule_derivation";
   label: string;
@@ -195,6 +197,14 @@ export interface ComponentCandidate {
   typeDecision: "accepted" | "candidate";
   typeRuleId: string;
   label: string;
+  /** Raw labelling evidence carried for the held-out export; absent on older scans. */
+  inputType?: string | null;
+  ariaHasPopup?: boolean;
+  ariaExpanded?: string | null;
+  ariaControlsResolved?: boolean;
+  inNavigation?: boolean;
+  /** Bounded (trimmed, 200 chars) `aria-label` shared by the classifier and the blind row. */
+  ariaLabel?: string | null;
   visible: boolean;
   offscreen: boolean;
   sectionNodeKey: string | null;

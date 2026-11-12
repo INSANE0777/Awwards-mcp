@@ -903,7 +903,7 @@ Evidence honesty:
 - A resolved `aria-controls` relationship makes a `navigation_trigger` accepted with rule `component.aria.navigation-trigger.resolved`; an unresolved declaration stays candidate
 - `context.section_purpose` evidence points at the containing section's scan entry, and is emitted only for accepted section purposes
 
-**F9 held-out component gate (spec 17.4) is not met.** Accepted native/declared type precision >= 95% is measured against held-out human labels. No held-out human component labels exist yet; the fixtures only audit the mapping table and structural rules, so they are not a precision measurement. Inferred card/drawer/tooltip/carousel/icon_button quality is reported as unreviewed with no precision claim.
+**F9 held-out component gate (spec 17.4) is not met.** Accepted native/declared type precision >= 95% is measured against held-out human labels. No held-out human component labels exist yet; the fixtures only audit the mapping table and structural rules, so they are not a precision measurement. The component held-out harness now exports blind rows and scores accepted types, but the gate opens only after humans label a fresh corpus. A 2026-11-12 Codex-labeled provisional run covered 44 pages and 512 accepted components using the older `regionKey` label format; it predates the `nodeKey` keying, is not scoreable by the current harness, and is retained only as calibration history — it does not validate the current blind export. Inferred card/drawer/tooltip/carousel/icon_button quality is reported as unreviewed with no precision claim.
 
 ## Phase 4B explicit states
 
@@ -1044,6 +1044,42 @@ AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas prune --older-than-days <N> --apply
 - A prune that removes a shared file before an in-flight capture publishes makes that capture fail artifact validation instead of leaving a dangling reference. The publish pre-flight withdraws heads whose artifacts are already invalid, but the recheck inside the publish transaction returns `ARTIFACT_INVALID` without withdrawing a head; `verify` reports the missing file and the next successful publish replaces the head.
 - The unlink pass runs after COMMIT and is not transactional. A crash between the commit and the unlink leaves an unreferenced artifact file behind. `verify` walks database rows and does not report it, and no reclaim command exists; the file is inert because no row references it, and a later identical artifact write reuses the same content-addressed path.
 - Output is counts, typed codes, verify artifact IDs/kinds and redacted failure messages; stack traces and absolute cache paths are never printed.
+
+## Component held-out review (F9)
+
+F9 is component-type precision, not section classification. The harness exports only scorable accepted rows to the labeler's file and keeps every prediction out of it.
+
+```bash
+npm run atlas:heldout -- collect-components <cacheRoot> <siteSlug> <outDir>
+# label <outDir>/components-review.json, filling <outDir>/component-labels.json
+npm run atlas:heldout -- score-components <outDir>/components-review-full.json <outDir>/component-labels.json
+# or score every <outRoot>/<slug>/ pair together:
+npm run atlas:heldout -- score-components-corpus <outRoot>
+```
+
+- `components-review.json` is the blind input. It contains only scorable accepted components — observed `native_semantics`/`declared_aria` rows whose `acceptedTypes` is exactly one real vocabulary type other than `none` or `ambiguous` — with selector, tag, role, accessible name, section heading, rect, screenshot keys, `inputType`, `ariaHasPopup`, `ariaExpanded`, `ariaControlsResolved`, `inNavigation` and the bounded 200-character `ariaLabel`. It contains no predicted type, basis, classification, decision, rule ID or claim.
+- `component-labels.json` is a map from `capture|viewport|nodeKey` to exactly one human label for those scorable accepted components. The key contains no type, unlike the hashed region key, so a labeler cannot brute-force the prediction from it.
+- Allowed labels are the `component.type` vocabulary entries with `support: "supported"`, excluding the inferred types (`card`, `drawer`, `carousel`, `icon_button`, `tooltip`), plus `none` and `ambiguous`.
+- `components-review-full.json` is the scoring input and must not be shown to labelers.
+- Only `components-review.json` may be shared with labelers. Never hand over the output directory or the full review: the full review contains the predictions, and the labels file reveals the keys they are scored under.
+- Every accepted **scorable** component needs a label. Candidate and inferred components are excluded from the precision denominator.
+- An accepted scorable row is defined once (`isScorableAcceptedComponent`) and used by both the blind export and the scorer, so the labelable set and the measured set cannot diverge. An accepted row outside that set is listed in `invalidAcceptedRows`, stays out of the denominator and forces the gate to `fail`.
+- `score-components-corpus` reads immediate child directories only. Every immediate child directory of the corpus root must be a real directory and a complete page with both files, so an unrelated nested directory aborts scoring rather than being skipped. A symlinked or junction page directory is refused with `HELDOUT_COMPONENT_INVALID_CORPUS` instead of being skipped; a symlinked file is ignored like any other stray file. A label key may not repeat across pages, and `__proto__`, `constructor` and `prototype` are reserved.
+- Re-running `collect-components` rewrites the full and blind reviews but never overwrites an existing `component-labels.json`, so re-collecting a page keeps human labels. Use a fresh output directory for a fresh corpus; labels from an older capture no longer match and are reported as unknown keys.
+- Per-type status is `pass` at precision >= 0.95 with at least 20 accepted samples, `insufficient` below 20, and `fail` below 0.95. The report gate is `fail` if any measured type fails, `insufficient` if any type lacks samples or nothing was measured, else `pass`.
+- `score-components` and `score-components-corpus` are report-only: they print the report and exit 0 even when the gate is `fail` or `insufficient`. Callers must parse `report.gate`; no `--fail-on-gate` flag exists.
+
+### Labeling contract
+
+- An explicit ARIA role wins over the native tag.
+- The one navigation exception: for a `nav` element or `role="navigation"`, a bounded 200-character `ariaLabel` matching `breadcrumb` case-insensitively yields `breadcrumb`; otherwise a bounded 200-character `ariaLabel` matching `pager` or `pagination` yields `pagination`; otherwise `navigation`. Breadcrumb is tested first. The page scan's component hint matches this bounded 200-character `ariaLabel` (trimmed, then capped) and the blind row carries the same value.
+- `navigation_trigger` only when all of these hold: the row is inside a navigation landmark (`inNavigation` is true); the element is an `a` or `button`, or has `role="button"` or `role="link"`; it declares `aria-haspopup` or `aria-expanded`; and its `aria-controls` resolves to real content. A `nav` landmark without a button/link role follows the breadcrumb/pagination/navigation exception above; a `navigation_trigger` outside a `nav` landmark (or `role="navigation"`) is not a trigger.
+- For an `input`, its type decides `checkbox`, `radio` or `text_input`; button-like input types remain `button`.
+- If no rule yields exactly one type, label `ambiguous`; use `none` only when the row is not a component at all.
+
+Blind rows carry only evidence, never predictions. Do not infer the label from the row order, the section heading or the scoring report.
+
+Do not tune rules on the rows used to score them. Demote a failing type to candidate or change its rule, then collect a fresh held-out set before re-scoring.
 
 ## Next phase
 
