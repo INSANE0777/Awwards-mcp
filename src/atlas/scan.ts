@@ -493,6 +493,14 @@ export const ATLAS_SECTION_SCAN = function (hints: {
   const nativeHints = hints?.native ?? {};
   const roleHints = hints?.aria ?? {};
   const inputHints = hints?.input ?? {};
+  // One bounded aria-label feeds both the nav classification and the blind
+  // row, so a labeler can reproduce breadcrumb/pagination from the export.
+  const boundedAriaLabel = (el: any): string | null => {
+    const value = el.getAttribute?.("aria-label");
+    if (value == null) return null;
+    const bounded = String(value).trim().slice(0, 200);
+    return bounded.length > 0 ? bounded : null;
+  };
   const componentHint = (
     el: any,
     style: any,
@@ -500,7 +508,7 @@ export const ATLAS_SECTION_SCAN = function (hints: {
     try {
       const tag = String(el.tagName || "").toLowerCase();
       const role = String(el.getAttribute?.("role") || "").toLowerCase();
-      const ariaLabel = String(el.getAttribute?.("aria-label") || "").trim();
+      const ariaLabel = boundedAriaLabel(el) ?? "";
       const insideNav = Boolean(closestWithin(el, "nav,[role=navigation]", 12));
       const hasPopup = el.hasAttribute?.("aria-haspopup");
       const expanded = el.getAttribute?.("aria-expanded");
@@ -702,7 +710,7 @@ export const ATLAS_SECTION_SCAN = function (hints: {
       ) as any[];
       const tag = String(el.tagName || "").toLowerCase();
       const role = el.getAttribute?.("role");
-      const ariaLabel = el.getAttribute?.("aria-label");
+      const ariaLabel = boundedAriaLabel(el);
       const label = clean(
         ariaLabel || el.getAttribute?.("title") || boundedText(el, 200, bounded),
       ).slice(0, 200);
@@ -736,6 +744,10 @@ export const ATLAS_SECTION_SCAN = function (hints: {
         selector: selectorFor(el),
         tag,
         role: role ? String(role).toLowerCase() : null,
+        inputType:
+          tag === "input"
+            ? String(el.getAttribute?.("type") || "text").toLowerCase()
+            : null,
         hint: semantic.hint,
         hintBasis: semantic.basis,
         label,
@@ -764,7 +776,7 @@ export const ATLAS_SECTION_SCAN = function (hints: {
           const ids = String(controls).split(/\s+/).slice(0, 4);
           return ids.every((id) => Boolean(doc.getElementById?.(id)));
         })(),
-        ariaLabel: ariaLabel ? String(ariaLabel).slice(0, 200) : null,
+        ariaLabel,
         overflowX,
         scrollableX:
           Number(el.scrollWidth || 0) > Number(el.clientWidth || 0) + 1 &&

@@ -1981,6 +1981,49 @@ suite("Atlas collector with real Chromium", () => {
     }
   }, 60_000);
 
+  it("bounds the nav aria-label before matching breadcrumb", async () => {
+    const longLabel = `${"z".repeat(200)}breadcrumb`;
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        shell(
+          `<main><section><h1>Navigation</h1>
+            <nav aria-label="  Breadcrumb  "><a href="/home">Home</a></nav>
+            <nav aria-label="${longLabel}"><a href="/long">Long</a></nav>
+            <nav aria-label="  Products  "><a href="/products">Products</a></nav>
+          </section></main>`,
+        ),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const navs = (attempt.viewports[0]!.scan.components ?? []).filter(
+      (component) => component.tag === "nav",
+    );
+    expect(navs).toHaveLength(3);
+    const breadcrumb = navs.find((component) => component.label === "Breadcrumb")!;
+    expect(breadcrumb.hint).toBe("breadcrumb");
+    expect(breadcrumb.ariaLabel).toBe("Breadcrumb");
+    // The padded value is trimmed before export, not carried as written.
+    expect(breadcrumb.ariaLabel).not.toBe("  Breadcrumb  ");
+    const capped = navs.find((component) => component.ariaLabel?.startsWith("z"))!;
+    expect(capped.ariaLabel).toBe("z".repeat(200));
+    expect(capped.ariaLabel!.length).toBe(200);
+    expect(capped.hint).toBe("navigation");
+    const plain = navs.find((component) => component.label === "Products")!;
+    expect(plain.hint).toBe("navigation");
+    expect(plain.ariaLabel).toBe("Products");
+  }, 60_000);
+
   it("keys distinct three-level trees apart while identical trees share one pattern", async () => {
     const origin = await start((path, res) => {
       if (path === "/robots.txt") {

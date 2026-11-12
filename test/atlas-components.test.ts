@@ -229,6 +229,29 @@ describe("Atlas component discovery", () => {
     expect(candidates[5]!.typeClassification).toBe("inferred");
   });
 
+  it("forwards held-out evidence fields from the scan component", () => {
+    const [candidate] = discoverComponents(
+      scanWith(
+        rawComponent({
+          inputType: "email",
+          ariaHasPopup: true,
+          ariaExpanded: "true",
+          ariaControlsResolved: true,
+          inNavigation: true,
+          ariaLabel: "Main navigation",
+        }),
+      ),
+    );
+    expect(candidate).toMatchObject({
+      inputType: "email",
+      ariaHasPopup: true,
+      ariaExpanded: "true",
+      ariaControlsResolved: true,
+      inNavigation: true,
+      ariaLabel: "Main navigation",
+    });
+  });
+
   it("keeps the native vocabulary observed and searchable", () => {
     const fixtures: Array<[string, string]> = [
       ["navigation", "nav"],

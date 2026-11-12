@@ -9,6 +9,14 @@ const ATLAS_DOC = readFileSync(new URL("../ATLAS.md", import.meta.url), "utf8");
 const README_DOC = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const README_ATLAS = README_DOC.slice(README_DOC.indexOf("## Atlas (experimental, opt-in)"));
 const README_ATLAS_FLAT = README_ATLAS.replace(/\s+/g, " ");
+const F9_GATE = ATLAS_DOC.slice(
+  ATLAS_DOC.indexOf("**F9 held-out component gate"),
+  ATLAS_DOC.indexOf("## Phase 4B"),
+);
+const F9_SECTION = ATLAS_DOC.slice(
+  ATLAS_DOC.indexOf("## Component held-out review (F9)"),
+  ATLAS_DOC.indexOf("## Next phase"),
+);
 
 const TOOLS = ["search_atlas", "get_atlas", "capture_atlas", "export_evidence_pack"];
 
@@ -167,6 +175,42 @@ describe("Atlas documentation", () => {
     expect(ATLAS_DOC).toContain("32 MiB is the accepted release cap; spec §16 allows 64 MiB");
     expect(ATLAS_DOC).toContain("the spec §16 64 MiB allowance is not implemented");
     expect(ATLAS_DOC).toContain("this release caps copies at 32 MiB, the accepted release cap");
+  });
+
+  it("keeps the F9 component held-out contract honest", () => {
+    expect(F9_GATE).toContain("not met");
+    expect(F9_GATE).toContain("not scoreable by the current harness");
+    expect(F9_GATE).toContain("retained only as calibration history");
+    expect(F9_GATE).toContain("does not validate the current blind export");
+
+    expect(F9_SECTION).toContain("scorable accepted components");
+    expect(F9_SECTION).toContain("0.95");
+    expect(F9_SECTION).toContain("capture|viewport|nodeKey");
+    expect(F9_SECTION).toContain("at least 20 accepted samples");
+    expect(F9_SECTION).toContain("exit 0 even when the gate is `fail` or `insufficient`");
+    expect(F9_SECTION).toContain("Only `components-review.json` may be shared with labelers");
+    expect(F9_SECTION).toContain("report-only");
+
+    // Nav exception, bounded label and the full trigger contract.
+    expect(F9_SECTION).toContain("a bounded 200-character `ariaLabel` matching `breadcrumb`");
+    expect(F9_SECTION).toContain("otherwise `navigation`");
+    expect(F9_SECTION).toContain("bounded 200-character `ariaLabel`");
+    expect(F9_SECTION).toContain("page scan's component hint");
+    expect(F9_SECTION).not.toContain("The classifier matches");
+    expect(F9_SECTION).toContain("the blind row carries the same value");
+    expect(F9_SECTION).toContain(
+      "`nav` landmark without a button/link role follows the breadcrumb/pagination/navigation exception",
+    );
+    expect(F9_SECTION).not.toContain("raw `ariaLabel`");
+    expect(F9_SECTION).toContain("`inNavigation` is true");
+    expect(F9_SECTION).toContain('`role="button"` or `role="link"`');
+    expect(F9_SECTION).toContain("`aria-controls` resolves to real content");
+    expect(F9_SECTION).toContain("is not a trigger");
+
+    // The symlink refusal sentence, verbatim.
+    expect(F9_SECTION).toContain(
+      "A symlinked or junction page directory is refused with `HELDOUT_COMPONENT_INVALID_CORPUS` instead of being skipped",
+    );
   });
 
   it("documents the result-envelope data rules", () => {

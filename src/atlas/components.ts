@@ -17,7 +17,15 @@ export const COMPONENT_PACK_NODE_CAP = 150;
 export const COMPONENT_PACK_DEPTH_CAP = 12;
 
 /** Component types that require structure beyond a native/declared element. */
-const INFERRED_TYPES = new Set(["card", "drawer", "carousel", "icon_button", "tooltip"]);
+export const ATLAS_INFERRED_COMPONENT_TYPES = [
+  "card",
+  "drawer",
+  "carousel",
+  "icon_button",
+  "tooltip",
+] as const;
+
+const INFERRED_TYPES: ReadonlySet<string> = new Set(ATLAS_INFERRED_COMPONENT_TYPES);
 
 function enabled(registry: AtlasClassificationRegistry, value: string): boolean {
   return registry.some(
@@ -116,6 +124,12 @@ export function discoverComponents(scan: AtlasPageScan): ComponentCandidate[] {
       selector: component.selector,
       tag: component.tag,
       role: component.role,
+      inputType: component.inputType ?? null,
+      ariaHasPopup: component.ariaHasPopup === true,
+      ariaExpanded: component.ariaExpanded ?? null,
+      ariaControlsResolved: component.ariaControlsResolved === true,
+      inNavigation: component.inNavigation === true,
+      ariaLabel: component.ariaLabel ?? null,
       type,
       typeClassification: classification,
       typeBasis: basis,
