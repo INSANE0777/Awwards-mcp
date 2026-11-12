@@ -4,7 +4,9 @@ Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
 sourced from the web's best award-winning websites.
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme) [![mcp.market](https://mcp.market/badge/insane0777-awwwards-mcp.svg)](https://mcp.market/server/insane0777-awwwards-mcp) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa)](https://github.com/sponsors/INSANE0777)
+[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme) [![mcp.market](https://mcp.market/badge/insane0777-awwwards-mcp.svg)](https://mcp.market/server/insane0777-awwwards-mcp) [![Website](https://img.shields.io/badge/Website-awwwards--mcp.vercel.app-2ea44f)](https://awwwards-mcp.vercel.app) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa)](https://github.com/sponsors/INSANE0777)
+
+Project site: **https://awwwards-mcp.vercel.app**
 
 <p align="center">
   <picture>

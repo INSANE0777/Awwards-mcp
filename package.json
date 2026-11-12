@@ -33,7 +33,7 @@
   "bugs": {
     "url": "https://github.com/INSANE0777/Awwwards-mcp/issues"
   },
-  "homepage": "https://github.com/INSANE0777/Awwwards-mcp#readme",
+  "homepage": "https://awwwards-mcp.vercel.app",
   "engines": {
     "node": ">=22.13.0"
   },
