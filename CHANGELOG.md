@@ -3,6 +3,13 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased
+
+### Fixed
+
+- `analyze_page_structure` no longer returns a single viewport-tall band on virtual-scroll (Lenis/transform-driven) sites: when the document does not scroll and no overflow scroll root exists, the tallest wide in-flow wrapper supplies `totalHeight` and 0-based band offsets.
+- Additive result fields `scrollMode` (`document` | `element` | `virtual` | `canvas`), `virtualRoot` and, for canvas-only pages, a `note` pointing to `record_site_motion` / `capture_pose_3d`. Existing fields are unchanged.
+
 ## v1.19.0 - 2026-11-11
 
 ### Atlas Phase 6 (experimental, opt-in)
