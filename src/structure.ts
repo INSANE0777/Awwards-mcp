@@ -21,6 +21,8 @@ export interface PageBand {
   textStart: string;
 }
 
+export type ScrollMode = "document" | "element" | "virtual" | "canvas";
+
 export interface PageStructure {
   url: string;
   finalUrl?: string;
@@ -29,6 +31,12 @@ export interface PageStructure {
   bands: PageBand[];
   /** Detected inner scroll container (`tag#id.class`); absent when the page scrolls on the document root. */
   scrollRoot?: string;
+  /** How the page scrolls: document, an inner overflow element, a virtual (transform-driven) wrapper, or a canvas-only page. Absent on older scans. */
+  scrollMode?: ScrollMode;
+  /** Virtual-scroll wrapper label (`tag#id.class`) that totalHeight and band offsets were measured against; only with scrollMode "virtual". */
+  virtualRoot?: string;
+  /** Short explanation for non-document modes (e.g. canvas-only pages). */
+  note?: string;
   /** Mobile-only element evidence; absent unless the capture asked for it. */
   responsive?: ResponsiveReport;
   /** Additive marker: this scan ran on an attached page and never navigated. */
@@ -78,6 +86,9 @@ export interface ScanResult {
   candidates: RawBand[];
   /** Detected inner scroll container (`tag#id.class`); absent for document-root scrolling. */
   scrollRoot?: string;
+  scrollMode?: ScrollMode;
+  virtualRoot?: string;
+  note?: string;
   /** Landmark y-tops (headings + distinct-bg children ≥400px). Omitted when collection threw. */
   landmarks?: number[];
   /** Mobile element evidence; omitted unless the snippet was called with responsive:true. */
@@ -140,6 +151,55 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     return best;
   }
 
+  // Virtual-scroll fallback (Lenis/Locomotive-style transform scrolling): the
+  // document never scrolls and no element has overflow auto/scroll, but a
+  // wide in-flow wrapper is laid out far taller than the viewport and gets
+  // moved by transform. Tallest wins; DOM order makes the outermost win ties.
+  // Mirrored inline in preScroll.
+  function findVirtualRoot(): any {
+    let best: any = null;
+    let bestHeight = 0;
+    try {
+      const de = doc.documentElement;
+      const bodyHeight = doc.body ? Number(doc.body.scrollHeight || 0) : 0;
+      const viewportHeight = Number(g.innerHeight || de.clientHeight || 0);
+      if (Math.max(Number(de.scrollHeight || 0), bodyHeight) > viewportHeight + 100) return null;
+      const bodyWidth = doc.body.getBoundingClientRect().width || 1;
+      const all = doc.querySelectorAll("*");
+      for (let i = 0; i < all.length && i < 20000; i++) {
+        const el = all[i];
+        if (el === doc.body || el === doc.documentElement) continue;
+        const r = el.getBoundingClientRect();
+        if (!(r.width >= 0.6 * bodyWidth) || !(r.height > viewportHeight + 100)) continue;
+        if (!(r.height > bestHeight)) continue;
+        const s = g.getComputedStyle(el);
+        if (String(s.display) === "none" || String(s.visibility) === "hidden") continue;
+        if (String(s.position) === "fixed") continue;
+        bestHeight = r.height;
+        best = el;
+      }
+    } catch {}
+    return best;
+  }
+
+  // Canvas-only page: neither document, overflow root nor virtual root is
+  // taller than the viewport, but one canvas covers >= 80% of the viewport.
+  function hasViewportCanvas(): boolean {
+    try {
+      const vw = Number(g.innerWidth || 0);
+      const vh = Number(g.innerHeight || 0);
+      if (!(vw > 0 && vh > 0)) return false;
+      const canvases = doc.querySelectorAll("canvas");
+      for (let i = 0; i < canvases.length; i++) {
+        const r = canvases[i].getBoundingClientRect();
+        const w = Math.min(r.right, vw) - Math.max(r.left, 0);
+        const h = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+        if (w > 0 && h > 0 && (w * h) / (vw * vh) >= 0.8) return true;
+      }
+    } catch {}
+    return false;
+  }
+
   function cssEscape(value: any): string {
     const css = g.CSS;
     if (css && typeof css.escape === "function") return String(css.escape(String(value)));
@@ -156,6 +216,9 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   }
 
   const scroller = findScrollRoot();
+  const virtualRoot = scroller ? null : findVirtualRoot();
+  const virtualRect = virtualRoot ? virtualRoot.getBoundingClientRect() : null;
+  const virtualTop = virtualRect ? virtualRect.top : 0;
   const scrollerRect = scroller ? scroller.getBoundingClientRect() : null;
   const scrollerTop = scrollerRect ? scrollerRect.top : 0;
   const scrollerScrollTop = scroller ? scroller.scrollTop || 0 : 0;
@@ -163,12 +226,17 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     Number(doc.documentElement.scrollHeight || 0),
     doc.body ? Number(doc.body.scrollHeight || 0) : 0,
   );
-  const totalHeight = Math.round(scroller ? scroller.scrollHeight : documentHeight);
+  const totalHeight = Math.round(
+    scroller ? scroller.scrollHeight : virtualRect ? virtualRect.height : documentHeight,
+  );
 
   // Content y in the scanned scroller's coordinates: the document root adds
   // window scroll; an element scroller subtracts its viewport top and adds its
   // own scrollTop (mirrors the pure coordinateY helper).
   function coordY(r: any): number {
+    // A virtual wrapper moves by transform while the window stays at 0, so its
+    // own rect top is the content origin.
+    if (virtualRect) return Math.round(r.top - virtualTop);
     return Math.round(scrollerRect ? r.top - scrollerTop + scrollerScrollTop : r.top + g.scrollY);
   }
 
@@ -271,6 +339,15 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   }
   const out: ScanResult = { title: doc.title, totalHeight, candidates };
   if (scroller) out.scrollRoot = scrollRootLabel(scroller);
+  if (scroller) out.scrollMode = "element";
+  else if (virtualRoot) {
+    out.scrollMode = "virtual";
+    out.virtualRoot = scrollRootLabel(virtualRoot);
+  } else if (documentHeight <= Number(g.innerHeight || 0) + 100 && hasViewportCanvas()) {
+    out.scrollMode = "canvas";
+    out.note =
+      "Content lives in a full-viewport canvas (WebGL/canvas), not in the DOM, so bands cannot describe it. Use record_site_motion or capture_pose_3d to study it.";
+  } else out.scrollMode = "document";
   if (landmarks) out.landmarks = landmarks;
   // Responsive evidence, mobile captures only. One pass in document
   // coordinates; every rule is independent and the whole block degrades to no
@@ -687,6 +764,8 @@ export interface PreScrollInfo {
   scrollRoot: string | null;
   scrollHeight: number;
   clientHeight: number;
+  /** Only present when the page scrolls virtually: the wrapper's layout height (no scrolling is possible). */
+  virtualHeight?: number;
 }
 
 // tsx (esbuild keepNames) injects __name()/__defProp helpers at module scope;
@@ -833,7 +912,32 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
     }
     g.window.scrollTo({ left: 0, top: 0, behavior: "instant" });
     await new Promise((r) => setTimeout(r, 150));
+    // Mirror of SCAN_SNIPPET's findVirtualRoot (inline, no named helper): the
+    // document did not scroll, so report the transform-driven wrapper's layout
+    // height. Additive: absent for ordinary document pages.
+    let virtualHeight = 0;
+    try {
+      const de = doc.documentElement;
+      const bodyHeight = doc.body ? Number(doc.body.scrollHeight || 0) : 0;
+      const viewportHeight = Number(g.innerHeight || de.clientHeight || 0);
+      if (!(Math.max(Number(de.scrollHeight || 0), bodyHeight) > viewportHeight + 100)) {
+        const bodyWidth = doc.body.getBoundingClientRect().width || 1;
+        const all = doc.querySelectorAll("*");
+        for (let i = 0; i < all.length && i < 20000; i++) {
+          const el = all[i];
+          if (el === doc.body || el === doc.documentElement) continue;
+          const r = el.getBoundingClientRect();
+          if (!(r.width >= 0.6 * bodyWidth) || !(r.height > viewportHeight + 100)) continue;
+          if (!(r.height > virtualHeight)) continue;
+          const s = g.getComputedStyle(el);
+          if (String(s.display) === "none" || String(s.visibility) === "hidden") continue;
+          if (String(s.position) === "fixed") continue;
+          virtualHeight = r.height;
+        }
+      }
+    } catch {}
     return {
+      ...(virtualHeight > 0 ? { virtualHeight: Math.round(virtualHeight) } : {}),
       scrollRoot: null,
       scrollHeight: Math.round(
         Math.max(
@@ -851,6 +955,14 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
       ),
     };
   });
+}
+
+function scrollModeFields(raw: ScanResult): Pick<PageStructure, "scrollMode" | "virtualRoot" | "note"> {
+  return {
+    ...(raw.scrollMode ? { scrollMode: raw.scrollMode } : {}),
+    ...(raw.virtualRoot ? { virtualRoot: raw.virtualRoot } : {}),
+    ...(raw.note ? { note: raw.note } : {}),
+  };
 }
 
 export async function analyzePageStructure(
@@ -905,6 +1017,7 @@ export async function analyzePageStructure(
         totalHeight: raw.totalHeight,
         bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
         ...(raw.scrollRoot ? { scrollRoot: raw.scrollRoot } : {}),
+        ...scrollModeFields(raw),
         attached: true,
       };
     } finally {
@@ -953,6 +1066,7 @@ export async function analyzePageStructure(
       bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
     };
     if (raw.scrollRoot) structure.scrollRoot = raw.scrollRoot;
+    Object.assign(structure, scrollModeFields(raw));
     if (raw.responsive) structure.responsive = buildResponsiveReport(raw.responsive, profile);
     return structure;
   } finally {

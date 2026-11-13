@@ -1386,3 +1386,178 @@ it("SCAN_SNIPPET alpha parsing handles space syntax and percentage alphas", () =
   expect(parseAlpha("color(srgb 0.2 0.4 0.6)")).toBe(1); // modern opaque function
   expect(parseAlpha("linear-gradient(...)")).toBe(0); // non-function → conservative
 });
+
+// Scroll modes: document / virtual (transform-driven wrapper) / canvas-only.
+// The fake DOM carries just what SCAN_SNIPPET reads; elements are listed flat
+// in document order (outermost first) like querySelectorAll("*").
+describe("SCAN_SNIPPET scrollMode", () => {
+  const fakeEl = (tag: string, cls: string, rect: Record<string, number>, over: Record<string, unknown> = {}) => ({
+    tagName: tag.toUpperCase(),
+    id: "",
+    classList: cls ? [cls] : [],
+    children: [] as any[],
+    textContent: "",
+    scrollHeight: 0,
+    clientHeight: 0,
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ left: 0, right: 1440, bottom: rect.top + rect.height, ...rect }),
+    ...over,
+  });
+
+  const scanFake = (opts: { docHeight: number; els: any[]; canvases?: any[]; styleFor?: (el: any) => any }) => {
+    const body: any = fakeEl("body", "", { top: 0, width: 1440, height: opts.docHeight });
+    body.children = opts.els.filter((e) => !opts.els.some((p) => p.children.includes(e)));
+    const fakeDoc = {
+      title: "T",
+      documentElement: { scrollHeight: opts.docHeight, clientHeight: 900 },
+      body,
+      scrollingElement: { clientHeight: 900 },
+      querySelectorAll: (sel: string) => {
+        if (sel === "*") return [body, ...opts.els];
+        if (sel === "canvas") return opts.canvases ?? [];
+        return [];
+      },
+    };
+    const g = globalThis as any;
+    const saved = {
+      document: g.document,
+      getComputedStyle: g.getComputedStyle,
+      scrollX: g.scrollX,
+      scrollY: g.scrollY,
+      innerHeight: g.innerHeight,
+      innerWidth: g.innerWidth,
+    };
+    g.document = fakeDoc;
+    g.scrollX = 0;
+    g.scrollY = 0;
+    g.innerHeight = 900;
+    g.innerWidth = 1440;
+    g.getComputedStyle = (el: any) => ({
+      overflowY: "visible",
+      display: "block",
+      visibility: "visible",
+      position: "relative",
+      backgroundColor: "rgb(255, 255, 255)",
+      ...(opts.styleFor ? opts.styleFor(el) : {}),
+    });
+    try {
+      return SCAN_SNIPPET({});
+    } finally {
+      Object.assign(g, saved);
+    }
+  };
+
+  it("virtual: translated 25200px wrapper gives its height and 0-based band tops", () => {
+    // main moved to top -7955 by the virtual scroller; the document stays 900.
+    const main = fakeEl("main", "home", { top: -7955, width: 1440, height: 25200 });
+    const hero = fakeEl("section", "hero", { top: -7955, width: 1440, height: 900 });
+    const work = fakeEl("section", "work", { top: -7055, width: 1440, height: 3000 });
+    const inner = fakeEl("div", "inner", { top: -7955, width: 1440, height: 25200 }); // equal height: outermost wins
+    main.children = [hero, work];
+    const res = scanFake({
+      docHeight: 900,
+      els: [main, inner, hero, work],
+      styleFor: (el) => (el === work ? { backgroundColor: "rgb(10, 10, 10)" } : {}),
+    });
+    expect(res.scrollMode).toBe("virtual");
+    expect(res.virtualRoot).toBe("main.home");
+    expect(res.totalHeight).toBe(25200);
+    expect(res.scrollRoot).toBeUndefined();
+    const tops = res.candidates.filter((c) => c.tag === "section").map((c) => c.top);
+    expect(tops).toEqual([0, 900]);
+    const bands = collapseBands(res.candidates, res.totalHeight);
+    expect(bands.length).toBeGreaterThan(1);
+    expect(bands[bands.length - 1].offsetTop + bands[bands.length - 1].height).toBe(25200);
+  });
+
+  it("virtual: ignores a fixed-position tall element", () => {
+    const fixedBg = fakeEl("div", "bg", { top: 0, width: 1440, height: 5000 });
+    const res = scanFake({
+      docHeight: 900,
+      els: [fixedBg],
+      styleFor: (el) => (el === fixedBg ? { position: "fixed" } : {}),
+    });
+    expect(res.scrollMode).not.toBe("virtual");
+  });
+
+  it("canvas: a full-viewport canvas on a one-screen page", () => {
+    const canvas = fakeEl("canvas", "webgl", { top: 0, width: 1440, height: 900 });
+    const res = scanFake({ docHeight: 900, els: [canvas], canvases: [canvas] });
+    expect(res.scrollMode).toBe("canvas");
+    expect(res.note).toContain("record_site_motion");
+    expect(res.note).toContain("capture_pose_3d");
+    expect(res.totalHeight).toBe(900);
+    expect(res.virtualRoot).toBeUndefined();
+  });
+
+  it("canvas: a small canvas does not trigger canvas mode", () => {
+    const canvas = fakeEl("canvas", "chart", { top: 0, width: 400, height: 300 }, {});
+    const res = scanFake({ docHeight: 900, els: [canvas], canvases: [canvas] });
+    expect(res.scrollMode).toBe("document");
+    expect(res.note).toBeUndefined();
+  });
+
+  it("document: normal tall page is unchanged (height, no virtualRoot, no note)", () => {
+    const section = fakeEl("section", "a", { top: 0, width: 1440, height: 5000 });
+    const res = scanFake({ docHeight: 5000, els: [section] });
+    expect(res.scrollMode).toBe("document");
+    expect(res.totalHeight).toBe(5000);
+    expect(res.virtualRoot).toBeUndefined();
+    expect(res.scrollRoot).toBeUndefined();
+    expect(res.note).toBeUndefined();
+  });
+
+  it("element scroll root keeps scrollRoot and reports element mode", () => {
+    const scroller = fakeEl("div", "page", { top: 0, width: 1440, height: 900 }, {
+      scrollHeight: 4000,
+      clientHeight: 900,
+    });
+    const res = scanFake({
+      docHeight: 900,
+      els: [scroller],
+      styleFor: (el) => (el === scroller ? { overflowY: "auto" } : {}),
+    });
+    expect(res.scrollMode).toBe("element");
+    expect(res.scrollRoot).toBe("div.page");
+    expect(res.totalHeight).toBe(4000);
+  });
+
+  it("analyzePageStructure passes scrollMode/virtualRoot/note through; omits them when absent", async () => {
+    const mk = (extra: Record<string, unknown>) => ({
+      chromium: {
+        launch: async () => ({
+          newPage: async () => ({
+            addInitScript: async () => {},
+            goto: async () => {},
+            waitForTimeout: async () => {},
+            url: () => "https://x.test/",
+            evaluate: async () => ({
+              title: "T",
+              totalHeight: 25200,
+              candidates: [{ tag: "body", label: "body", bg: "rgb(0,0,0)", top: 0, height: 25200, textStart: "" }],
+              ...extra,
+            }),
+          }),
+          close: async () => {},
+        }),
+      },
+    });
+    const withMode = await analyzePageStructure("https://x.test/", async () => mk({ scrollMode: "virtual", virtualRoot: "main.home" }));
+    if ("error" in withMode) throw new Error(withMode.error);
+    expect(withMode.scrollMode).toBe("virtual");
+    expect(withMode.virtualRoot).toBe("main.home");
+    const without = await analyzePageStructure("https://x.test/", async () => mk({}));
+    if ("error" in without) throw new Error(without.error);
+    expect("scrollMode" in without).toBe(false);
+    expect("virtualRoot" in without).toBe(false);
+    expect("note" in without).toBe(false);
+  });
+
+  it("SCAN_SNIPPET virtual detection and preScroll mirror each other (source-lock)", () => {
+    for (const src of [String(SCAN_SNIPPET), String(preScroll)]) {
+      expect(src).toMatch(/r\.width >= (0)?\.6 \* bodyWidth/);
+      expect(src).toContain("viewportHeight + 100");
+      expect(src).toContain('String(s.position) === "fixed"');
+    }
+  });
+});
