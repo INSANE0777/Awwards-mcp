@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -215,9 +216,12 @@ async function runWorkflow(fixtureOptions: PackFixtureOptions = {}) {
   const pack = envelope(exported);
   expect(pack.status).toBe("ok");
   expect(pack.data.cached).toBe(false);
-  expect(pack.data.directory.startsWith(join(cache.rootDir, "atlas", "evidence-packs"))).toBe(
-    true,
-  );
+  // macOS resolves tmpdir /var to /private/var, so compare canonical paths.
+  expect(
+    realpathSync(pack.data.directory).startsWith(
+      realpathSync(join(cache.rootDir, "atlas", "evidence-packs")),
+    ),
+  ).toBe(true);
 
   // The guarded collector is local; export/reference mode performs no fetch.
   expect(fetched).not.toHaveBeenCalled();
