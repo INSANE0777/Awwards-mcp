@@ -2,7 +2,10 @@
 // qualification harness. No I/O here: the unit tests prove the accounting,
 // exit-code mapping and anti-false-green rules without a server or browser.
 
-export const REPORT_SCHEMA_VERSION = 1;
+export const REPORT_SCHEMA_VERSION = 2;
+// Bumped whenever the harness changes what a report means, so an old report
+// cannot be replayed through a newer release gate.
+export const HARNESS_VERSION = 2;
 export const CHECK_STATUSES = Object.freeze(["PASS", "FAIL", "SKIP"]);
 export const QUALIFICATION_SCOPES = Object.freeze(["full", "offline-installed"]);
 const STATUS = new Set(CHECK_STATUSES);
@@ -67,6 +70,7 @@ export function createReport(meta = {}) {
   const { startedAt = new Date().toISOString(), ...rest } = meta;
   return {
     schemaVersion: REPORT_SCHEMA_VERSION,
+    harnessVersion: HARNESS_VERSION,
     harness: "installed-qualification",
     startedAt,
     ...rest,
@@ -86,13 +90,16 @@ export function addCheck(report, check) {
 }
 
 function summarize(checks, qualificationScope = "full") {
-  const pass = checks.filter((check) => check.status === "PASS").length;
-  const fail = checks.filter((check) => check.status === "FAIL").length;
-  const skip = checks.filter((check) => check.status === "SKIP").length;
-  const blockers = checks
+  const entries = (Array.isArray(checks) ? checks : []).filter(
+    (check) => check && typeof check === "object" && !Array.isArray(check),
+  );
+  const pass = entries.filter((check) => check.status === "PASS").length;
+  const fail = entries.filter((check) => check.status === "FAIL").length;
+  const skip = entries.filter((check) => check.status === "SKIP").length;
+  const blockers = entries
     .filter((check) => check.status === "FAIL")
     .map((check) => ({ id: check.id, reason: check.reason }));
-  const unqualified = checks
+  const unqualified = entries
     .filter((check) => check.status === "SKIP")
     .map((check) => ({ id: check.id, required: check.required, reason: check.reason }));
   let status = fail > 0 ? "FAIL" : unqualified.some((entry) => entry.required) ? "INCOMPLETE" : "PASS";
@@ -126,6 +133,9 @@ export function validateReport(report) {
   if (report.schemaVersion !== REPORT_SCHEMA_VERSION) {
     errors.push(`schemaVersion: expected ${REPORT_SCHEMA_VERSION}`);
   }
+  if (report.harnessVersion !== HARNESS_VERSION) {
+    errors.push(`harnessVersion: expected ${HARNESS_VERSION}`);
+  }
   if (report.harness !== "installed-qualification") errors.push("harness: unexpected name");
   if (!QUALIFICATION_SCOPES.includes(report.qualificationScope)) {
     errors.push(`qualificationScope: expected one of ${QUALIFICATION_SCOPES.join(", ")}`);
@@ -146,6 +156,7 @@ export function validateReport(report) {
   const ids = new Set();
   report.checks.forEach((check, index) => {
     errors.push(...checkProblems(check, `checks[${index}]`));
+    if (!check || typeof check !== "object" || Array.isArray(check)) return;
     if (ids.has(check.id)) errors.push(`checks[${index}]: duplicate id ${check.id}`);
     ids.add(check.id);
   });
@@ -208,7 +219,9 @@ export function renderHumanSummary(report) {
     const artifact = report.artifact;
     lines.push(
       `artifact: ${artifact.filename} sha256:${String(artifact.sha256).slice(0, 16)}… ` +
-        `${artifact.bytes} bytes, ${artifact.files} files`,
+        `${artifact.bytes} bytes` +
+        (Number.isFinite(artifact.files) ? `, ${artifact.files} files` : "") +
+        (artifact.source ? ` (${artifact.source})` : ""),
     );
   }
   const groups = [...new Set(report.checks.map((check) => check.group))];

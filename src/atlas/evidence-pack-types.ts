@@ -4,7 +4,28 @@ import type { EvidenceCoverage, RightsRecord } from "./types.js";
 export const EVIDENCE_PACK_SCHEMA_VERSION = "awwwards-atlas-evidence-pack-v1";
 export const EVIDENCE_SELECTION_SCHEMA_VERSION = "awwwards-atlas-evidence-selection-v2";
 export const EVIDENCE_DESIGN_SCHEMA_VERSION = "awwwards-design-evidence-v1";
-export const EVIDENCE_PACK_EXPORTER_VERSION = "atlas-exporter-1";
+/**
+ * Exporter version 2 records the missing motion family. Version 1 packs were
+ * shipped by 1.19.0 without it; both are validated with their own rules so an
+ * existing pack keeps its identity and stays adoptable.
+ */
+export const EVIDENCE_PACK_EXPORTER_VERSION = "atlas-exporter-2";
+export const LEGACY_EVIDENCE_PACK_EXPORTER_VERSION = "atlas-exporter-1";
+export type PackExporterVersion =
+  | typeof EVIDENCE_PACK_EXPORTER_VERSION
+  | typeof LEGACY_EVIDENCE_PACK_EXPORTER_VERSION;
+export const EVIDENCE_PACK_EXPORTER_VERSIONS: readonly PackExporterVersion[] = [
+  LEGACY_EVIDENCE_PACK_EXPORTER_VERSION,
+  EVIDENCE_PACK_EXPORTER_VERSION,
+];
+/** Null means unsupported: callers must fail closed, never guess a version. */
+export function supportedExporterVersion(value: unknown): PackExporterVersion | null {
+  return EVIDENCE_PACK_EXPORTER_VERSIONS.find((version) => version === value) ?? null;
+}
+/** Whether this exporter version records the missing-motion omission. */
+export function packExporterIncludesMotion(version: PackExporterVersion): boolean {
+  return version !== LEGACY_EVIDENCE_PACK_EXPORTER_VERSION;
+}
 export const EVIDENCE_PACK_ATTRIBUTION = "Awwwards Atlas local evidence pack";
 
 /** MIME recorded for a pack file, derived only from its extension. */
@@ -81,6 +102,11 @@ export interface EvidencePackInput {
 export interface EvidencePackStore {
   cache: Cache;
   now?: () => number;
+  /**
+   * Test/compat seam: emit a supported historical exporter version. Production
+   * callers omit it and get the current version.
+   */
+  exporterVersion?: PackExporterVersion;
   /** Test seam between the validated temp directory and the atomic rename. */
   onBeforePublish?: (tempDir: string) => void;
   /** Test seam inside the publication write transaction, after the head recheck. */

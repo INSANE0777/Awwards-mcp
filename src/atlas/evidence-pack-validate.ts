@@ -33,12 +33,14 @@ import {
   REQUIRED_PACK_FILES,
   STYLE_FIELDS,
   evidenceFileMime,
+  supportedExporterVersion,
   type EvidenceSelection,
   type MediaDecision,
   type PackArtifactRef,
   type PackCapture,
   type PackClaim,
   type PackComponentSummary,
+  type PackExporterVersion,
   type PackOmission,
   type PackRegion,
   type PackSectionSummary,
@@ -494,6 +496,9 @@ export function validateEvidencePack(path: string): PackValidation {
   const errors: PackValidationIssue[] = [];
   const warnings: string[] = [];
   let packId: string | null = null;
+  // A pack is validated with the renderer rules of the export that produced
+  // it, never the current rules; unsupported versions fail closed below.
+  let exporterVersion: PackExporterVersion = EVIDENCE_PACK_EXPORTER_VERSION;
   const fail = (code: string, message: string, issuePath?: string): void => {
     errors.push({ code, message, ...(issuePath ? { path: issuePath } : {}) });
   };
@@ -587,8 +592,11 @@ export function validateEvidencePack(path: string): PackValidation {
   if (manifest.schemaVersion !== EVIDENCE_PACK_SCHEMA_VERSION) {
     fail("MANIFEST_INVALID", "manifest schemaVersion is not supported", MANIFEST);
   }
-  if (manifest.exporterVersion !== EVIDENCE_PACK_EXPORTER_VERSION) {
-    fail("MANIFEST_INVALID", "manifest exporterVersion is not the supported version", MANIFEST);
+  const supportedVersion = supportedExporterVersion(manifest.exporterVersion);
+  if (!supportedVersion) {
+    fail("MANIFEST_INVALID", "manifest exporterVersion is not a supported version", MANIFEST);
+  } else {
+    exporterVersion = supportedVersion;
   }
   if (typeof manifest.packId !== "string" || !HASH.test(manifest.packId)) {
     fail("MANIFEST_INVALID", "manifest packId must be a hex SHA-256", MANIFEST);
@@ -1181,7 +1189,7 @@ export function validateEvidencePack(path: string): PackValidation {
         !HASH.test(designEvidence.requestedUrlHash) ||
         !isFiniteNumber(designEvidence.capturedAt) ||
         !isNonEmptyString(designEvidence.viewport) ||
-        designEvidence.toolVersion !== EVIDENCE_PACK_EXPORTER_VERSION
+        designEvidence.toolVersion !== exporterVersion
       ) {
         fail("DESIGN_EVIDENCE_INVALID", "design-evidence provenance fields are invalid", "design-evidence.json");
       }
@@ -1651,7 +1659,7 @@ export function validateEvidencePack(path: string): PackValidation {
             MANIFEST,
           );
         }
-        const expectedOmitted = omittedValues(derived);
+        const expectedOmitted = omittedValues(derived, exporterVersion);
         if (!sameJsonSet(derived.omitted, expectedOmitted)) {
           fail(
             "MANIFEST_DECISION_MISMATCH",
@@ -1687,7 +1695,7 @@ export function validateEvidencePack(path: string): PackValidation {
       try {
         for (const expected of [
           renderSelectionArtifact(derived).document,
-          ...renderGeneratedDocuments(derived, sha256(selectionBytes)),
+          ...renderGeneratedDocuments(derived, sha256(selectionBytes), exporterVersion),
         ]) {
           const actual = documentBytes.get(expected.path);
           if (!actual) continue;
@@ -2131,7 +2139,7 @@ export function validateEvidencePack(path: string): PackValidation {
     if (!identity) {
       fail("SELECTION_INVALID", "selection is missing identity fields", SELECTION);
     } else {
-      const derived = evidencePackId(identity);
+      const derived = evidencePackId(identity, exporterVersion);
       if (derived !== packId) {
         fail("PACK_ID_MISMATCH", "derived pack id does not match manifest", MANIFEST);
       }

@@ -1050,11 +1050,12 @@ AWWWARDS_MCP_ATLAS=1 awwwards-index --atlas prune --older-than-days <N> --apply
 F9 is component-type precision, not section classification. The harness exports only scorable accepted rows to the labeler's file and keeps every prediction out of it.
 
 ```bash
-npm run atlas:heldout -- collect-components <cacheRoot> <siteSlug> <outDir>
-# label <outDir>/components-review.json, filling <outDir>/component-labels.json
-npm run atlas:heldout -- score-components <outDir>/components-review-full.json <outDir>/component-labels.json
-# or score every <outRoot>/<slug>/ pair together:
-npm run atlas:heldout -- score-components-corpus <outRoot>
+npm run atlas:heldout -- collect-components <cacheRoot> <siteSlug> <outRoot>/<page>
+# hand only <outRoot>/<page>/components-review.json to the labeler; then fill <outRoot>/<page>/component-labels.json
+npm run atlas:heldout -- attest-components <outRoot> <attestation.json>
+npm run atlas:heldout -- score-components <outRoot>/<page>/components-review-full.json <outRoot>/<page>/component-labels.json --provenance <outRoot>/provenance.json [--require-pass]
+# or score every <outRoot>/<page>/ pair together:
+npm run atlas:heldout -- score-components-corpus <outRoot> [--require-pass]
 ```
 
 - `components-review.json` is the blind input. It contains only scorable accepted components — observed `native_semantics`/`declared_aria` rows whose `acceptedTypes` is exactly one real vocabulary type other than `none` or `ambiguous` — with selector, tag, role, accessible name, section heading, rect, screenshot keys, `inputType`, `ariaHasPopup`, `ariaExpanded`, `ariaControlsResolved`, `inNavigation` and the bounded 200-character `ariaLabel`. It contains no predicted type, basis, classification, decision, rule ID or claim.
@@ -1067,7 +1068,8 @@ npm run atlas:heldout -- score-components-corpus <outRoot>
 - `score-components-corpus` reads immediate child directories only. Every immediate child directory of the corpus root must be a real directory and a complete page with both files, so an unrelated nested directory aborts scoring rather than being skipped. A symlinked or junction page directory is refused with `HELDOUT_COMPONENT_INVALID_CORPUS` instead of being skipped; a symlinked file is ignored like any other stray file. A label key may not repeat across pages, and `__proto__`, `constructor` and `prototype` are reserved.
 - Re-running `collect-components` rewrites the full and blind reviews but never overwrites an existing `component-labels.json`, so re-collecting a page keeps human labels. Use a fresh output directory for a fresh corpus; labels from an older capture no longer match and are reported as unknown keys.
 - Per-type status is `pass` at precision >= 0.95 with at least 20 accepted samples, `insufficient` below 20, and `fail` below 0.95. The report gate is `fail` if any measured type fails, `insufficient` if any type lacks samples or nothing was measured, else `pass`.
-- `score-components` and `score-components-corpus` are report-only: they print the report and exit 0 even when the gate is `fail` or `insufficient`. Callers must parse `report.gate`; no `--fail-on-gate` flag exists.
+- `score-components` and `score-components-corpus` are report-only by default: they print the report and exit 0 even when the gate is `fail` or `insufficient`. `--require-pass` adds the release gate: exit 3 for a numerical `fail`/`insufficient` with qualifying evidence, exit 4 for absent/stale/non-human provenance, exit 1 for invalid input, exit 2 for usage. `score-components` also needs `--provenance` in strict mode; without it the provenance is `absent` and the exit is 4. `report.gate` is the numerical fact and `report.provenance.qualifying` is the independent human-evidence fact; a strict pass requires both.
+- `attest-components` writes a versioned `provenance.json` at `<outRoot>/provenance.json`, binding each page's full review, blind review and labels, the corpus hash, declared type population, dataset split, reviewer/controller attestations and human-vs-model provenance. It also binds the classifier fingerprint recorded at collection and the current classifier source hashes (`components`, `vocabulary`, `collector`, `scan`). Recapture, relabeling, a changed page set, a changed classifier, blind-file tampering or a blind file that exposes predictions invalidates it. A classifier change requires deleting old labels and labeling a fresh holdout; unchanged sealed labels are refused. F9 remains unmet until a qualifying human corpus passes `--require-pass`.
 
 ### Labeling contract
 

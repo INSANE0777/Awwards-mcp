@@ -359,7 +359,7 @@ captures, each stamped with the time it was taken.
 
 ## Setup
 
-**Stable, current, fully offline — no API key, no account.** Any MCP-compatible coding agent can use awwwards-mcp.
+**Local-first, no API key, no account.** Any MCP-compatible coding agent can use awwwards-mcp. The server runs locally, but it is not zero-egress at startup: the CLI may refresh the index and check npm for updates.
 Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
 
 **Updates**: the server checks the npm registry once a day and prints an
@@ -561,6 +561,31 @@ refused before any browser launch. The equivalent environment variable is
 `dist` older than `src` and reports INCOMPLETE (exit 2), so an existing build
 cannot qualify stale code.
 
+To qualify a tarball that already exists, without rebuilding or repacking:
+
+```bash
+npm run qualify:installed -- --tarball <packed.tgz> \
+  --fixture-url https://awwwards-mcp.vercel.app/
+```
+
+The tarball is hashed with its npm SHA-512 integrity, installed from that exact
+path, and the package name/version are read back from the installed tree. The
+report goes to `.qualification/installed-report.json` by default. Without
+`--fixture-url` the run is `qualificationScope: "offline-installed"` —
+INCOMPLETE (exit 2), never a release PASS. A qualifying report is then gated
+against the same bytes:
+
+```bash
+node scripts/qualify/gate.mjs \
+  --report .qualification/installed-report.json --tarball <packed.tgz> \
+  --filename <tarball basename> --package awwwards-mcp --version <version>
+```
+
+`--mode` defaults to `tarball`; use `--mode pack` for a report from a pack-mode
+qualification. Add `--integrity <registry-SRI>` when gating an already-published
+version. A report only qualifies the exact bytes it names; the gate must pass
+before the same path is published.
+
 ### Resource limits and diagnostics
 
 All optional and read at startup:
@@ -630,8 +655,9 @@ Install them with the [`skills` CLI](https://skills.sh):
 npx skills add INSANE0777/awwwards-skills
 ```
 
-Tested pairing: **`awwwards-mcp@1.19.0` + `skills-v2026.11.11`**. The 1.18
-release keeps the same **41 / 13 / 15** tool surface (**45 / 13 / 16** with
+Tested pairing: **`awwwards-mcp@1.20.0` + `skills-v2026.11.11`** (the skills
+tag pairing is being updated separately). The 1.20 release keeps the same
+**41 / 13 / 15** tool surface (**45 / 13 / 16** with
 `AWWWARDS_MCP_ATLAS=1`), but rerun the
 compatibility check before a later release changes either side.
 

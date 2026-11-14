@@ -194,6 +194,8 @@ export interface PackFixtureOptions {
   componentCount?: number;
   /** Collect component candidates and packs; default true. */
   components?: boolean;
+  /** Add one capture-level external-media artifact (never copyable). */
+  externalMedia?: boolean;
 }
 
 export interface PackFixtureResult {
@@ -342,6 +344,18 @@ export async function buildPackAttempt(
   }
 
   const artifacts: AtlasStoredArtifact[] = [scanStored, ...screenshots, ...packArtifacts];
+  if (options.externalMedia) {
+    const external = writeArtifactBytesSync(cache.rootDir, PNG, ".png");
+    artifacts.push({
+      key: `external-media-${viewport}-0`,
+      kind: "external_media",
+      storagePath: external.storagePath,
+      sha256: external.sha256,
+      bytes: external.bytes,
+      mimeType: "image/png",
+      regionKey: null,
+    });
+  }
   let stateArtifact: AtlasStoredArtifact | null = null;
   if (options.includeState) {
     const stored = writeJsonArtifactSync(cache.rootDir, {

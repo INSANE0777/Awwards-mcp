@@ -591,6 +591,52 @@ describe("component held-out review", () => {
     ).toBe("HELDOUT_COMPONENT_INVALID_LABEL");
   });
 
+  it("rejects a prediction nested inside rect before export", () => {
+    const out = mkdtempSync(join(tmpdir(), "atlas-component-heldout-"));
+    try {
+      for (const rect of [
+        { ...row(1, "button").rect, acceptedTypes: ["button"] },
+        { ...row(1, "button").rect, x: "0" },
+      ]) {
+        const malicious = { ...row(1, "button"), rect } as HeldoutComponentRow;
+        expect(
+          errorCode(() => writeHeldoutComponentReview(reviewWith([malicious]), out)),
+          JSON.stringify(rect),
+        ).toBe("HELDOUT_COMPONENT_INVALID_REVIEW");
+        expect(existsSync(join(out, "components-review-full.json"))).toBe(false);
+        expect(existsSync(join(out, "components-review.json"))).toBe(false);
+        expect(existsSync(join(out, "component-labels.json"))).toBe(false);
+      }
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects nested prediction fields in a review file and never scores them", () => {
+    const root = mkdtempSync(join(tmpdir(), "atlas-component-cli-"));
+    try {
+      const malicious = {
+        ...row(1, "button"),
+        rect: { ...row(1, "button").rect, acceptedTypes: ["button"] },
+      };
+      const reviewPath = join(root, "components-review-full.json");
+      const labelsPath = join(root, "component-labels.json");
+      writeFileSync(reviewPath, JSON.stringify(reviewWith([malicious as HeldoutComponentRow])));
+      writeFileSync(
+        labelsPath,
+        JSON.stringify({ [componentHeldoutKey(malicious)]: ["button"] }),
+      );
+      const run = runScoreComponents(reviewPath, labelsPath);
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("HELDOUT_COMPONENT_INVALID_REVIEW");
+      expect(run.stderr).not.toContain("acceptedTypes");
+      expect(run.stderr.split("\n")).toHaveLength(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects duplicate component keys within one review", () => {
     const first = row(1, "button");
     const second = { ...row(2, "button"), nodeKey: first.nodeKey };

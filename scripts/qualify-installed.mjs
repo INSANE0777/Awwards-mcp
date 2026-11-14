@@ -26,12 +26,14 @@ import {
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { GUARD_MARKER } from "./egress-guard-marker.cjs";
 import { buildChildEnv, cacheFingerprint, sameCacheFingerprint } from "./qualify/child-env.mjs";
 import { ATLAS_ACTIONS, classifyFlagOffProbe, classifyFlagOnProbe } from "./qualify/cli-probe.mjs";
+import { describeArtifactFile, assertInstalledTree, installedPackageDir, readInstalledIdentity, unsafeArtifactPath } from "./qualify/artifact.mjs";
 import { APPROVED_FIXTURE_URL, normalizeFixtureUrl } from "./qualify/fixture.mjs";
+import { requiredCheckInventory } from "./qualify/gate.mjs";
 import {
   ATLAS_FULL_TOOLS,
   ATLAS_V2_BRANCHES,
@@ -60,6 +62,8 @@ import {
   renderHumanSummary,
   validateReport,
 } from "./qualify/report.mjs";
+import { extractArtifact } from "./release-artifact.mjs";
+import { computeIntegrity } from "./release-integrity.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
@@ -85,13 +89,14 @@ const FIXTURE = `<!doctype html>
 </html>`;
 
 const USAGE = `usage: node scripts/qualify-installed.mjs [--report <path>] [--skip-build]
-       [--no-browser] [--keep-temp] [--verbose] [--timeout-ms <n>]
-       [--fixture-url ${APPROVED_FIXTURE_URL}]`;
+       [--tarball <packed.tgz>] [--no-browser] [--keep-temp] [--verbose]
+       [--timeout-ms <n>] [--fixture-url ${APPROVED_FIXTURE_URL}]`;
 
 function parseArgs(argv) {
   const options = {
     report: join(ROOT, ".qualification", "installed-report.json"),
     skipBuild: false,
+    tarball: null,
     browser: true,
     keepTemp: false,
     timeoutMs: 120_000,
@@ -106,7 +111,11 @@ function parseArgs(argv) {
     else if (arg === "--no-browser") options.browser = false;
     else if (arg === "--keep-temp") options.keepTemp = true;
     else if (arg === "--verbose") options.verbose = true;
-    else if (arg === "--fixture-url") {
+    else if (arg === "--tarball") {
+      const value = argv[++index];
+      if (!value) throw new Error(`--tarball needs an existing packed tarball\n${USAGE}`);
+      options.tarball = resolve(value);
+    } else if (arg === "--fixture-url") {
       const value = argv[++index];
       if (!value) throw new Error(`--fixture-url needs an approved URL\n${USAGE}`);
       options.fixtureUrl = normalizeFixtureUrl(value);
@@ -125,17 +134,25 @@ function parseArgs(argv) {
       throw new Error(`unknown argument: ${arg}\n${USAGE}`);
     }
   }
+  if (options.tarball && options.skipBuild) {
+    throw new Error(`--skip-build has no meaning with --tarball; the supplied artifact is used as-is\n${USAGE}`);
+  }
   return options;
 }
 
 const options = parseArgs(process.argv.slice(2));
+const qualificationMode = options.tarball ? "tarball" : "pack";
 const report = createReport({
   node: process.version,
   platform: `${process.platform}-${process.arch}`,
-  package: { name: PKG.name, version: PKG.version },
+  checkoutPackage: { name: PKG.name, version: PKG.version },
   repo: gitInfo(),
+  input: { mode: qualificationMode },
+  qualificationFixture: { url: options.fixtureUrl },
+  requiredInventory: requiredCheckInventory(qualificationMode),
   options: {
     skipBuild: options.skipBuild,
+    tarball: Boolean(options.tarball),
     browser: options.browser,
     keepTemp: options.keepTemp,
     timeoutMs: options.timeoutMs,
@@ -371,7 +388,7 @@ async function seedCache(cacheDir, { siteUrl } = {}) {
   }
   writeFileSync(
     join(cacheDir, "version-check.json"),
-    JSON.stringify({ checkedAt: now, latest: PKG.version }),
+    JSON.stringify({ checkedAt: now, latest: report.package?.version ?? PKG.version }),
   );
   writeFileSync(join(cacheDir, "env-check.json"), JSON.stringify({ checkedAt: now }));
 }
@@ -1208,77 +1225,106 @@ async function runQualification() {
     realCache: { path: realCache, existedBefore: realCacheBefore.exists },
   };
 
-  const build = await check("artifact.build", "artifact", true, async () => {
-    if (options.skipBuild) {
-      assert(existsSync(join(ROOT, "dist", "cli.js")), "dist/cli.js is missing; run without --skip-build");
-      const freshness = checkDistFreshness({
-        srcDir: join(ROOT, "src"),
-        distDir: join(ROOT, "dist"),
-      });
-      if (!freshness.ok) {
+  if (qualificationMode === "tarball") {
+    requirePass(
+      await check("artifact.input", "artifact", true, async () => {
+        const metadata = describeArtifactFile(options.tarball);
+        tarball = metadata.path;
+        report.artifact = {
+          source: "tarball",
+          filename: metadata.filename,
+          sha256: metadata.sha256,
+          integrity: metadata.integrity,
+          bytes: metadata.bytes,
+          files: null,
+        };
         return {
-          status: "SKIP",
-          reason: `--skip-build refused: ${freshness.reason}`,
+          status: "PASS",
+          reason:
+            `${metadata.filename}: ${metadata.bytes} bytes, sha512 ${metadata.integrity.slice(0, 24)}…, ` +
+            "supplied artifact hashed as-is (no build or pack)",
+          details: { filename: metadata.filename, sha256: metadata.sha256, bytes: metadata.bytes },
+        };
+      }),
+      "artifact input",
+    );
+  } else {
+    const build = await check("artifact.build", "artifact", true, async () => {
+      if (options.skipBuild) {
+        assert(existsSync(join(ROOT, "dist", "cli.js")), "dist/cli.js is missing; run without --skip-build");
+        const freshness = checkDistFreshness({
+          srcDir: join(ROOT, "src"),
+          distDir: join(ROOT, "dist"),
+        });
+        if (!freshness.ok) {
+          return {
+            status: "SKIP",
+            reason: `--skip-build refused: ${freshness.reason}`,
+            details: freshness,
+          };
+        }
+        return {
+          status: "PASS",
+          reason: `using the existing dist (build skipped); ${freshness.reason}`,
           details: freshness,
         };
       }
-      return {
-        status: "PASS",
-        reason: `using the existing dist (build skipped); ${freshness.reason}`,
-        details: freshness,
-      };
+      npm(["run", "build"]);
+      assert(existsSync(join(ROOT, "dist", "cli.js")), "npm run build produced no dist/cli.js");
+      return { status: "PASS", reason: "npm run build completed; dist/cli.js present" };
+    });
+    if (build.status === "SKIP") {
+      report.notes.push(
+        "artifact build was not qualified (stale dist under --skip-build); dependent checks were not run",
+      );
+      return;
     }
-    npm(["run", "build"]);
-    assert(existsSync(join(ROOT, "dist", "cli.js")), "npm run build produced no dist/cli.js");
-    return { status: "PASS", reason: "npm run build completed; dist/cli.js present" };
-  });
-  if (build.status === "SKIP") {
-    report.notes.push(
-      "artifact build was not qualified (stale dist under --skip-build); dependent checks were not run",
-    );
-    return;
-  }
-  requirePass(build, "artifact build");
+    requirePass(build, "artifact build");
 
-  requirePass(
-    await check("artifact.pack", "artifact", true, async () => {
-      const packDir = join(tempRoot, "pack");
-      mkdirSync(packDir, { recursive: true });
-      const parsed = JSON.parse(
-        npm(["pack", "--json", "--prefer-offline", "--pack-destination", packDir]).stdout,
-      );
-      const info = parsed?.[0];
-      assert(info?.filename, "npm pack returned no filename");
-      tarball = join(packDir, info.filename);
-      const bytes = readFileSync(tarball);
-      const sha256 = createHash("sha256").update(bytes).digest("hex");
-      const files = (info.files ?? []).map((file) => file.path);
-      assert(files.length > 0, "npm pack reported no files");
-      for (const required of ["package.json", "dist/cli.js", "dist/index-cli.js", "README.md", "ATLAS.md"]) {
-        assert(files.includes(required), `packed artifact is missing ${required}`);
-      }
-      const forbidden = files.filter(
-        (file) =>
-          /^(src|test|scripts|node_modules|docs|coverage)\//.test(file) ||
-          file.startsWith(".") ||
-          file.includes("..") ||
-          resolve(file) === file,
-      );
-      assert(forbidden.length === 0, `packed artifact leaks checkout files: ${forbidden.slice(0, 5).join(", ")}`);
-      report.artifact = {
-        filename: info.filename,
-        sha256,
-        bytes: bytes.length,
-        files: files.length,
-      };
-      return {
-        status: "PASS",
-        reason: `${info.filename}: ${files.length} files, sha256 ${sha256.slice(0, 16)}…, no checkout files`,
-        details: { filename: info.filename, sha256, bytes: bytes.length, files: files.length },
-      };
-    }),
-    "artifact pack",
-  );
+    requirePass(
+      await check("artifact.pack", "artifact", true, async () => {
+        const packDir = join(tempRoot, "pack");
+        mkdirSync(packDir, { recursive: true });
+        const parsed = JSON.parse(
+          npm(["pack", "--json", "--prefer-offline", "--pack-destination", packDir]).stdout,
+        );
+        const packed = extractArtifact(parsed);
+        tarball = join(packDir, packed.filename);
+        const bytes = readFileSync(tarball);
+        const integrity = computeIntegrity(bytes);
+        assert(
+          integrity === packed.integrity,
+          `computed integrity ${integrity} does not match npm pack integrity ${packed.integrity}`,
+        );
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        const files = (parsed[0].files ?? []).map((file) => file.path);
+        assert(files.length > 0, "npm pack reported no files");
+        for (const required of ["package.json", "dist/cli.js", "dist/index-cli.js", "README.md", "ATLAS.md"]) {
+          assert(files.includes(required), `packed artifact is missing ${required}`);
+        }
+        const forbidden = files.filter(
+          (file) =>
+            /^(src|test|scripts|node_modules|docs|coverage)\//.test(file) ||
+            unsafeArtifactPath(file),
+        );
+        assert(forbidden.length === 0, `packed artifact leaks checkout files: ${forbidden.slice(0, 5).join(", ")}`);
+        report.artifact = {
+          source: "pack",
+          filename: packed.filename,
+          sha256,
+          integrity,
+          bytes: bytes.length,
+          files: files.length,
+        };
+        return {
+          status: "PASS",
+          reason: `${packed.filename}: ${files.length} files, sha256 ${sha256.slice(0, 16)}…, no checkout files`,
+          details: { filename: packed.filename, sha256, integrity, bytes: bytes.length, files: files.length },
+        };
+      }),
+      "artifact pack",
+    );
+  }
 
   requirePass(
     await check("artifact.install", "artifact", true, async () => {
@@ -1297,21 +1343,32 @@ async function runQualification() {
       ]);
       globalRoot = npm(["root", "-g", "--prefix", prefix]).stdout.trim();
       const globalPrefix = npm(["prefix", "-g", "--prefix", prefix]).stdout.trim();
-      installedPkgDir = join(globalRoot, PKG.name);
+      installedPkgDir = installedPackageDir(globalRoot);
       installedCli = join(installedPkgDir, "dist", "cli.js");
       installedIndexCli = join(installedPkgDir, "dist", "index-cli.js");
       assert(existsSync(join(installedPkgDir, "package.json")), `installed package missing at ${installedPkgDir}`);
       assert(existsSync(installedCli), `installed CLI missing at ${installedCli}`);
       assert(existsSync(installedIndexCli), `installed index CLI missing at ${installedIndexCli}`);
-      const installed = JSON.parse(readFileSync(join(installedPkgDir, "package.json"), "utf8"));
-      assert(installed.version === PKG.version, `installed version ${installed.version}, expected ${PKG.version}`);
+      const installed = readInstalledIdentity(installedPkgDir);
       for (const [bin, target] of Object.entries(PKG.bin)) {
         assert(existsSync(join(installedPkgDir, target)), `${bin} target missing: ${target}`);
       }
+      const installedFiles = walkFiles(installedPkgDir)
+        .map((file) => relative(installedPkgDir, file).replace(/\\/g, "/"))
+        .filter((file) => file !== "node_modules" && !file.startsWith("node_modules/"));
+      assertInstalledTree(installedFiles);
+      const afterInstall = describeArtifactFile(tarball);
+      assert(
+        afterInstall.integrity === report.artifact.integrity && afterInstall.bytes === report.artifact.bytes,
+        "artifact bytes changed between qualification and install",
+      );
+      report.package = installed;
       report.artifact = { ...report.artifact, installedVersion: installed.version };
       return {
         status: "PASS",
-        reason: `${PKG.name}@${installed.version} installed under the throwaway prefix; all bins present`,
+        reason:
+          `${installed.name}@${installed.version} installed from the ${report.artifact.source} artifact; ` +
+          "all bins present and bytes unchanged",
         details: { globalRoot, globalPrefix, packageDir: installedPkgDir },
       };
     }),

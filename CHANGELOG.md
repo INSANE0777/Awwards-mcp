@@ -3,6 +3,36 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.20.0 - 2026-11-14
+
+### Artifact-bound release qualification
+
+- `npm run qualify:installed` accepts `--tarball <packed.tgz>`: the supplied tarball is hashed (SHA-256 and npm SHA-512 integrity), installed from that exact path without rebuilding or repacking, and the reported package name/version are read back from the installed tree instead of checkout metadata.
+- Added `scripts/qualify/gate.mjs`, which refuses a qualification report unless it is a full-scope run against the approved fixture, was produced by the current harness version and is bound to the exact tarball bytes — including the registry integrity when gating an already-published version. Its required-check inventory is compiled in, so a report cannot shrink its own gate by omitting checks.
+- The release workflow now packs once and carries that artifact through verification, installed qualification, the evidence gate and `npm publish`; a qualification gate must pass against the same path before publication, and qualification evidence is uploaded on every outcome.
+
+### Evidence-pack exporter compatibility
+
+- Exporter version 2 adds the missing-motion omission (`motion: NOT_CAPTURED`), which v1 packs never recorded. Packs are now validated and re-rendered with the rules of the exporter that produced them: `atlas-exporter-1` packs from 1.19.0 keep their pack identity and stay adoptable, while unsupported exporter versions fail closed instead of being guessed.
+
+### F9 provenance controls (experimental)
+
+- `atlas-heldout-review attest-components` writes a versioned `provenance.json` binding each page's full review, blind review and labels, the corpus hash, declared type population, dataset split, reviewer/controller attestations and human-vs-model provenance. It also pins the classifier fingerprint recorded at collection and the current classifier source hashes (`components`, `vocabulary`, `collector`, `scan`), so recapture, relabeling, a changed page set, a changed classifier, blind-file tampering or a blind file exposing predictions invalidates the attestation.
+- `score-components` and `score-components-corpus` gained `--provenance` and `--require-pass`, with pinned exits: 3 for a numerical `fail`/`insufficient` with qualifying evidence, 4 for absent/stale/non-human provenance, 1 for invalid input, 2 for usage. `report.gate` (numerical) and `report.provenance.qualifying` (human evidence) remain separate facts; a strict pass needs both. Score-only behavior is unchanged.
+
+### Protocol and distribution checks
+
+- The protocol smoke now covers both MCP eras (`2025-06-18` initialize and `2026-07-28` discover) across every profile (`full`, `core`, `v2`, Atlas on and off), asserting negotiated versions, per-profile surface counts, branch and output-schema behavior, `structuredContent`, and typed failures against an isolated seeded cache.
+- Install/distribution audit and doc corrections: the release documentation no longer claims zero egress at startup (the CLI may refresh the index and check npm for updates), and it now documents tarball qualification, `--mode pack`, `--integrity` and the INCOMPLETE `offline-installed` scope.
+
+### Known limitations
+
+- The W2 live pilot is **INCOMPLETE**: component-only coverage, 1x1 sr-only sections, and human review still pending.
+- F9 held-out component precision remains **UNMET** pending a qualifying human corpus that passes `--require-pass`.
+- Atlas remains experimental and off by default (`AWWWARDS_MCP_ATLAS=1` to enable).
+- The Three.js and Spector adapters and the `verify_build.scene3d` gate keep their existing status; no status change in this release.
+- The last full test run excluded the Chromium browser tests (`*.chromium.test.ts`).
+
 ## v1.19.0 - 2026-11-11
 
 ### Atlas Phase 6 (experimental, opt-in)
