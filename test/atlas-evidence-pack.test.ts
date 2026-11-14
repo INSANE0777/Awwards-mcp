@@ -36,6 +36,8 @@ import {
   MAX_TEXT_DOCUMENT_BYTES,
   REQUIRED_DESIGN_SECTIONS,
   evidenceFileMime,
+  EVIDENCE_PACK_EXPORTER_VERSION,
+  LEGACY_EVIDENCE_PACK_EXPORTER_VERSION,
   type EvidencePackInput,
   type EvidenceSelection,
   type PackValidation,
@@ -265,10 +267,12 @@ function packStore(
   onBeforePublish?: (tempDir: string) => void,
   onBeforeRename?: () => void,
   onAfterRename?: (finalDir: string) => void,
+  exporterVersion?: "atlas-exporter-1" | "atlas-exporter-2",
 ) {
   return {
     cache,
     now: () => PACK_NOW,
+    ...(exporterVersion ? { exporterVersion } : {}),
     ...(onBeforePublish ? { onBeforePublish } : {}),
     ...(onBeforeRename ? { onBeforeRename } : {}),
     ...(onAfterRename ? { onAfterRename } : {}),
@@ -574,7 +578,7 @@ describe("Atlas evidence packs", () => {
     const manifest = manifestOf(built.directory);
     expect(manifest).toMatchObject({
       schemaVersion: "awwwards-atlas-evidence-pack-v1",
-      exporterVersion: "atlas-exporter-1",
+      exporterVersion: EVIDENCE_PACK_EXPORTER_VERSION,
       packId: built.packId,
       createdAt: PACK_NOW,
       goal: GOAL,
@@ -599,6 +603,46 @@ describe("Atlas evidence packs", () => {
     expect(evidence.claims.some((claim: { state: string }) => claim.state === "hover")).toBe(true);
     expect(manifest.coverage).toMatchObject({ status: "complete", collected: 2 });
     expect(manifest.rightsAssertions).toEqual([]);
+  });
+
+  it("validates and adopts a legacy exporter-1 pack while new packs use exporter-2", async () => {
+    const cache = cacheFor();
+    const fixture = await publishPackFixture(cache, { includeState: true });
+    const input = inputFor(fixture);
+
+    const legacy = await buildEvidencePack(
+      input,
+      packStore(cache, undefined, undefined, undefined, LEGACY_EVIDENCE_PACK_EXPORTER_VERSION),
+    );
+    expect(manifestOf(legacy.directory).exporterVersion).toBe(
+      LEGACY_EVIDENCE_PACK_EXPORTER_VERSION,
+    );
+    expect(validateEvidencePack(legacy.directory).ok).toBe(true);
+    expect(designEvidenceOf(legacy.directory).toolVersion).toBe(
+      LEGACY_EVIDENCE_PACK_EXPORTER_VERSION,
+    );
+    expect(
+      (manifestOf(legacy.directory).omitted as Array<{ family: string }>).some(
+        (entry) => entry.family === "motion",
+      ),
+    ).toBe(false);
+
+    const adopted = adoptEvidencePack(legacy.directory, packStore(cache), legacy.packId);
+    expect(adopted.packId).toBe(legacy.packId);
+    expect(adopted.manifestHash).toBe(legacy.manifestHash);
+
+    const current = await buildEvidencePack(input, packStore(cache));
+    expect(current.packId).not.toBe(legacy.packId);
+    expect(manifestOf(current.directory).exporterVersion).toBe(
+      EVIDENCE_PACK_EXPORTER_VERSION,
+    );
+    expect(
+      (manifestOf(current.directory).omitted as Array<{ family: string }>).some(
+        (entry) => entry.family === "motion",
+      ),
+    ).toBe(true);
+    expect(validateEvidencePack(current.directory).ok).toBe(true);
+    expect(validateEvidencePack(legacy.directory).ok).toBe(true);
   });
 
   it("resolves every evidence pointer in the pack-local selection artifact", async () => {
@@ -2163,7 +2207,7 @@ describe("Atlas evidence packs", () => {
     );
     expect(row.state).toBe("ready");
     expect(row.manifest_hash).toBe(built.manifestHash);
-    expect(row.exporter_version).toBe("atlas-exporter-1");
+    expect(row.exporter_version).toBe(EVIDENCE_PACK_EXPORTER_VERSION);
     const selection = JSON.parse(String(row.selection_json));
     expect(selection.regionIds).toEqual([...input.regionIds].sort());
     expect(selection.inclusionMode).toBe("references");

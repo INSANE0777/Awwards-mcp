@@ -4,6 +4,7 @@ import { stableHash } from "./identity.js";
 import {
   EVIDENCE_PACK_EXPORTER_VERSION,
   type InclusionMode,
+  type PackExporterVersion,
   type PolicyState,
 } from "./evidence-pack-types.js";
 import type { RightsRecord } from "./types.js";
@@ -39,7 +40,10 @@ function compareText(left: string, right: string): number {
 }
 
 /** Deterministic pack identity; the creation clock is deliberately excluded. */
-export function evidencePackId(input: PackIdentityInput): string {
+export function evidencePackId(
+  input: PackIdentityInput,
+  exporterVersion: PackExporterVersion = EVIDENCE_PACK_EXPORTER_VERSION,
+): string {
   const captureIdentity = input.captures.map((capture) =>
     JSON.stringify([
       capture.id,
@@ -76,7 +80,7 @@ export function evidencePackId(input: PackIdentityInput): string {
     JSON.stringify(rightsIdentity),
     ATLAS_VOCABULARY_VERSION,
     ATLAS_CLASSIFIER_VERSION,
-    EVIDENCE_PACK_EXPORTER_VERSION,
+    exporterVersion,
     String(ATLAS_SCHEMA_VERSION),
     String(ATLAS_FTS_VERSION),
   );

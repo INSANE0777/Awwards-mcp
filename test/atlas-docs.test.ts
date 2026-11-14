@@ -213,6 +213,17 @@ describe("Atlas documentation", () => {
     );
   });
 
+  it("pins the F9 attestation and strict-gate controls", () => {
+    expect(F9_SECTION).toContain("attest-components <outRoot> <attestation.json>");
+    expect(F9_SECTION).toContain("<outRoot>/<page>");
+    expect(F9_SECTION).toContain("--require-pass");
+    expect(F9_SECTION).toContain("exit 3 for a numerical `fail`/`insufficient`");
+    expect(F9_SECTION).toContain("exit 4 for absent/stale/non-human provenance");
+    expect(F9_SECTION).toContain("`score-components` also needs `--provenance` in strict mode");
+    expect(F9_SECTION).toContain("(`components`, `vocabulary`, `collector`, `scan`)");
+    expect(F9_SECTION).toContain("F9 remains unmet until a qualifying human corpus");
+  });
+
   it("documents the result-envelope data rules", () => {
     expect(ATLAS_DOC).toContain("`ok` and `partial` always carry operation data in `data`");
     expect(ATLAS_DOC).toContain("`inconclusive` carries resolved evidence when the operation produced any");

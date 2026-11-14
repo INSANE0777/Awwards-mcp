@@ -528,9 +528,9 @@ describe("elements cache", () => {
   it("listElements returns rows newest-fetched first", () => {
     let t = 1_000_000;
     const cache = new Cache(tmpDir(), () => t);
-    cache.upsertElements([elementRecord({ slug: "old" })]);
+    cache.upsertElements([elementRecord({ slug: "old", fetchedAt: 1_000_000 })]);
     t += 5_000;
-    cache.upsertElements([elementRecord({ slug: "new" })]);
+    cache.upsertElements([elementRecord({ slug: "new", fetchedAt: 1_005_000 })]);
     expect(cache.listElements(10).map((r) => r.slug)).toEqual(["new", "old"]);
     expect(cache.listElements(1).map((r) => r.slug)).toEqual(["new"]);
   });

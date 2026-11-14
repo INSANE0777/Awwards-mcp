@@ -34,6 +34,7 @@ import {
   STYLE_FIELDS,
   EvidencePackError,
   evidenceFileMime,
+  supportedExporterVersion,
   type EvidencePackFile,
   type EvidencePackInput,
   type EvidencePackResult,
@@ -45,6 +46,7 @@ import {
   type PackArtifactRef,
   type PackCapture,
   type PackClaim,
+  type PackExporterVersion,
   type PackObservation,
   type PackOmission,
   type PackRegion,
@@ -160,6 +162,7 @@ interface PackRegistration {
   manifestHash: string;
   selectionJson: string;
   createdAt: number;
+  exporterVersion: PackExporterVersion;
 }
 
 interface FrozenFile {
@@ -830,6 +833,7 @@ function manifestFor(
   selection: EvidenceSelection,
   createdAt: number,
   files: EvidencePackFile[],
+  exporterVersion: PackExporterVersion,
 ): Record<string, unknown> {
   const observed = selection.captures
     .map((capture) => capture.observedAt ?? capture.lastConfirmedAt ?? capture.sourceFetchedAt)
@@ -850,7 +854,7 @@ function manifestFor(
     .map((decision) => ({ artifactId: decision.artifactId, reason: decision.reason }));
   return {
     schemaVersion: EVIDENCE_PACK_SCHEMA_VERSION,
-    exporterVersion: EVIDENCE_PACK_EXPORTER_VERSION,
+    exporterVersion,
     packId: selection.packId,
     createdAt,
     goal: selection.goal,
@@ -910,7 +914,7 @@ function writePackRow(db: DatabaseSync, registration: PackRegistration): void {
     registration.manifestHash,
     registration.selectionJson,
     registration.createdAt,
-    EVIDENCE_PACK_EXPORTER_VERSION,
+    registration.exporterVersion,
   );
 }
 
@@ -1013,8 +1017,13 @@ function registrationOf(result: EvidencePackResult): PackRegistration {
     createdAt: number;
     goal: string;
     inclusionMode: string;
+    exporterVersion: unknown;
     selection: { regionIds: string[]; captureIds: string[] };
   };
+  const exporterVersion = supportedExporterVersion(manifest.exporterVersion);
+  if (!exporterVersion) {
+    throw new EvidencePackError("PACK_CORRUPT", "evidence pack exporter version is unsupported");
+  }
   return {
     packId: result.packId,
     manifestHash: result.manifestHash,
@@ -1025,6 +1034,7 @@ function registrationOf(result: EvidencePackResult): PackRegistration {
       goal: manifest.goal,
     }),
     createdAt: manifest.createdAt,
+    exporterVersion,
   };
 }
 
@@ -1038,6 +1048,10 @@ function freezePack(directory: string, selection: EvidenceSelection, createdAt: 
   const manifestBytes = readFileSync(join(directory, "manifest.json"));
   const manifestHash = manifestPin(manifestBytes);
   const manifest = manifestObject(manifestBytes);
+  const exporterVersion = supportedExporterVersion(manifest.exporterVersion);
+  if (!exporterVersion) {
+    throw new EvidencePackError("PACK_CORRUPT", "evidence pack exporter version is unsupported");
+  }
   const files = Array.isArray(manifest.files) ? (manifest.files as EvidencePackFile[]) : [];
   const selectionBytes = readFileSync(join(directory, "artifacts", "selection.json"));
   let selectionValue: unknown;
@@ -1064,6 +1078,7 @@ function freezePack(directory: string, selection: EvidenceSelection, createdAt: 
         goal: selection.goal,
       }),
       createdAt,
+      exporterVersion,
     },
   };
 }
@@ -2041,6 +2056,10 @@ export async function buildEvidencePack(
   const cache = store.cache;
   const normalized = normalizeInput(input);
   const now = store.now?.() ?? Date.now();
+  const exporterVersion = supportedExporterVersion(
+    store.exporterVersion ?? EVIDENCE_PACK_EXPORTER_VERSION,
+  );
+  if (!exporterVersion) throw invalid("exporter version is not supported");
 
   const loaded = cache.withAtlasDb((db) => {
     db.exec("BEGIN");
@@ -2299,15 +2318,18 @@ export async function buildEvidencePack(
       .filter((value): value is string => typeof value === "string"),
   );
   const omitted: PackOmission[] = [];
-  const packId = evidencePackId({
-    siteSlug: normalized.siteSlug,
-    goal: normalized.goal,
-    inclusionMode: normalized.inclusionMode,
-    regionIds: ordered.map((region) => region.regionId),
-    captures,
-    references: [...referencesById.values()],
-    rights: normalized.rights,
-  });
+  const packId = evidencePackId(
+    {
+      siteSlug: normalized.siteSlug,
+      goal: normalized.goal,
+      inclusionMode: normalized.inclusionMode,
+      regionIds: ordered.map((region) => region.regionId),
+      captures,
+      references: [...referencesById.values()],
+      rights: normalized.rights,
+    },
+    exporterVersion,
+  );
 
   const selection: EvidenceSelection = {
     packId,
@@ -2340,12 +2362,16 @@ export async function buildEvidencePack(
   };
   // Tokens and omitted families derive from the final claim set.
   selection.tokens = buildTokens(selection);
-  selection.omitted = omittedValues(selection);
+  selection.omitted = omittedValues(selection, exporterVersion);
 
   const selectionArtifact = renderSelectionArtifact(selection);
   const documents = [
     selectionArtifact.document,
-    ...renderGeneratedDocuments(selection, sha256(selectionArtifact.document.content)),
+    ...renderGeneratedDocuments(
+      selection,
+      sha256(selectionArtifact.document.content),
+      exporterVersion,
+    ),
   ];
   assertWithinLimits(documents);
 
@@ -2393,7 +2419,7 @@ export async function buildEvidencePack(
       }
     }
 
-    const manifest = manifestFor(selection, now, files);
+    const manifest = manifestFor(selection, now, files, exporterVersion);
     const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
     writeFileExclusive(tempDir, "manifest.json", manifestText);
 

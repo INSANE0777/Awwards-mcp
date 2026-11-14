@@ -7,12 +7,12 @@
     "source": "github"
   },
   "websiteUrl": "https://awwwards-mcp.vercel.app",
-  "version": "1.19.0",
+  "version": "1.20.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "awwwards-mcp",
-      "version": "1.19.0",
+      "version": "1.20.0",
       "transport": {
         "type": "stdio"
       }

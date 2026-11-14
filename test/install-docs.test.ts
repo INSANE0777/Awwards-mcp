@@ -56,6 +56,28 @@ describe("install documentation", () => {
     expect(text).toContain("manual post-release admin step");
   });
 
+  it("README qualifies a supplied tarball against the approved fixture", () => {
+    const text = flatten(README);
+    const section = text.slice(
+      text.indexOf("To qualify a tarball that already exists"),
+      text.indexOf("### Resource limits and diagnostics"),
+    );
+    expect(section).toContain("--tarball <packed.tgz>");
+    expect(section).toContain("--fixture-url https://awwwards-mcp.vercel.app/");
+    expect(section).toContain('qualificationScope: "offline-installed"');
+    expect(section).toContain("INCOMPLETE (exit 2)");
+    expect(section).toContain("node scripts/qualify/gate.mjs");
+    expect(section).toContain("--mode pack");
+    expect(section).toContain("--integrity <registry-SRI>");
+  });
+
+  it("README describes local-first startup instead of promising zero egress", () => {
+    const text = flatten(README);
+    expect(text).toContain("it is not zero-egress at startup");
+    expect(text).toContain("may refresh the index and check npm for updates");
+    expect(text).not.toContain("Stable, current, fully offline — no API key, no account.");
+  });
+
   it("does not ship the skills that moved to awwwards-skills", () => {
     expect(PKG.files).not.toContain("skills");
   });

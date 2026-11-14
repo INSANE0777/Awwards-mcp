@@ -5,10 +5,12 @@ import {
   EVIDENCE_PACK_EXPORTER_VERSION,
   EVIDENCE_SELECTION_SCHEMA_VERSION,
   STYLE_FIELDS,
+  packExporterIncludesMotion,
   type EvidenceSelection,
   type PackCapture,
   type PackClaim,
   type PackComponentSummary,
+  type PackExporterVersion,
   type PackOmission,
   type PackRegion,
   type PackSectionSummary,
@@ -286,6 +288,7 @@ export function packCoverage(captures: PackCapture[], regions: PackRegion[]): Ev
 /** Omitted families are a derived decision: recompute them from the final claim set. */
 export function omittedValues(
   selection: Pick<EvidenceSelection, "regions" | "tokens" | "captures" | "claims">,
+  exporterVersion: PackExporterVersion = EVIDENCE_PACK_EXPORTER_VERSION,
 ): PackOmission[] {
   const omitted: PackOmission[] = [];
   const add = (family: string, reason: string): void => {
@@ -311,6 +314,9 @@ export function omittedValues(
   const states = new Set(selection.claims.map((claim) => claim.state));
   if (!states.has("hover")) add("hover state", "NOT_CAPTURED");
   if (!states.has("focus")) add("focus state", "NOT_CAPTURED");
+  // Exporters have never observed motion; v1 packs predate this disclosure, so
+  // version 1 must keep rendering exactly what it shipped.
+  if (packExporterIncludesMotion(exporterVersion)) add("motion", "NOT_CAPTURED");
   add("elevation", "NO_DEFAULT_STATE_EVIDENCE");
   add("border", "NO_DEFAULT_STATE_EVIDENCE");
   for (const region of selection.regions) {
@@ -896,6 +902,7 @@ export function renderDesignEvidence(
   selection: EvidenceSelection,
   selectionSha256: string,
   documentBytes: number,
+  exporterVersion: PackExporterVersion = EVIDENCE_PACK_EXPORTER_VERSION,
 ): { document: RenderedDocument; payload: Record<string, unknown> } {
   const selectionHash = selectionSha256;
   const observedAt = selection.captures.reduce<number | null>((latest, capture) => {
@@ -911,7 +918,7 @@ export function renderDesignEvidence(
     redactedFinalUrl: redactUrl(selection.sourceUrls[0]),
     capturedAt: observedAt ?? 0,
     viewport: viewports.length === 1 ? viewports[0] : viewports.join("+"),
-    toolVersion: EVIDENCE_PACK_EXPORTER_VERSION,
+    toolVersion: exporterVersion,
     captures: [
       {
         id: "selection",
@@ -980,6 +987,7 @@ export function renderDesignEvidence(
 export function renderGeneratedDocuments(
   selection: EvidenceSelection,
   selectionSha256: string,
+  exporterVersion: PackExporterVersion = EVIDENCE_PACK_EXPORTER_VERSION,
 ): RenderedDocument[] {
   const designMd = renderDesignMd(selection);
   return [
@@ -989,7 +997,7 @@ export function renderGeneratedDocuments(
     renderComponentsJson(selection),
     renderBrief(selection),
     renderRebuildHandoff(selection, selection.goal),
-    renderDesignEvidence(selection, selectionSha256, designMd.bytes).document,
+    renderDesignEvidence(selection, selectionSha256, designMd.bytes, exporterVersion).document,
   ];
 }
 

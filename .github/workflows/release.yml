@@ -56,6 +56,49 @@ jobs:
         run: |
           node scripts/verify-published-artifact.mjs .release-artifact/pack.json "$REGISTRY_INTEGRITY"
 
+      - name: Install Chromium for installed qualification
+        run: npx playwright install chromium
+
+      - name: Qualify the exact packed artifact
+        run: |
+          npm run qualify:installed -- \
+            --tarball ".release-artifact/${{ steps.artifact.outputs.filename }}" \
+            --fixture-url https://awwwards-mcp.vercel.app/ \
+            --report .release-artifact/qualification-report.json
+
+      - name: Gate - qualification evidence matches the release artifact
+        env:
+          REGISTRY_INTEGRITY: ${{ steps.npmcheck.outputs.integrity }}
+          ALREADY_PUBLISHED: ${{ steps.npmcheck.outputs.published }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          ARGS=(
+            --report .release-artifact/qualification-report.json
+            --tarball ".release-artifact/${{ steps.artifact.outputs.filename }}"
+            --filename "${{ steps.artifact.outputs.filename }}"
+            --mode tarball
+            --package "$PACKAGE_NAME"
+            --version "$VERSION"
+            --evidence .release-artifact/qualification-gate.json
+          )
+          if [[ "$ALREADY_PUBLISHED" == "true" ]]; then
+            ARGS+=(--integrity "$REGISTRY_INTEGRITY")
+          fi
+          node scripts/qualify/gate.mjs "${ARGS[@]}"
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ github.ref_name }}
+          path: |
+            .release-artifact/qualification-report.json
+            .release-artifact/qualification-gate.json
+          if-no-files-found: error
+
+      # The gate hashes the tarball path once. Publication re-reads the same
+      # path, so it must not be swapped between the gate and npm publish.
       - name: Publish (beta tag when prerelease)
         if: steps.npmcheck.outputs.published != 'true'
         run: |
